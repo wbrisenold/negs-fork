@@ -13,6 +13,19 @@ enum EditorWorkspace {
     case library, editor
 }
 
+private enum DiagnosticOverlayMode: String {
+    case off, clipping, falseColor, saturation
+
+    static var persisted: DiagnosticOverlayMode {
+        if let stored = UserDefaults.standard.string(forKey: "diagnosticOverlayMode"),
+           let mode = DiagnosticOverlayMode(rawValue: stored) { return mode }
+        if UserDefaults.standard.bool(forKey: "clippingOverlayEnabled") { return .clipping }
+        if UserDefaults.standard.bool(forKey: "falseColorEnabled") { return .falseColor }
+        if UserDefaults.standard.bool(forKey: "saturationOverlayEnabled") { return .saturation }
+        return .off
+    }
+}
+
 /// Adjustment families that can come from the global reset preset.
 enum ResetKeepGroup: String, CaseIterable, Identifiable, Codable {
     case exposure = "Exposure"
@@ -245,12 +258,18 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
     private(set) var colorSample: ColorSample?
     var scopeMode: ScopeMode { requestedScopeMode }
     private(set) var scopesUpdating = false
-    var clippingOverlayEnabled = UserDefaults.standard.bool(forKey: "clippingOverlayEnabled") {
+    private var diagnosticOverlayMode = DiagnosticOverlayMode.persisted {
         didSet {
-            if clippingOverlayEnabled && falseColorEnabled { falseColorEnabled = false }
-            UserDefaults.standard.set(clippingOverlayEnabled, forKey: "clippingOverlayEnabled")
+            UserDefaults.standard.set(diagnosticOverlayMode.rawValue, forKey: "diagnosticOverlayMode")
+            UserDefaults.standard.set(diagnosticOverlayMode == .clipping, forKey: "clippingOverlayEnabled")
+            UserDefaults.standard.set(diagnosticOverlayMode == .falseColor, forKey: "falseColorEnabled")
+            UserDefaults.standard.set(diagnosticOverlayMode == .saturation, forKey: "saturationOverlayEnabled")
             updateDiagnosticOverlay()
         }
+    }
+    var clippingOverlayEnabled: Bool {
+        get { diagnosticOverlayMode == .clipping }
+        set { setDiagnosticOverlayMode(.clipping, enabled: newValue) }
     }
     // Built-in normalized luma boundaries for the clipping display. The
     // renderer receives these as runtime values; they are not user controls.
@@ -258,12 +277,18 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
     // use a visible near-black margin so underexposed shadows are reviewable.
     private let clippingLowThreshold = 0.05
     private let clippingHighThreshold = 0.999
-    var falseColorEnabled = UserDefaults.standard.bool(forKey: "falseColorEnabled") {
-        didSet {
-            if falseColorEnabled && clippingOverlayEnabled { clippingOverlayEnabled = false }
-            UserDefaults.standard.set(falseColorEnabled, forKey: "falseColorEnabled")
-            updateDiagnosticOverlay()
-        }
+    var falseColorEnabled: Bool {
+        get { diagnosticOverlayMode == .falseColor }
+        set { setDiagnosticOverlayMode(.falseColor, enabled: newValue) }
+    }
+    var saturationOverlayEnabled: Bool {
+        get { diagnosticOverlayMode == .saturation }
+        set { setDiagnosticOverlayMode(.saturation, enabled: newValue) }
+    }
+    private func setDiagnosticOverlayMode(_ mode: DiagnosticOverlayMode, enabled: Bool) {
+        let next = enabled ? mode : (diagnosticOverlayMode == mode ? .off : diagnosticOverlayMode)
+        guard next != diagnosticOverlayMode else { return }
+        diagnosticOverlayMode = next
     }
     private(set) var diagnosticOverlay: CGImage?
     var backgroundMaskEnabled = false {
@@ -701,10 +726,6 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
         self.sidecars = sidecars
         let enabled = UserDefaults.standard.object(forKey: "sidecars") as? Bool ?? true
         library = FolderPhotoLibrary(store: enabled ? sidecars : nil)
-        // Both switches were persisted independently in earlier builds. If
-        // both are on, the overlay renderer prefers false color and silently
-        // masks the clipping view; keep clipping as the explicit priority.
-        if clippingOverlayEnabled && falseColorEnabled { falseColorEnabled = false }
         recentFiles = (UserDefaults.standard.stringArray(forKey: "recentFiles") ?? []).map { URL(fileURLWithPath: $0) }
         library.sidecarChanged = { [weak self] photo in self?.sidecarChangedOnDisk(photo) }
         library.filterChanged = { [weak self] in self?.filterChanged() }
@@ -4217,13 +4238,19 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
         diagnosticOverlayRequest += 1
         diagnosticOverlayTask?.cancel(); diagnosticOverlayTask = nil
         let request = diagnosticOverlayRequest
-        guard !closing, (clippingOverlayEnabled || falseColorEnabled), let image else { diagnosticOverlay = nil; return }
-        let falseColor = falseColorEnabled
+        let mode = diagnosticOverlayMode
+        guard !closing, mode != .off, let image else { diagnosticOverlay = nil; return }
         let lowThreshold = clippingLowThreshold, highThreshold = clippingHighThreshold
         let clippedHighlights = clippingMask
         diagnosticOverlayTask = Task.detached(priority: .utility) { [weak self] in
-            let overlay = falseColor ? ImageScopes.falseColorOverlay(image) : ImageScopes.clippingOverlay(
+            let overlay: CGImage?
+            switch mode {
+            case .off: overlay = nil
+            case .clipping: overlay = ImageScopes.clippingOverlay(
                 image, low: lowThreshold, high: highThreshold, clippedHighlights: clippedHighlights)
+            case .falseColor: overlay = ImageScopes.falseColorOverlay(image)
+            case .saturation: overlay = ImageScopes.saturationFalseColorOverlay(image)
+            }
             guard !Task.isCancelled else { return }
             await self?.showDiagnosticOverlay(overlay, request: request)
         }
@@ -4537,7 +4564,7 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
     private func showDiagnosticOverlay(_ overlay: CGImage?, request: Int) {
         guard !closing, request == diagnosticOverlayRequest else { return }
         diagnosticOverlayTask = nil
-        diagnosticOverlay = (clippingOverlayEnabled || falseColorEnabled) ? overlay : nil
+        diagnosticOverlay = diagnosticOverlayMode == .off ? nil : overlay
     }
     private func showHistogram(_ counted: ImageScopes, request: Int) {
         guard !closing, request == histogramRequest else { return }

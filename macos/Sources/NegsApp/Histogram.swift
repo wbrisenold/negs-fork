@@ -228,6 +228,60 @@ struct ImageScopes: Equatable, Sendable {
                        provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
     }
 
+    /// Saturation heat map of the finished preview. Hue shows saturation level
+    /// (blue low, green mid, red high); the translucent fill keeps the image
+    /// visible underneath. The preview is already after the complete render
+    /// pipeline, so this diagnoses the signal the user is actually grading.
+    static func saturationFalseColorOverlay(_ surface: IOSurface) -> CGImage? {
+        guard surface.width > 0, surface.height > 0, surface.bytesPerElement == 4,
+              surface.planeCount <= 1, !Task.isCancelled else { return nil }
+        surface.lock(options: .readOnly, seed: nil)
+        defer { surface.unlock(options: .readOnly, seed: nil) }
+        let sourceWidth = surface.width, sourceHeight = surface.height
+        let scale = min(1.0, sqrt(Double(1 << 20) / Double(sourceWidth * sourceHeight)))
+        let width = max(1, Int((Double(sourceWidth) * scale).rounded()))
+        let height = max(1, Int((Double(sourceHeight) * scale).rounded()))
+        let source = surface.baseAddress.assumingMemoryBound(to: UInt8.self)
+        var rgba = [UInt8](repeating: 0, count: width * height * 4)
+        for y in 0..<height {
+            if Task.isCancelled { return nil }
+            let sy = min(sourceHeight - 1, Int((Double(y) + 0.5) * Double(sourceHeight) / Double(height)))
+            for x in 0..<width {
+                let sx = min(sourceWidth - 1, Int((Double(x) + 0.5) * Double(sourceWidth) / Double(width)))
+                let src = sy * surface.bytesPerRow + sx * surface.bytesPerElement
+                let red = Double(source[src + 2]), green = Double(source[src + 1]), blue = Double(source[src])
+                let maximum = max(red, green, blue), minimum = min(red, green, blue)
+                let saturation = maximum > 0 ? (maximum - minimum) / maximum : 0
+                // Blue → cyan → green → yellow → red, matching a familiar
+                // false-colour scale while leaving neutral pixels unobtrusive.
+                let hue = (2.0 / 3.0) * (1.0 - saturation)
+                let sector = hue * 6
+                let chroma = 1.0
+                let xValue = chroma * (1 - abs(sector.truncatingRemainder(dividingBy: 2) - 1))
+                let (r, g, b): (Double, Double, Double)
+                switch Int(sector) {
+                case 0: (r, g, b) = (chroma, xValue, 0)
+                case 1: (r, g, b) = (xValue, chroma, 0)
+                case 2: (r, g, b) = (0, chroma, xValue)
+                case 3: (r, g, b) = (0, xValue, chroma)
+                case 4: (r, g, b) = (xValue, 0, chroma)
+                default: (r, g, b) = (chroma, 0, xValue)
+                }
+                let offset = (y * width + x) * 4
+                let alpha = 42 + saturation * 138
+                rgba[offset] = UInt8((r * alpha).rounded())
+                rgba[offset + 1] = UInt8((g * alpha).rounded())
+                rgba[offset + 2] = UInt8((b * alpha).rounded())
+                rgba[offset + 3] = UInt8(alpha.rounded())
+            }
+        }
+        guard let provider = CGDataProvider(data: Data(rgba) as CFData) else { return nil }
+        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+                       bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                       bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                       provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+    }
+
     static func of(_ surface: IOSurface, crop: CropSettings, rotation: Int = 0, maxSamples: Int = 1 << 20,
                    mode: ScopeMode? = nil) -> ImageScopes {
         guard surface.width > 0, surface.height > 0, surface.bytesPerElement == 4,
@@ -607,6 +661,8 @@ struct ScopePanelView: View {
     var setClippingEnabled: (Bool) -> Void = { _ in }
     var falseColorEnabled = false
     var setFalseColorEnabled: (Bool) -> Void = { _ in }
+    var saturationOverlayEnabled = false
+    var setSaturationOverlayEnabled: (Bool) -> Void = { _ in }
     @AppStorage("scopeMode") private var mode = ScopeMode.histogram
     /// Dragged with the handle below the scope; remembered.
     @AppStorage("scopeHeight.compactInspector") private var height = ScopePanelView.defaultHeight
@@ -625,6 +681,7 @@ struct ScopePanelView: View {
             Group {
                 VStack(spacing: StudioStyle.Space.compact) {
                     if falseColorEnabled { FalseColorLegend().padding(.horizontal, 3) }
+                    if saturationOverlayEnabled { SaturationOverlayLegend().padding(.horizontal, 3) }
                     switch mode {
                     case .histogram: HistogramView(histogram: histogram)
                     case .waveform: WaveformView(waveform: waveform)
@@ -691,6 +748,16 @@ struct ScopePanelView: View {
                 .buttonStyle(.borderless)
                 .accessibilityLabel("False Color")
                 .help("Show a false-colour exposure map over the developed photograph.")
+                Button {
+                    setSaturationOverlayEnabled(!saturationOverlayEnabled)
+                } label: {
+                    Image(systemName: "circle.lefthalf.filled")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(saturationOverlayEnabled ? Color.green : Color.secondary)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Saturation overlay")
+                .help("Show a saturation heat map over the finished photograph: blue is low, red is high.")
                 Spacer()
                 Text(mode.signalLabel)
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
@@ -755,6 +822,21 @@ private struct FalseColorLegend: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("False color exposure scale in IRE")
+    }
+}
+
+private struct SaturationOverlayLegend: View {
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("SAT").font(.system(size: 8, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.tertiary)
+            LinearGradient(colors: [.blue, .cyan, .green, .yellow, .red], startPoint: .leading, endPoint: .trailing)
+                .frame(height: 5).clipShape(Capsule())
+            Text("LOW").font(.system(size: 8, weight: .medium, design: .monospaced)).foregroundStyle(.secondary)
+            Text("HIGH").font(.system(size: 8, weight: .medium, design: .monospaced)).foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Saturation overlay scale: blue is low saturation, red is high")
     }
 }
 

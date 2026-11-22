@@ -982,7 +982,9 @@ struct AdjustmentInspector: View {
                             clippingEnabled: model.clippingOverlayEnabled,
                             setClippingEnabled: { model.clippingOverlayEnabled = $0 },
                             falseColorEnabled: model.falseColorEnabled,
-                            setFalseColorEnabled: { model.falseColorEnabled = $0 })
+                            setFalseColorEnabled: { model.falseColorEnabled = $0 },
+                            saturationOverlayEnabled: model.saturationOverlayEnabled,
+                            setSaturationOverlayEnabled: { model.saturationOverlayEnabled = $0 })
                 .padding(.horizontal, Theme.Size.gutter)
                 .padding(.bottom, 10)
             InspectorTabs(model: model, tab: $tab)
