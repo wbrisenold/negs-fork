@@ -39,7 +39,8 @@ fn make_shown(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
     let base = (gid.y * bytes.width + gid.x) * 3u;
-    let c = post_rgb(vec3<f32>(display_clip(rgb[base]), display_clip(rgb[base + 1u]), display_clip(rgb[base + 2u])));
+    let c = post_rgb(vec3<f32>(display_clip(rgb[base]), display_clip(rgb[base + 1u]), display_clip(rgb[base + 2u])),
+        vec2<f32>(f32(gid.x), f32(gid.y)), vec2<f32>(f32(bytes.width), f32(bytes.height)));
     textureStore(shown_out, gid.xy, vec4<f32>(display_byte(c.r), display_byte(c.g), display_byte(c.b), 1.0));
 }
 

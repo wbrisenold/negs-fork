@@ -704,15 +704,24 @@ extension AdjustmentInspector {
     static func colorCount(_ model: EditorModel) -> Int {
         let separation = ["strength", "target_hue", "complementary_hue", "target_saturation", "luminance_mask", "neutral_protection", "method", "color_wash"]
         let density = ["master", "red", "yellow", "green", "cyan", "blue", "magenta"]
+        let skinShaper = ["global_sat", "global_dens", "hue_rotate", "hue_center", "hue_range",
+                          "sigmoid_shift", "bellcurve_width", "phighlighter"]
+        let relight = ["post.relight.enabled", "post.relight.strength"]
+            + (0..<3).flatMap { index in
+                ["enabled", "x", "y", "radius", "intensity", "color.0", "color.1", "color.2"]
+                    .map { "post.relight.lights.\(index).\($0)" }
+            }
         let colorPaths = ["prep.color_correction_saturation", "io.render_look",
                           "post.hncs.clahe_strength", "post.hncs.skin_protection"]
         let colorPathCount = colorPaths.filter { model.isModified($0) }.count
         let separationCount = separation.filter { model.isModified("post.color_separation.\($0)") }.count
         let densityCount = density.filter { model.isModified("post.color_density.\($0)") }.count
+        let skinShaperCount = skinShaper.filter { model.isModified("post.skin_shaper.\($0)") }.count
+        let relightCount = relight.filter(model.isModified).count
         let correctionOffsetCount = model.isRaw && model.isModified("prep.color_correction_offset") ? 1 : 0
         let prepColorCount = prepColorControls.filter { isModified($0, model) }.count
         return whiteBalanceCount(model) + prepColorCount + colorPathCount + correctionOffsetCount
-            + separationCount + densityCount + count(.scan, model)
+            + separationCount + densityCount + skinShaperCount + relightCount + count(.scan, model)
     }
     static func maskCount(_ model: EditorModel) -> Int {
         let fields = ["exposure_ev", "temperature", "tint", "saturation"]
@@ -975,8 +984,7 @@ struct AdjustmentInspector: View {
         VStack(spacing: 0) {
             ScopePanelView(histogram: model.histogram, waveform: model.waveform,
                             vectorscope: model.vectorscope, skinAnalysis: model.skinAnalysis,
-                            chromaticity: model.chromaticity, colorSample: model.colorSample,
-                            saturation: model.saturation,
+                            colorSample: model.colorSample,
                             isUpdating: model.scopesUpdating,
                             setScopeMode: { model.scopeModeChanged($0) },
                             clippingEnabled: model.clippingOverlayEnabled,
@@ -984,7 +992,11 @@ struct AdjustmentInspector: View {
                             falseColorEnabled: model.falseColorEnabled,
                             setFalseColorEnabled: { model.falseColorEnabled = $0 },
                             saturationOverlayEnabled: model.saturationOverlayEnabled,
-                            setSaturationOverlayEnabled: { model.saturationOverlayEnabled = $0 })
+                            setSaturationOverlayEnabled: { model.saturationOverlayEnabled = $0 },
+                            skinToneOverlayEnabled: model.skinToneOverlayEnabled,
+                            setSkinToneOverlayEnabled: { model.skinToneOverlayEnabled = $0 },
+                            neutralCandidatesEnabled: model.neutralCandidatesEnabled,
+                            setNeutralCandidatesEnabled: { model.neutralCandidatesEnabled = $0 })
                 .padding(.horizontal, Theme.Size.gutter)
                 .padding(.bottom, 10)
             InspectorTabs(model: model, tab: $tab)
@@ -1082,6 +1094,25 @@ struct AdjustmentInspector: View {
                           modified: model.isModified("post.color_separation.target_hue"), reset: { model.resetValue("post.color_separation.target_hue") },
                           editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Change Color Separation") },
                           help: "Hue angle of the first colour family, measured in the displayed scan's encoded RGB hue wheel.")
+            HStack(spacing: 7) {
+                Spacer(minLength: 0)
+                Button { model.beginColorSeparationHuePick() } label: {
+                    Image(systemName: "eyedropper")
+                        .foregroundStyle(model.colorSeparationHuePickActive ? Theme.accent : Theme.label)
+                        .frame(width: 24, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Pick the target hue from the photograph")
+                .accessibilityLabel("Pick target hue from photograph")
+                if let sample = model.colorSample {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color(red: Double(sample.red) / 255, green: Double(sample.green) / 255, blue: Double(sample.blue) / 255))
+                        .frame(width: 28, height: 16)
+                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(Theme.line, lineWidth: 1))
+                        .help(sample.hex)
+                }
+            }
             LabeledSlider(title: "Complement", value: model.number("post.color_separation.complementary_hue", range: 0...360, step: 1),
                           range: 0...360, step: 1, unit: "°", defaultValue: 215,
                           modified: model.isModified("post.color_separation.complementary_hue"), reset: { model.resetValue("post.color_separation.complementary_hue") },
@@ -1131,6 +1162,102 @@ struct AdjustmentInspector: View {
             }
             HintText("ME deSatch behavior · SpektraFilm Studio · GPL-3.0")
         }
+        let relightFields = (0..<3).flatMap { index in
+            ["enabled", "x", "y", "radius", "intensity", "color.0", "color.1", "color.2"]
+                .map { "post.relight.lights.\(index).\($0)" }
+        }
+        InkSection(title: "Relight", edited: model.isModified("post.relight.enabled")
+                   || model.isModified("post.relight.strength") || relightFields.contains(where: model.isModified)) {
+            HintText("Three soft radial lights. Color and light falloff are evaluated in the active output color space.")
+            TickRow(title: "Enable relighting", isOn: model.toggle("post.relight.enabled"),
+                    changed: model.isModified("post.relight.enabled"),
+                    help: "Adds editable soft lights to the developed image.")
+            LabeledSlider(title: "Overall strength", value: model.number("post.relight.strength", range: 0...1, step: 0.01),
+                          range: 0...1, step: 0.01, defaultValue: 1,
+                          modified: model.isModified("post.relight.strength"), reset: { model.resetValue("post.relight.strength") },
+                          editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Change Relighting") },
+                          help: "Scales the combined light contribution.")
+            ForEach(0..<3, id: \.self) { index in
+                let base = "post.relight.lights.\(index)"
+                Divider().overlay(Theme.line)
+                TickRow(title: "Light \(index + 1)", isOn: model.toggle("\(base).enabled"),
+                        changed: model.isModified("\(base).enabled"), help: "Enable this soft radial light.")
+                if model.value("\(base).enabled").bool {
+                    LabeledSlider(title: "Horizontal position", value: model.number("\(base).x", range: 0...1, step: 0.01),
+                                  range: 0...1, step: 0.01, defaultValue: 0.5,
+                                  modified: model.isModified("\(base).x"), reset: { model.resetValue("\(base).x") },
+                                  editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Move Relight") },
+                                  help: "Position from left to right.")
+                    LabeledSlider(title: "Vertical position", value: model.number("\(base).y", range: 0...1, step: 0.01),
+                                  range: 0...1, step: 0.01, defaultValue: 0.5,
+                                  modified: model.isModified("\(base).y"), reset: { model.resetValue("\(base).y") },
+                                  editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Move Relight") },
+                                  help: "Position from top to bottom.")
+                    LabeledSlider(title: "Radius", value: model.number("\(base).radius", range: 0.02...1.5, step: 0.01),
+                                  range: 0.02...1.5, step: 0.01, defaultValue: 0.45,
+                                  modified: model.isModified("\(base).radius"), reset: { model.resetValue("\(base).radius") },
+                                  editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Size Relight") },
+                                  help: "Soft falloff radius relative to the shorter image dimension.")
+                    LabeledSlider(title: "Intensity", value: model.number("\(base).intensity", range: -1...1, step: 0.01),
+                                  range: -1...1, step: 0.01, defaultValue: 0,
+                                  modified: model.isModified("\(base).intensity"), reset: { model.resetValue("\(base).intensity") },
+                                  editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Change Relight") },
+                                  help: "Positive values add light; negative values create negative fill.")
+                    ForEach(0..<3, id: \.self) { channel in
+                        let path = "\(base).color.\(channel)"
+                        LabeledSlider(title: ["Red", "Green", "Blue"][channel], value: model.number(path, range: 0...1, step: 0.01),
+                                      range: 0...1, step: 0.01, defaultValue: [1.0, 0.82, 0.66][channel],
+                                      modified: model.isModified(path), reset: { model.resetValue(path) },
+                                      editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Tint Relight") },
+                                      help: "Linear channel value in the selected output color space.")
+                    }
+                }
+            }
+            HintText("Based on the MIT-licensed radial-light method in ComfyUI-ReLight.")
+        }
+        let skinShaperFields = ["global_sat", "global_dens", "hue_rotate", "hue_center", "hue_range",
+                                "sigmoid_shift", "bellcurve_width", "phighlighter"]
+        InkSection(title: "Skin Shaper", edited: skinShaperFields.contains { model.isModified("post.skin_shaper.\($0)") }) {
+            HintText("Shapes a soft hue and luminance range around skin tones in the developed image.")
+            LabeledSlider(title: "Skin saturation", value: model.number("post.skin_shaper.global_sat", range: -1...1, step: 0.001),
+                          range: -1...1, step: 0.001, defaultValue: 0,
+                          modified: model.isModified("post.skin_shaper.global_sat"), reset: { model.resetValue("post.skin_shaper.global_sat") },
+                          editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Change Skin Shaper") },
+                          help: "Raises or lowers color in the selected skin hue and luminance range.")
+            LabeledSlider(title: "Skin density", value: model.number("post.skin_shaper.global_dens", range: -1...1, step: 0.001),
+                          range: -1...1, step: 0.001, defaultValue: 0,
+                          modified: model.isModified("post.skin_shaper.global_dens"), reset: { model.resetValue("post.skin_shaper.global_dens") },
+                          editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Change Skin Shaper") },
+                          help: "Changes the six-color density map within the selected range.")
+            LabeledSlider(title: "Skin hue", value: model.number("post.skin_shaper.hue_rotate", range: -60...60, step: 0.1),
+                          range: -60...60, step: 0.1, unit: "°", defaultValue: 0,
+                          modified: model.isModified("post.skin_shaper.hue_rotate"), reset: { model.resetValue("post.skin_shaper.hue_rotate") },
+                          editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Change Skin Shaper") },
+                          help: "Rotates the shaped hue range.")
+            LabeledSlider(title: "Hue center", value: model.number("post.skin_shaper.hue_center", range: -30...30, step: 0.1),
+                          range: -30...30, step: 0.1, unit: "°", defaultValue: 0,
+                          modified: model.isModified("post.skin_shaper.hue_center"), reset: { model.resetValue("post.skin_shaper.hue_center") },
+                          editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Change Skin Shaper") },
+                          help: "Moves the center of the skin hue selection.")
+            LabeledSlider(title: "Hue range", value: model.number("post.skin_shaper.hue_range", range: 15...65, step: 0.1),
+                          range: 15...65, step: 0.1, unit: "°", defaultValue: 40,
+                          modified: model.isModified("post.skin_shaper.hue_range"), reset: { model.resetValue("post.skin_shaper.hue_range") },
+                          editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Change Skin Shaper") },
+                          help: "Controls how broadly the hue adjustment fades around its center.")
+            LabeledSlider(title: "Luma center", value: model.number("post.skin_shaper.sigmoid_shift", range: 0...1, step: 0.001),
+                          range: 0...1, step: 0.001, defaultValue: 0.5,
+                          modified: model.isModified("post.skin_shaper.sigmoid_shift"), reset: { model.resetValue("post.skin_shaper.sigmoid_shift") },
+                          editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Change Skin Shaper") },
+                          help: "Centers the luminance selection from shadows to highlights.")
+            LabeledSlider(title: "Luma range", value: model.number("post.skin_shaper.bellcurve_width", range: 0.25...1.75, step: 0.01),
+                          range: 0.25...1.75, step: 0.01, defaultValue: 1,
+                          modified: model.isModified("post.skin_shaper.bellcurve_width"), reset: { model.resetValue("post.skin_shaper.bellcurve_width") },
+                          editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Change Skin Shaper") },
+                          help: "Controls the luminance falloff around the center.")
+            TickRow(title: "Highlight selected hues", isOn: model.toggle("post.skin_shaper.phighlighter"),
+                    changed: model.isModified("post.skin_shaper.phighlighter"),
+                    help: "Shows the selected hue and luminance range against a dim neutral image.")
+        }
         let outputChanged = InspectorEdits.outputCount(model) > 0
         let outputShown = outputChanged || shows(section: .scan)
         InkSection(title: "Scan & Color", edited: InspectorEdits.count(.scan, model) > 0) {
@@ -1166,18 +1293,34 @@ struct AdjustmentInspector: View {
                             .disabled(model.backgroundMaskGenerating)
                         }
                     } label: {
-                        Label("AI Select", systemImage: "sparkle.magnifyingglass")
+                        Label("Select", systemImage: "sparkle.magnifyingglass")
                     }
                     .menuStyle(.borderlessButton)
                     .controlSize(.small)
                     .disabled(model.backgroundMaskGenerating)
                     .help("Create an on-device selection")
                     Button { model.createBrushBackgroundMask() } label: {
-                        Label("New Brush", systemImage: "paintbrush.pointed")
+                        Image(systemName: "paintbrush.pointed")
                     }
                     .buttonStyle(SquareOutlinedButtonStyle(height: 25))
                     .controlSize(.small)
                     .disabled(model.backgroundMaskGenerating || model.image == nil)
+                    .accessibilityLabel("New Brush")
+                    .help("Create a new mask and paint directly on the photograph")
+                    Menu {
+                        ForEach(DepthMask.Preset.allCases) { preset in
+                            Button { model.addDepthMask(preset) } label: {
+                                Label("\(preset.title) depth", systemImage: preset.symbol)
+                            }
+                            .disabled(model.backgroundMaskGenerating || model.image == nil)
+                        }
+                    } label: {
+                        Label("Depth", systemImage: "square.3.layers.3d")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .controlSize(.small)
+                    .disabled(model.backgroundMaskGenerating || model.image == nil)
+                    .help("Estimate an on-device depth map, then select a near, middle, or far range.")
                 }
                 HStack(spacing: 12) {
                     TickRow(title: "Mask overlay", isOn: Binding(
@@ -1197,6 +1340,34 @@ struct AdjustmentInspector: View {
                         .frame(width: 30, alignment: .trailing)
                 }
                 .padding(.top, 4)
+                if model.hasSelectedDepthMask {
+                    HStack(spacing: 8) {
+                        Text("Depth range").font(Theme.ui(10)).foregroundStyle(Theme.dim)
+                        Text("\(Int(model.depthMaskLower * 100))")
+                            .font(Theme.metadata(9)).foregroundStyle(Theme.dim).monospacedDigit()
+                        Slider(value: Binding(get: { model.depthMaskLower }, set: { model.setDepthMaskLower($0) }),
+                               in: 0...max(0.02, model.depthMaskUpper - 0.02))
+                            .help("Nearest included depth")
+                        Text("\(Int(model.depthMaskUpper * 100))")
+                            .font(Theme.metadata(9)).foregroundStyle(Theme.dim).monospacedDigit()
+                        Slider(value: Binding(get: { model.depthMaskUpper }, set: { model.setDepthMaskUpper($0) }),
+                               in: min(0.98, model.depthMaskLower + 0.02)...1)
+                            .help("Farthest included depth")
+                    }
+                    .padding(.top, 5)
+                    HStack(spacing: 6) {
+                        TickRow(title: "Depth map preview", isOn: Binding(
+                            get: { model.depthMapPreviewEnabled },
+                            set: { model.depthMapPreviewEnabled = $0 }),
+                                 help: "Cyan marks farther depth and amber marks nearer depth. Turn this off to see the selected mask overlay.")
+                        Spacer(minLength: 4)
+                        Circle().fill(Color.cyan).frame(width: 7, height: 7)
+                        Text("Far").font(Theme.metadata(9)).foregroundStyle(Theme.dim)
+                        Circle().fill(Color.orange).frame(width: 7, height: 7)
+                        Text("Near").font(Theme.metadata(9)).foregroundStyle(Theme.dim)
+                    }
+                    .padding(.top, 4)
+                }
                 if model.backgroundMaskGenerating {
                     HStack(spacing: 7) {
                         ProgressView().controlSize(.small)

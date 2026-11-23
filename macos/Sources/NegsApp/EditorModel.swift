@@ -14,7 +14,7 @@ enum EditorWorkspace {
 }
 
 private enum DiagnosticOverlayMode: String {
-    case off, clipping, falseColor, saturation
+    case off, clipping, falseColor, saturation, skinTone, neutralCandidates
 
     static var persisted: DiagnosticOverlayMode {
         if let stored = UserDefaults.standard.string(forKey: "diagnosticOverlayMode"),
@@ -22,6 +22,7 @@ private enum DiagnosticOverlayMode: String {
         if UserDefaults.standard.bool(forKey: "clippingOverlayEnabled") { return .clipping }
         if UserDefaults.standard.bool(forKey: "falseColorEnabled") { return .falseColor }
         if UserDefaults.standard.bool(forKey: "saturationOverlayEnabled") { return .saturation }
+        if UserDefaults.standard.bool(forKey: "neutralCandidatesEnabled") { return .neutralCandidates }
         return .off
     }
 }
@@ -253,9 +254,8 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
     private(set) var waveform: Waveform?
     private(set) var vectorscope: Vectorscope?
     private(set) var skinAnalysis: SkinAnalysis?
-    private(set) var chromaticity = ChromaticityScope()
-    private(set) var saturation = SaturationScope()
     private(set) var colorSample: ColorSample?
+    private(set) var colorSeparationHuePickActive = false
     var scopeMode: ScopeMode { requestedScopeMode }
     private(set) var scopesUpdating = false
     private var diagnosticOverlayMode = DiagnosticOverlayMode.persisted {
@@ -264,6 +264,8 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
             UserDefaults.standard.set(diagnosticOverlayMode == .clipping, forKey: "clippingOverlayEnabled")
             UserDefaults.standard.set(diagnosticOverlayMode == .falseColor, forKey: "falseColorEnabled")
             UserDefaults.standard.set(diagnosticOverlayMode == .saturation, forKey: "saturationOverlayEnabled")
+            UserDefaults.standard.set(diagnosticOverlayMode == .skinTone, forKey: "skinToneOverlayEnabled")
+            UserDefaults.standard.set(diagnosticOverlayMode == .neutralCandidates, forKey: "neutralCandidatesEnabled")
             updateDiagnosticOverlay()
         }
     }
@@ -284,6 +286,14 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
     var saturationOverlayEnabled: Bool {
         get { diagnosticOverlayMode == .saturation }
         set { setDiagnosticOverlayMode(.saturation, enabled: newValue) }
+    }
+    var skinToneOverlayEnabled: Bool {
+        get { diagnosticOverlayMode == .skinTone }
+        set { setDiagnosticOverlayMode(.skinTone, enabled: newValue) }
+    }
+    var neutralCandidatesEnabled: Bool {
+        get { diagnosticOverlayMode == .neutralCandidates }
+        set { setDiagnosticOverlayMode(.neutralCandidates, enabled: newValue) }
     }
     private func setDiagnosticOverlayMode(_ mode: DiagnosticOverlayMode, enabled: Bool) {
         let next = enabled ? mode : (diagnosticOverlayMode == mode ? .off : diagnosticOverlayMode)
@@ -314,7 +324,27 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
     var visibleBackgroundMaskOverlay: CGImage? { backgroundMaskOverlayVisible ? backgroundMaskOverlay : nil }
     private(set) var backgroundMaskGenerating = false
     private(set) var backgroundMaskStatus = ""
+    var depthMaskPreset: DepthMask.Preset = .near
+    var depthMaskLower = 0.66
+    var depthMaskUpper = 1.0
+    var depthMapPreviewEnabled = false {
+        didSet {
+            guard depthMapPreviewEnabled != oldValue, backgroundMaskEnabled else { return }
+            backgroundMaskOverlay = activeBackgroundMaskOverlay()
+        }
+    }
     private var backgroundMaskLayers: [JSONValue] { value("post.background_masks").array }
+    private var selectedDepthMaskLayer: JSONValue? {
+        guard backgroundMaskLayers.indices.contains(selectedBackgroundMaskIndex) else { return nil }
+        let layer = backgroundMaskLayers[selectedBackgroundMaskIndex]
+        return layer["depth_map_png_base64"].string.isEmpty ? nil : layer
+    }
+    var hasSelectedDepthMask: Bool { selectedDepthMaskLayer != nil }
+    var selectedDepthPreset: DepthMask.Preset? {
+        guard let raw = selectedDepthMaskLayer?["selection"].string,
+              raw.hasPrefix("depth_"), let preset = DepthMask.Preset(rawValue: String(raw.dropFirst(6))) else { return nil }
+        return preset
+    }
     var hasBackgroundMask: Bool {
         !backgroundMaskLayers.isEmpty || !value("post.background_mask_png_base64").string.isEmpty
     }
@@ -1308,6 +1338,11 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
         interactionStart = nil
         lastInteraction = start != state ? (start, state) : nil
         if start != state { registerUndo(restoring: start, action: action) }
+        // The last proxy frame may have arrived while its clipping overlay
+        // task was being cancelled by the next slider frame. Refresh once
+        // after interaction ends so the indicator always settles to the
+        // latest displayed image, including RAW edits that keep the proxy.
+        updateDiagnosticOverlay()
         // Non-RAW drag frames track canvas scale, so settle them on release.
         // RAW frames intentionally stay on the interactive proxy; forcing a
         // settled render here made every RAW slider release decode/develop at
@@ -1879,8 +1914,6 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
             histogramTask?.cancel(); histogramTask = nil
             histogramRequest += 1; histogram = cached.scopes.histogram; waveform = cached.scopes.waveform
             vectorscope = cached.scopes.vectorscope; skinAnalysis = cached.scopes.skinAnalysis; scopesUpdating = false
-            chromaticity = cached.scopes.chromaticity
-            saturation = cached.scopes.saturation
             updateDiagnosticOverlay()
         } else { updateHistogram() }
         updateFilmStrip()
@@ -4208,7 +4241,7 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
             histogramTask = nil; scopesUpdating = false
             clippingMask = nil
             histogram = nil; waveform = nil; vectorscope = nil; skinAnalysis = nil; diagnosticOverlay = nil
-            chromaticity = ChromaticityScope(); saturation = SaturationScope(); colorSample = nil
+            colorSample = nil
             backgroundMaskRequest += 1
             backgroundMaskTask?.cancel(); backgroundMaskTask = nil
             backgroundMaskOverlay = nil; backgroundMaskGenerating = false
@@ -4230,9 +4263,34 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
         requestedScopeMode = mode
         updateHistogram()
     }
-    func pickColor(at displayedPoint: CGPoint) {
-        guard let image else { return }
-        colorSample = ImageScopes.sample(image, displayedPoint: displayedPoint, crop: crop, rotation: imageRotation)
+    func beginColorSeparationHuePick() {
+        if colorSeparationHuePickActive {
+            cancelColorSeparationHuePick()
+            return
+        }
+        colorSeparationHuePickPreviousScope = requestedScopeMode
+        colorSeparationHuePickActive = true
+        scopeModeChanged(.picker)
+    }
+    private var colorSeparationHuePickPreviousScope: ScopeMode?
+    private func cancelColorSeparationHuePick() {
+        colorSeparationHuePickActive = false
+        if let previous = colorSeparationHuePickPreviousScope {
+            colorSeparationHuePickPreviousScope = nil
+            scopeModeChanged(previous)
+        }
+    }
+    func pickColor(at sourcePoint: CGPoint) {
+        guard let image, let sample = ImageScopes.sample(image, sourcePoint: sourcePoint) else { return }
+        colorSample = sample
+        guard colorSeparationHuePickActive else { return }
+        if let hue = sample.hueDegrees {
+            var next = state
+            next.params["post.color_separation.target_hue"] = .number(hue)
+            next.params["post.color_separation.complementary_hue"] = .number((hue + 180).truncatingRemainder(dividingBy: 360))
+            apply(next, action: "Pick Color Separation Hue")
+        }
+        cancelColorSeparationHuePick()
     }
     private func updateDiagnosticOverlay() {
         diagnosticOverlayRequest += 1
@@ -4242,7 +4300,17 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
         guard !closing, mode != .off, let image else { diagnosticOverlay = nil; return }
         let lowThreshold = clippingLowThreshold, highThreshold = clippingHighThreshold
         let clippedHighlights = clippingMask
-        diagnosticOverlayTask = Task.detached(priority: .utility) { [weak self] in
+        // Slider-driven renders can deliver several frames before the viewer
+        // settles. Keep only the latest saturation map instead of spending CPU
+        // generating maps the next preview immediately cancels.
+        let interactiveOverlay = mode == .clipping || mode == .saturation || mode == .skinTone
+        let coalesceSliderUpdates = interactiveOverlay && interacting
+        let priority: TaskPriority = interactiveOverlay ? .userInitiated : .utility
+        diagnosticOverlayTask = Task.detached(priority: priority) { [weak self] in
+            if coalesceSliderUpdates {
+                try? await Task.sleep(for: .milliseconds(45))
+                guard !Task.isCancelled else { return }
+            }
             let overlay: CGImage?
             switch mode {
             case .off: overlay = nil
@@ -4250,6 +4318,8 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
                 image, low: lowThreshold, high: highThreshold, clippedHighlights: clippedHighlights)
             case .falseColor: overlay = ImageScopes.falseColorOverlay(image)
             case .saturation: overlay = ImageScopes.saturationFalseColorOverlay(image)
+            case .skinTone: overlay = ImageScopes.skinToneFalseColorOverlay(image)
+            case .neutralCandidates: overlay = ImageScopes.neutralCandidateOverlay(image)
             }
             guard !Task.isCancelled else { return }
             await self?.showDiagnosticOverlay(overlay, request: request)
@@ -4273,6 +4343,7 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
     /// so switching photos cannot leave the previous image's affected region
     /// visible (or leave a newly restored mask hidden).
     private func refreshBackgroundMaskForImageUpdate(_ generation: Int) {
+        syncDepthRangeFromSelectedMask()
         guard backgroundMaskSourceGeneration != generation else {
             if backgroundMaskEnabled, hasBackgroundMask {
                 backgroundMaskOverlay = activeBackgroundMaskOverlay()
@@ -4295,20 +4366,120 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
     private func activeBackgroundMaskOverlay() -> CGImage? {
         let layers = backgroundMaskLayers
         if layers.indices.contains(selectedBackgroundMaskIndex) {
-            return BackgroundMask.overlay(fromPNGBase64: layers[selectedBackgroundMaskIndex]["mask_png_base64"].string)
+            let layer = layers[selectedBackgroundMaskIndex]
+            if depthMapPreviewEnabled, !layer["depth_map_png_base64"].string.isEmpty {
+                return DepthMask.depthOverlay(depthMapPNGBase64: layer["depth_map_png_base64"].string)
+            }
+            return BackgroundMask.overlay(fromPNGBase64: layer["mask_png_base64"].string)
         }
         return BackgroundMask.overlay(fromPNGBase64: value("post.background_mask_png_base64").string)
     }
     var backgroundMaskLabels: [String] {
         backgroundMaskLayers.enumerated().map { index, layer in
-            let title = BackgroundMask.Selection(rawValue: layer["selection"].string)?.title ?? "Mask"
+            let selection = layer["selection"].string
+            let title: String
+            if selection.hasPrefix("depth_"), let preset = DepthMask.Preset(rawValue: String(selection.dropFirst(6))) {
+                title = "Depth · \(preset.title)"
+            } else {
+                title = BackgroundMask.Selection(rawValue: selection)?.title ?? "Mask"
+            }
             return "\(index + 1) · \(title)"
         }
+    }
+    func addDepthMask(_ preset: DepthMask.Preset) {
+        guard !backgroundMaskGenerating, let image else { return }
+        depthMaskPreset = preset
+        depthMaskLower = preset.defaultRange.lowerBound
+        depthMaskUpper = preset.defaultRange.upperBound
+        backgroundMaskBrushActive = false
+        backgroundMaskGenerating = true
+        backgroundMaskStatus = "Estimating depth on this Mac…"
+        backgroundMaskRequest += 1
+        let request = backgroundMaskRequest
+        let surface = image
+        backgroundMaskTask?.cancel()
+        backgroundMaskTask = Task.detached(priority: .utility) { [weak self] in
+            do {
+                let result = try await DepthMask.estimate(for: surface, preset: preset)
+                guard !Task.isCancelled else { return }
+                await self?.appendDepthMask(result, preset: preset, range: preset.defaultRange, request: request)
+            } catch {
+                guard !Task.isCancelled else { return }
+                await self?.finishDepthMaskFailure(error, request: request)
+            }
+        }
+    }
+    private func appendDepthMask(_ result: DepthMask.Result, preset: DepthMask.Preset,
+                                 range: ClosedRange<Double>, request: Int) {
+        guard !closing, request == backgroundMaskRequest else { return }
+        backgroundMaskTask = nil
+        backgroundMaskGenerating = false
+        backgroundMaskStatus = ""
+        var layers = backgroundMaskLayers
+        layers.append(.object([
+            "id": .string(UUID().uuidString), "selection": .string("depth_\(preset.rawValue)"),
+            "mask_png_base64": .string(result.maskPNGBase64),
+            "depth_base_mask_png_base64": .string(result.maskPNGBase64),
+            "depth_refinements_png_base64": .string(""),
+            "depth_map_png_base64": .string(result.depthMapPNGBase64),
+            "depth_lower": .number(range.lowerBound), "depth_upper": .number(range.upperBound),
+            "exposure_ev": .number(0), "temperature": .number(0), "tint": .number(0), "saturation": .number(0)
+        ]))
+        selectedBackgroundMaskIndex = layers.count - 1
+        var next = state
+        next.params["post.background_masks"] = .array(layers)
+        apply(next, action: "Create Depth Mask")
+        depthMapPreviewEnabled = true
+        backgroundMaskEnabled = true
+        backgroundMaskOverlay = DepthMask.depthOverlay(depthMapPNGBase64: result.depthMapPNGBase64) ?? result.overlay
+    }
+    private func finishDepthMaskFailure(_ error: Error, request: Int) {
+        guard request == backgroundMaskRequest else { return }
+        backgroundMaskTask = nil
+        backgroundMaskGenerating = false
+        backgroundMaskStatus = ""
+        self.error = error.localizedDescription
+    }
+    func setDepthMaskLower(_ value: Double) { updateDepthMaskRange(lower: value, upper: depthMaskUpper) }
+    func setDepthMaskUpper(_ value: Double) { updateDepthMaskRange(lower: depthMaskLower, upper: value) }
+    private func updateDepthMaskRange(lower: Double, upper: Double) {
+        guard backgroundMaskLayers.indices.contains(selectedBackgroundMaskIndex),
+              let layer = selectedDepthMaskLayer,
+              !layer["depth_map_png_base64"].string.isEmpty else { return }
+        let nextLower = min(max(lower, 0), upper - 0.02)
+        let nextUpper = max(min(upper, 1), nextLower + 0.02)
+        guard nextUpper > nextLower else { return }
+        depthMaskLower = nextLower
+        depthMaskUpper = nextUpper
+        guard let (mask, overlay) = DepthMask.mask(depthMapPNGBase64: layer["depth_map_png_base64"].string,
+                                                   range: nextLower...nextUpper) else { return }
+        var layers = backgroundMaskLayers
+        guard var updated = layers[selectedBackgroundMaskIndex].object else { return }
+        let refinedMask = DepthMask.applyingRefinement(updated["depth_refinements_png_base64"]?.string ?? "", to: mask) ?? mask
+        updated["mask_png_base64"] = .string(refinedMask)
+        updated["depth_base_mask_png_base64"] = .string(mask)
+        updated["depth_lower"] = .number(nextLower)
+        updated["depth_upper"] = .number(nextUpper)
+        layers[selectedBackgroundMaskIndex] = .object(updated)
+        var next = state
+        next.params["post.background_masks"] = .array(layers)
+        backgroundMaskOverlay = depthMapPreviewEnabled
+            ? DepthMask.depthOverlay(depthMapPNGBase64: layer["depth_map_png_base64"].string)
+            : BackgroundMask.overlay(fromPNGBase64: refinedMask) ?? overlay
+        apply(next, action: "Adjust Depth Range")
     }
     func selectBackgroundMask(at index: Int) {
         guard backgroundMaskLayers.indices.contains(index) else { return }
         selectedBackgroundMaskIndex = index
+        syncDepthRangeFromSelectedMask()
         if backgroundMaskEnabled { backgroundMaskOverlay = activeBackgroundMaskOverlay() }
+    }
+    private func syncDepthRangeFromSelectedMask() {
+        guard let layer = selectedDepthMaskLayer else { return }
+        depthMaskPreset = selectedDepthPreset ?? .near
+        let lower = layer["depth_lower"].double, upper = layer["depth_upper"].double
+        depthMaskLower = lower < upper ? lower : depthMaskPreset.defaultRange.lowerBound
+        depthMaskUpper = lower < upper ? upper : depthMaskPreset.defaultRange.upperBound
     }
     func createBrushBackgroundMask() {
         guard !backgroundMaskGenerating, let image,
@@ -4355,6 +4526,12 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
         var layers = backgroundMaskLayers
         guard layers.indices.contains(selectedBackgroundMaskIndex), var layer = layers[selectedBackgroundMaskIndex].object else { return }
         layer["mask_png_base64"] = .string(result.pngBase64)
+        if !(layer["depth_map_png_base64"]?.string ?? "").isEmpty,
+           let refinement = DepthMask.refinement(
+               currentMaskPNGBase64: result.pngBase64,
+               baseMaskPNGBase64: layer["depth_base_mask_png_base64"]?.string ?? "") {
+            layer["depth_refinements_png_base64"] = .string(refinement)
+        }
         // An edited selection no longer matches a previously generated fill.
         layer.removeValue(forKey: "inpaint_patch_png_base64")
         layer.removeValue(forKey: "inpaint_bounds")
@@ -4379,6 +4556,12 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
         var layers = backgroundMaskLayers
         guard var layer = layers[selectedBackgroundMaskIndex].object else { return }
         layer["mask_png_base64"] = .string(result.pngBase64)
+        if !(layer["depth_map_png_base64"]?.string ?? "").isEmpty,
+           let refinement = DepthMask.refinement(
+               currentMaskPNGBase64: result.pngBase64,
+               baseMaskPNGBase64: layer["depth_base_mask_png_base64"]?.string ?? "") {
+            layer["depth_refinements_png_base64"] = .string(refinement)
+        }
         layer.removeValue(forKey: "inpaint_patch_png_base64")
         layer.removeValue(forKey: "inpaint_bounds")
         layer.removeValue(forKey: "inpaint_color_space")
@@ -4573,8 +4756,6 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
         waveform = counted.waveform
         vectorscope = counted.vectorscope
         skinAnalysis = counted.skinAnalysis
-        chromaticity = counted.chromaticity
-        saturation = counted.saturation
     }
 
     // MARK: Tone graph

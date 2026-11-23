@@ -17,6 +17,11 @@ struct Post {
     color_flags: vec4<f32>,
     film_compression: vec4<f32>,
     film_expand: vec4<f32>,
+    skin: vec4<f32>,
+    skin_flags: vec4<f32>,
+    relight_flags: vec4<f32>,
+    relight_positions: array<vec4<f32>, 3>,
+    relight_colors: array<vec4<f32>, 3>,
 }
 
 fn post_rgb_to_hsv(c: vec3<f32>) -> vec3<f32> {
@@ -70,6 +75,85 @@ fn post_color_separation(rgb: vec3<f32>) -> vec3<f32> {
     return post_hsv_to_rgb(hsv);
 }
 
+fn post_rgb_to_hsl(rgb: vec3<f32>) -> vec3<f32> {
+    let hi = max(rgb.r, max(rgb.g, rgb.b));
+    let lo = min(rgb.r, min(rgb.g, rgb.b));
+    let d = hi - lo;
+    let l = (hi + lo) * 0.5;
+    if d <= 1e-6 { return vec3<f32>(0.0, 0.0, l); }
+    var h = 0.0;
+    if hi == rgb.r { h = (rgb.g - rgb.b) / d; }
+    else if hi == rgb.g { h = (rgb.b - rgb.r) / d + 2.0; }
+    else { h = (rgb.r - rgb.g) / d + 4.0; }
+    h = h * 60.0;
+    if h < 0.0 { h += 360.0; }
+    let s = select(d / max(2.0 - hi - lo, 1e-6), d / max(hi + lo, 1e-6), l < 0.5);
+    return vec3<f32>(h, s, l);
+}
+
+fn post_hsl_to_rgb(hsl: vec3<f32>) -> vec3<f32> {
+    let c = (1.0 - abs(2.0 * hsl.z - 1.0)) * hsl.y;
+    let sector = hsl.x / 60.0;
+    let x = c * (1.0 - abs((sector - 2.0 * floor(sector / 2.0)) - 1.0));
+    let m = hsl.z - c * 0.5;
+    var rgb = vec3<f32>(c, x, 0.0);
+    if sector >= 1.0 && sector < 2.0 { rgb = vec3<f32>(x, c, 0.0); }
+    else if sector >= 2.0 && sector < 3.0 { rgb = vec3<f32>(0.0, c, x); }
+    else if sector >= 3.0 && sector < 4.0 { rgb = vec3<f32>(0.0, x, c); }
+    else if sector >= 4.0 && sector < 5.0 { rgb = vec3<f32>(x, 0.0, c); }
+    else if sector >= 5.0 { rgb = vec3<f32>(c, 0.0, x); }
+    return clamp(rgb + vec3<f32>(m), vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+fn post_skin_shaper(rgb: vec3<f32>) -> vec3<f32> {
+    let hsl = post_rgb_to_hsl(rgb);
+    let target_hue = (20.0 - clamp(post.skin.w, -30.0, 30.0) + 360.0) % 360.0;
+    let hue_width = clamp(post.skin_flags.x, 15.0, 65.0);
+    let hue_distance = post_hue_distance(hsl.x, target_hue);
+    let hue_mask = exp(-(hue_distance * hue_distance) / (hue_width * hue_width));
+    let luma_width = 0.4 * clamp(post.skin_flags.z, 0.25, 1.75);
+    let luma_distance = abs(hsl.z - clamp(post.skin_flags.y, 0.0, 1.0));
+    let luma_mask = exp(-(luma_distance * luma_distance) / (luma_width * luma_width));
+    let mask = hue_mask * luma_mask;
+
+    let dens = -clamp(post.skin.y, -1.0, 1.0);
+    let sat = clamp(post.skin.x, -1.0, 0.999);
+    let red = vec3<f32>(1.0 + dens, -sat + dens, -sat + dens);
+    let green = vec3<f32>(-sat + dens, 1.0 + dens, -sat + dens);
+    let blue = vec3<f32>(-sat + dens, -sat + dens, 1.0 + dens);
+    let cyan_dens = dens * 0.8;
+    let magenta_dens = dens * 0.8;
+    let yellow_dens = dens * 0.6;
+    let cyan = vec3<f32>(-sat + cyan_dens, 1.0 + cyan_dens, 1.0 + cyan_dens);
+    let magenta = vec3<f32>(1.0 + magenta_dens, -sat + magenta_dens, 1.0 + magenta_dens);
+    let yellow = vec3<f32>(1.0 + yellow_dens, 1.0 + yellow_dens, -sat + yellow_dens);
+    var adjusted = vec3<f32>(0.0);
+    if rgb.r > rgb.g {
+        if rgb.g > rgb.b {
+            adjusted = rgb.r * red + rgb.g * (yellow - red) + rgb.b * (vec3<f32>(1.0) - yellow);
+        } else if rgb.r > rgb.b {
+            adjusted = rgb.r * red + rgb.g * (vec3<f32>(1.0) - magenta) + rgb.b * (magenta - red);
+        } else {
+            adjusted = rgb.r * (magenta - blue) + rgb.g * (vec3<f32>(1.0) - magenta) + rgb.b * blue;
+        }
+    } else if rgb.b > rgb.g {
+        adjusted = rgb.r * (vec3<f32>(1.0) - cyan) + rgb.g * (cyan - blue) + rgb.b * blue;
+    } else if rgb.b > rgb.r {
+        adjusted = rgb.r * (vec3<f32>(1.0) - cyan) + rgb.g * green + rgb.b * (cyan - green);
+    } else {
+        adjusted = rgb.r * (yellow - green) + rgb.g * green + rgb.b * (vec3<f32>(1.0) - yellow);
+    }
+    var shaped_hsl = post_rgb_to_hsl(clamp(adjusted, vec3<f32>(0.0), vec3<f32>(1.0)));
+    shaped_hsl.x = (shaped_hsl.x - clamp(post.skin.z, -60.0, 60.0) + 360.0) % 360.0;
+    let shaped = post_hsl_to_rgb(shaped_hsl);
+    var base = rgb;
+    if post.skin_flags.w > 0.5 {
+        let y = dot(rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+        base = vec3<f32>(y * 0.1 + 0.18);
+    }
+    return clamp(mix(base, shaped, mask), vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
 fn post_film_expand(rgb: vec3<f32>) -> vec3<f32> {
     let black = clamp(post.film_expand.x, -0.20, 0.30);
     let white = clamp(post.film_expand.y, 0.30, 1.20);
@@ -111,7 +195,36 @@ fn post_lookup(t: u32, x: f32) -> f32 {
 
 // A scan pixel, NaN-free and clipped to [0, 1], adjusted; in the scan's
 // encoding, clipped too.
-fn post_rgb(rgb: vec3<f32>) -> vec3<f32> {
+fn post_relight(rgb: vec3<f32>, pixel: vec2<f32>, size: vec2<f32>) -> vec3<f32> {
+    if post.relight_flags.x < 0.5 || post.relight_flags.y <= 0.0 { return rgb; }
+    let min_dim = max(min(size.x, size.y), 1.0);
+    var out = rgb;
+    if post.encoded == 1u {
+        out = vec3<f32>(post_lookup(0u, rgb.r), post_lookup(0u, rgb.g), post_lookup(0u, rgb.b));
+    }
+    for (var i = 0u; i < 3u; i++) {
+        let p = post.relight_positions[i];
+        let c = post.relight_colors[i];
+        if c.w < 0.5 || p.w == 0.0 { continue; }
+        let d = (pixel / size - p.xy) * size / min_dim;
+        let falloff = clamp(1.0 - length(d) / clamp(p.z, 0.02, 1.5), 0.0, 1.0);
+        let amount = falloff * falloff * clamp(p.w, -1.0, 1.0) * clamp(post.relight_flags.y, 0.0, 1.0);
+        for (var channel = 0u; channel < 3u; channel++) {
+            if amount >= 0.0 {
+                out[channel] = out[channel] + (1.0 - out[channel]) * c[channel] * amount;
+            } else {
+                out[channel] = out[channel] * (1.0 + amount * c[channel]);
+            }
+        }
+    }
+    out = clamp(out, vec3<f32>(0.0), vec3<f32>(1.0));
+    if post.encoded == 1u {
+        out = vec3<f32>(post_lookup(1u, sqrt(out.r)), post_lookup(1u, sqrt(out.g)), post_lookup(1u, sqrt(out.b)));
+    }
+    return out;
+}
+
+fn post_rgb(rgb: vec3<f32>, pixel: vec2<f32>, size: vec2<f32>) -> vec3<f32> {
     if post.on == 0u {
         return rgb;
     }
@@ -147,17 +260,21 @@ fn post_rgb(rgb: vec3<f32>) -> vec3<f32> {
     c = clamp(y2 + (c - y2) * f, vec3<f32>(0.0), vec3<f32>(1.0));
     // Hue selection is perceptual/display-referred, matching the visible
     // image and picker. Keep tone work linear; encode only around this stage.
-    if post.film_expand.w > 0.0 || post.film_compression.x > 0.0 || post.color_strength > 0.0 {
+    if post.film_expand.w > 0.0 || post.film_compression.x > 0.0 || post.color_strength > 0.0
+        || post.skin.x != 0.0 || post.skin.y != 0.0 || post.skin.z != 0.0 || post.skin_flags.w > 0.5 {
         var display = vec3<f32>(post_lookup(1u, sqrt(max(c.r, 0.0))),
                                 post_lookup(1u, sqrt(max(c.g, 0.0))),
                                 post_lookup(1u, sqrt(max(c.b, 0.0))));
         if post.film_expand.w > 0.0 { display = post_film_expand(display); }
         if post.film_compression.x > 0.0 { display = post_film_compression(display); }
         if post.color_strength > 0.0 { display = post_color_separation(display); }
+        if post.skin.x != 0.0 || post.skin.y != 0.0 || post.skin.z != 0.0 || post.skin_flags.w > 0.5 {
+            display = post_skin_shaper(display);
+        }
         c = vec3<f32>(post_lookup(0u, display.r), post_lookup(0u, display.g), post_lookup(0u, display.b));
     }
     if post.encoded == 1u {
         c = vec3<f32>(post_lookup(1u, sqrt(c.r)), post_lookup(1u, sqrt(c.g)), post_lookup(1u, sqrt(c.b)));
     }
-    return c;
+    return post_relight(c, pixel + vec2<f32>(0.5), size);
 }

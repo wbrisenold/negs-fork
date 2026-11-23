@@ -2129,7 +2129,8 @@ impl WgpuBackend {
                 let rgba = images.buffer(&self.device, "rgba", bytes, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC);
                 let rgba_readback =
                     images.buffer(&self.device, "rgba_readback", bytes, wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST);
-                self.encode_display_rgba8(&mut encoder, &buf_b, &rgba, n_pixels, encoded, post.as_deref());
+                self.encode_display_rgba8(&mut encoder, &buf_b, &rgba, n_pixels,
+                    image.width, image.height, encoded, post.as_deref());
                 encoder.copy_buffer_to_buffer(&rgba, 0, &rgba_readback, 0, bytes);
                 Some(rgba_readback)
             }
@@ -2187,6 +2188,8 @@ impl WgpuBackend {
         rgb: &wgpu::Buffer,
         rgba: &wgpu::Buffer,
         n_pixels: u32,
+        width: u32,
+        height: u32,
         encoded: bool,
         post: Option<&crate::DisplayPost>,
     ) {
@@ -2195,7 +2198,8 @@ impl WgpuBackend {
         struct Params {
             n_pixels: u32,
             encoded: u32,
-            _pad: [u32; 2],
+            width: u32,
+            height: u32,
         }
         let pipe = self.cached_pipeline(
             concat!(
@@ -2213,7 +2217,7 @@ impl WgpuBackend {
         let (post, tables) = self.post_buffers(post);
         let params = self.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("display_rgba8_params"),
-            contents: bytemuck::bytes_of(&Params { n_pixels, encoded: encoded as u32, _pad: [0; 2] }),
+            contents: bytemuck::bytes_of(&Params { n_pixels, encoded: encoded as u32, width, height }),
             usage: wgpu::BufferUsages::UNIFORM,
         });
         let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -2248,6 +2252,11 @@ impl WgpuBackend {
             color_flags: [f32; 4],
             film_compression: [f32; 4],
             film_expand: [f32; 4],
+            skin: [f32; 4],
+            skin_flags: [f32; 4],
+            relight_flags: [f32; 4],
+            relight_positions: [[f32; 4]; 3],
+            relight_colors: [[f32; 4]; 3],
         }
         let uniform = match post {
             Some(p) => Post {
@@ -2265,10 +2274,21 @@ impl WgpuBackend {
                     p.film_compression.range, p.film_compression.color_density],
                 film_expand: [p.film_expand.blacks, p.film_expand.whites,
                     p.film_expand.rgb_mode as u8 as f32, p.film_expand.impact],
+                skin: [p.skin_shaper.global_sat, p.skin_shaper.global_dens,
+                    p.skin_shaper.hue_rotate, p.skin_shaper.hue_center],
+                skin_flags: [p.skin_shaper.hue_range, p.skin_shaper.sigmoid_shift,
+                    p.skin_shaper.bellcurve_width, p.skin_shaper.phighlighter as u8 as f32],
+                relight_flags: [p.relight_enabled as u8 as f32, p.relight_strength, 0.0, 0.0],
+                relight_positions: p.relight_lights.map(|light| [light.x, light.y, light.radius,
+                    if light.enabled { light.intensity } else { 0.0 }]),
+                relight_colors: p.relight_lights.map(|light| [light.color[0], light.color[1], light.color[2],
+                    light.enabled as u8 as f32]),
             },
             None => Post { on: 0, encoded: 0, saturation: 0.0, color_strength: 0.0,
                 luma: [0.0; 4], color: [0.0; 4], color_flags: [0.0; 4],
-                film_compression: [0.0; 4], film_expand: [0.0; 4] },
+                film_compression: [0.0; 4], film_expand: [0.0; 4],
+                skin: [0.0; 4], skin_flags: [0.0; 4], relight_flags: [0.0; 4],
+                relight_positions: [[0.0; 4]; 3], relight_colors: [[0.0; 4]; 3] },
         };
         let tables: Vec<f32> = match post {
             Some(p) => [&p.decode, &p.encode, &p.tone].into_iter().flatten().copied().collect(),

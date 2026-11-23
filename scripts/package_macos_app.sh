@@ -93,6 +93,28 @@ if [[ ${#requested_archs[@]} -gt 1 ]]; then
     binary_dir="$universal_dir"
 fi
 
+# Build the pinned local depth estimator before replacing the previous app.
+# Its model weights download on first use and are hash-checked by the app.
+depth_inputs=()
+depth_source="${DEPTH_RUNTIME_SOURCE:-$BUILD_TARGET_DIR/depth-anything.cpp}"
+for arch in "${requested_archs[@]}"; do
+    bash scripts/build_depth_runtime.sh "$arch" "$BUILD_TARGET_DIR"
+    depth_inputs+=("$BUILD_TARGET_DIR/da3-cli-$arch")
+done
+if [[ ${#depth_inputs[@]} -eq 1 ]]; then
+    depth_cli="${depth_inputs[0]}"
+else
+    depth_cli="$BUILD_TARGET_DIR/universal-apple-darwin/release/da3-cli"
+    lipo -create -output "$depth_cli" "${depth_inputs[@]}"
+fi
+for arch in "${requested_archs[@]}"; do
+    depth_archs="$(lipo -archs "$depth_cli")"
+    [[ " $depth_archs " == *" $arch "* ]] || {
+        echo "Depth runtime is missing the $arch architecture slice" >&2
+        exit 1
+    }
+done
+
 rm -rf "$DIST_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources" "$APP_BUNDLE/Contents/Frameworks" "$RELEASE_DIR"
 # SwiftPM builds the Swift sources but does not compile Xcode asset catalogs.
@@ -136,6 +158,7 @@ cp "$app_binary" "$APP_BUNDLE/Contents/MacOS/NegsApp"
 cp "$binary_dir/spektrafilm-native" "$APP_BUNDLE/Contents/MacOS/spektrafilm-native"
 cp "$binary_dir/spektrafilm" "$APP_BUNDLE/Contents/MacOS/spektrafilm"
 cp "$binary_dir/spektrafilm-f64" "$APP_BUNDLE/Contents/MacOS/spektrafilm-f64"
+cp "$depth_cli" "$APP_BUNDLE/Contents/MacOS/da3-cli"
 cp -R data "$APP_BUNDLE/Contents/Resources/data"
 # Newsreader, subset by scripts/subset_newsreader.sh, with its licence (OFL 1.1).
 mkdir -p "$APP_BUNDLE/Contents/Resources/Fonts"
@@ -145,6 +168,9 @@ cp macos/Fonts/Newsreader-Negs.ttf macos/Fonts/Newsreader-Negs-Italic.ttf macos/
 cp LICENSE "$APP_BUNDLE/Contents/Resources/LICENSE.txt"
 mkdir -p "$APP_BUNDLE/Contents/Resources/ThirdPartyLicenses"
 cp macos/ThirdPartyLicenses/Hncs-MIT.txt "$APP_BUNDLE/Contents/Resources/ThirdPartyLicenses/"
+cp macos/ThirdPartyLicenses/ComfyUI-ReLight-MIT.txt "$APP_BUNDLE/Contents/Resources/ThirdPartyLicenses/"
+cp "$depth_source/LICENSE" "$APP_BUNDLE/Contents/Resources/ThirdPartyLicenses/Depth-Anything.cpp-MIT.txt"
+cp "$depth_source/third_party/ggml/LICENSE" "$APP_BUNDLE/Contents/Resources/ThirdPartyLicenses/ggml-MIT.txt"
 # Referent is free to download but carries no redistribution grant. Bundle a
 # copy only into a local package when the user has installed their LUT; never
 # add it to source archives or the public repository.
@@ -156,7 +182,8 @@ fi
 chmod +x "$APP_BUNDLE/Contents/MacOS/NegsApp" \
     "$APP_BUNDLE/Contents/MacOS/spektrafilm-native" \
     "$APP_BUNDLE/Contents/MacOS/spektrafilm" \
-    "$APP_BUNDLE/Contents/MacOS/spektrafilm-f64"
+    "$APP_BUNDLE/Contents/MacOS/spektrafilm-f64" \
+    "$APP_BUNDLE/Contents/MacOS/da3-cli"
 
 "$PYTHON" scripts/macos_release.py --plist "$APP_BUNDLE/Contents/Info.plist" > "$DIST_DIR/release.json"
 
@@ -204,6 +231,11 @@ Native interface:
 Backends:
 - macOS uses the WGSL/wgpu backend through Metal by default.
 - CUDA is not available on modern macOS builds.
+
+Depth masks:
+- Depth masks use the local Depth Anything 3 Small model. The first estimate
+  downloads its model from Hugging Face and verifies the published SHA-256.
+- Estimated depth maps stay with the photograph's editable mask layers.
 
 f64 export:
 - spektrafilm-f64 is bundled inside Negs.app/Contents/MacOS.
@@ -254,7 +286,7 @@ COPYFILE_DISABLE=1 tar --exclude='.DS_Store' --exclude='__pycache__' --exclude='
 # overwrite Sparkle's supplied signatures. No Apple account is required.
 # Sign the helpers before NegsApp: signing the main executable checks its
 # neighbours, and the linker only ad-hoc signs arm64 slices, not x86_64.
-for binary in spektrafilm-native spektrafilm spektrafilm-f64 NegsApp; do
+for binary in spektrafilm-native spektrafilm spektrafilm-f64 da3-cli NegsApp; do
     codesign --force --sign - "$APP_BUNDLE/Contents/MacOS/$binary"
 done
 codesign --force --sign - "$APP_BUNDLE"

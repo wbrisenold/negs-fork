@@ -7,7 +7,8 @@
 struct Params {
     n_pixels: u32,
     encoded: u32,
-    _pad: vec2<u32>,
+    width: u32,
+    height: u32,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -45,6 +46,7 @@ fn main(
         return;
     }
     let base = idx * 3u;
-    let c = post_rgb(vec3<f32>(display_clip(rgb[base]), display_clip(rgb[base + 1u]), display_clip(rgb[base + 2u])));
+    let c = post_rgb(vec3<f32>(display_clip(rgb[base]), display_clip(rgb[base + 1u]), display_clip(rgb[base + 2u])),
+        vec2<f32>(f32(idx % params.width), f32(idx / params.width)), vec2<f32>(f32(params.width), f32(params.height)));
     rgba[idx] = display_byte(c.r) | (display_byte(c.g) << 8u) | (display_byte(c.b) << 16u) | 0xff000000u;
 }

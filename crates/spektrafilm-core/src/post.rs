@@ -41,6 +41,9 @@ pub struct PostParams {
     /// Inferred color separation controls; the original DCTL source is opaque.
     #[serde(default)]
     pub color_separation: ColorSeparationParams,
+    /// Mono Shaper style skin hue and luminance shaping controls.
+    #[serde(default)]
+    pub skin_shaper: SkinShaperParams,
     /// ME deSatch cone-space density controls from SpektraFilm Studio.
     #[serde(default)]
     pub color_density: ColorDensityParams,
@@ -68,6 +71,43 @@ pub struct PostParams {
     pub film_compression: FilmCompressionParams,
     #[serde(default)]
     pub film_expand: FilmExpandParams,
+    /// Three editable soft lights in the developed image. Positions are normalized.
+    #[serde(default)]
+    pub relight: RelightParams,
+}
+
+/// Deterministic, model-free soft-light controls, ported from the MIT
+/// ComfyUI-ReLight radial falloff/compositing approach.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RelightParams {
+    #[serde(default)] pub enabled: bool,
+    #[serde(default = "default_relight_strength")] pub strength: f32,
+    #[serde(default = "default_relight_lights")] pub lights: [RelightLight; 3],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct RelightLight {
+    #[serde(default)] pub enabled: bool,
+    #[serde(default = "default_light_x")] pub x: f32,
+    #[serde(default = "default_light_y")] pub y: f32,
+    #[serde(default = "default_light_radius")] pub radius: f32,
+    #[serde(default)] pub intensity: f32,
+    #[serde(default = "default_light_color")] pub color: [f32; 3],
+}
+
+fn default_light_x() -> f32 { 0.5 }
+fn default_light_y() -> f32 { 0.5 }
+fn default_light_radius() -> f32 { 0.45 }
+fn default_light_color() -> [f32; 3] { [1.0, 0.82, 0.66] }
+fn default_relight_strength() -> f32 { 1.0 }
+fn default_relight_lights() -> [RelightLight; 3] { [RelightLight::default(); 3] }
+
+impl Default for RelightLight {
+    fn default() -> Self { Self { enabled: false, x: 0.5, y: 0.5, radius: 0.45, intensity: 0.0, color: default_light_color() } }
+}
+
+impl Default for RelightParams {
+    fn default() -> Self { Self { enabled: false, strength: 1.0, lights: default_relight_lights() } }
 }
 
 fn default_background_mask_selection() -> String { "background".to_owned() }
@@ -172,6 +212,37 @@ pub struct ColorSeparationParams {
     #[serde(default)] pub color_wash: bool,
 }
 
+/// Skin shaper controls shared by the CPU post pass and resident display shader.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SkinShaperParams {
+    #[serde(default)] pub global_sat: f32,
+    #[serde(default)] pub global_dens: f32,
+    #[serde(default)] pub hue_rotate: f32,
+    #[serde(default)] pub hue_center: f32,
+    #[serde(default = "default_skin_hue_range")] pub hue_range: f32,
+    #[serde(default = "default_skin_luma_center")] pub sigmoid_shift: f32,
+    #[serde(default = "default_skin_luma_range")] pub bellcurve_width: f32,
+    #[serde(default)] pub phighlighter: bool,
+}
+
+fn default_skin_hue_range() -> f32 { 40.0 }
+fn default_skin_luma_center() -> f32 { 0.5 }
+fn default_skin_luma_range() -> f32 { 1.0 }
+
+impl Default for SkinShaperParams {
+    fn default() -> Self {
+        Self { global_sat: 0.0, global_dens: 0.0, hue_rotate: 0.0, hue_center: 0.0,
+            hue_range: 40.0, sigmoid_shift: 0.5, bellcurve_width: 1.0, phighlighter: false }
+    }
+}
+
+impl SkinShaperParams {
+    fn is_identity(self) -> bool {
+        self.global_sat == 0.0 && self.global_dens == 0.0 && self.hue_rotate == 0.0
+            && !self.phighlighter
+    }
+}
+
 fn default_target_hue() -> f32 { 35.0 }
 fn default_complementary_hue() -> f32 { 215.0 }
 fn default_target_saturation() -> f32 { 20.0 }
@@ -241,6 +312,7 @@ impl PostParams {
         self.brightness == 0.0 && self.contrast == 0.0 && self.whites == 0.0
             && self.blacks == 0.0 && self.saturation == 0.0
             && self.color_separation.strength == 0.0
+            && self.skin_shaper.is_identity()
             && self.color_density.is_identity()
             && (self.background_mask_png_base64.is_empty()
                 || (self.background_exposure_ev == 0.0 && self.background_temperature == 0.0
@@ -248,6 +320,7 @@ impl PostParams {
             && self.background_masks.iter().all(|mask| mask.exposure_ev == 0.0
                 && mask.temperature == 0.0 && mask.tint == 0.0 && mask.saturation == 0.0
                 && mask.inpaint_patch_png_base64.is_empty())
+            && !self.relight.enabled
             && !self.film_compression.enabled && !self.film_expand.enabled
     }
 }
@@ -305,6 +378,87 @@ fn apply_color_separation(rgb: [f32; 3], p: ColorSeparationParams) -> [f32; 3] {
     hsv[0] = (hsv[0] + hue_pull * amount * (1.0 - method) * hue_delta * 0.18).rem_euclid(360.0);
     hsv[1] = (hsv[1] + (target + complement) * amount * method * 0.35).clamp(0.0, 1.0);
     hsv_to_rgb(hsv)
+}
+
+fn rgb_to_hsl(rgb: [f32; 3]) -> [f32; 3] {
+    let max = rgb[0].max(rgb[1]).max(rgb[2]);
+    let min = rgb[0].min(rgb[1]).min(rgb[2]);
+    let delta = max - min;
+    let lightness = (max + min) * 0.5;
+    if delta <= 1e-6 { return [0.0, 0.0, lightness]; }
+    let saturation = if lightness < 0.5 { delta / (max + min).max(1e-6) }
+        else { delta / (2.0 - max - min).max(1e-6) };
+    let mut hue = if max == rgb[0] { (rgb[1] - rgb[2]) / delta }
+        else if max == rgb[1] { 2.0 + (rgb[2] - rgb[0]) / delta }
+        else { 4.0 + (rgb[0] - rgb[1]) / delta };
+    hue *= 60.0;
+    if hue < 0.0 { hue += 360.0; }
+    [hue, saturation, lightness]
+}
+
+fn hsl_to_rgb(hsl: [f32; 3]) -> [f32; 3] {
+    let [hue, saturation, lightness] = hsl;
+    let chroma = (1.0 - (2.0 * lightness - 1.0).abs()) * saturation;
+    let sector = hue / 60.0;
+    let x = chroma * (1.0 - (sector.rem_euclid(2.0) - 1.0).abs());
+    let match_value = lightness - chroma * 0.5;
+    let rgb = if sector < 1.0 { [chroma, x, 0.0] }
+        else if sector < 2.0 { [x, chroma, 0.0] }
+        else if sector < 3.0 { [0.0, chroma, x] }
+        else if sector < 4.0 { [0.0, x, chroma] }
+        else if sector < 5.0 { [x, 0.0, chroma] }
+        else { [chroma, 0.0, x] };
+    rgb.map(|v| (v + match_value).clamp(0.0, 1.0))
+}
+
+/// Skin shaping is one display-referred stage: the hue and luminance masks,
+/// six-color density map, saturation, hue rotation and highlight view travel
+/// together through this small parameter interface.
+fn apply_skin_shaper(rgb: [f32; 3], p: SkinShaperParams) -> [f32; 3] {
+    let hsl = rgb_to_hsl(rgb);
+    let target_hue = (20.0 - p.hue_center.clamp(-30.0, 30.0)).rem_euclid(360.0);
+    let hue_distance = hue_distance(hsl[0], target_hue);
+    let hue_width = p.hue_range.clamp(15.0, 65.0).max(1e-6);
+    let hue_mask = (-(hue_distance * hue_distance) / (hue_width * hue_width)).exp();
+    let luma_width = (0.4 * p.bellcurve_width.clamp(0.25, 1.75)).max(1e-6);
+    let luma_distance = (hsl[2] - p.sigmoid_shift.clamp(0.0, 1.0)).abs();
+    let luma_mask = (-(luma_distance * luma_distance) / (luma_width * luma_width)).exp();
+    let mask = hue_mask * luma_mask;
+
+    let global_density = -p.global_dens.clamp(-1.0, 1.0);
+    let sat = p.global_sat.clamp(-1.0, 0.999);
+    let red = [1.0 + global_density, -sat + global_density, -sat + global_density];
+    let green = [-sat + global_density, 1.0 + global_density, -sat + global_density];
+    let blue = [-sat + global_density, -sat + global_density, 1.0 + global_density];
+    let cyan_density = global_density * 0.8;
+    let magenta_density = global_density * 0.8;
+    let yellow_density = global_density * 0.6;
+    let cyan = [-sat + cyan_density, 1.0 + cyan_density, 1.0 + cyan_density];
+    let magenta = [1.0 + magenta_density, -sat + magenta_density, 1.0 + magenta_density];
+    let yellow = [1.0 + yellow_density, 1.0 + yellow_density, -sat + yellow_density];
+    let adjusted: [f32; 3] = if rgb[0] > rgb[1] {
+        if rgb[1] > rgb[2] {
+            std::array::from_fn(|i| rgb[0] * red[i] + rgb[1] * (yellow[i] - red[i]) + rgb[2] * (1.0 - yellow[i]))
+        } else if rgb[0] > rgb[2] {
+            std::array::from_fn(|i| rgb[0] * red[i] + rgb[1] * (1.0 - magenta[i]) + rgb[2] * (magenta[i] - red[i]))
+        } else {
+            std::array::from_fn(|i| rgb[0] * (magenta[i] - blue[i]) + rgb[1] * (1.0 - magenta[i]) + rgb[2] * blue[i])
+        }
+    } else if rgb[2] > rgb[1] {
+        std::array::from_fn(|i| rgb[0] * (1.0 - cyan[i]) + rgb[1] * (cyan[i] - blue[i]) + rgb[2] * blue[i])
+    } else if rgb[2] > rgb[0] {
+        std::array::from_fn(|i| rgb[0] * (1.0 - cyan[i]) + rgb[1] * green[i] + rgb[2] * (cyan[i] - green[i]))
+    } else {
+        std::array::from_fn(|i| rgb[0] * (yellow[i] - green[i]) + rgb[1] * green[i] + rgb[2] * (1.0 - yellow[i]))
+    };
+    let mut shaped_hsl = rgb_to_hsl(adjusted.map(|v| v.clamp(0.0, 1.0)));
+    shaped_hsl[0] = (shaped_hsl[0] - p.hue_rotate.clamp(-60.0, 60.0)).rem_euclid(360.0);
+    let shaped = hsl_to_rgb(shaped_hsl);
+    let base = if p.phighlighter {
+        let luminance = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+        [luminance * 0.1 + 0.18; 3]
+    } else { rgb };
+    std::array::from_fn(|i| (base[i] + (shaped[i] - base[i]) * mask).clamp(0.0, 1.0))
 }
 
 /// sRGB-encoded middle grey (18% reflectance), the contrast pivot.
@@ -402,10 +556,12 @@ pub struct PostProcess {
     /// Linear luminance → adjusted linear luminance, sampled on √Y.
     tone: Vec<f32>,
     color_separation: ColorSeparationParams,
+    skin_shaper: SkinShaperParams,
     color_density: ColorDensityParams,
     film_compression: FilmCompressionParams,
     film_expand: FilmExpandParams,
     background_masks: Vec<BackgroundMaskData>,
+    relight: RelightParams,
 }
 
 struct BackgroundMaskData {
@@ -523,16 +679,49 @@ impl PostProcess {
             encode: samples(&|s| space.encode(s * s)),
             tone: samples(&|s| srgb_decode(tone(params, srgb_encode(s * s)))),
             color_separation: params.color_separation,
+            skin_shaper: params.skin_shaper,
             color_density: params.color_density,
             film_compression: params.film_compression,
             film_expand: params.film_expand,
             background_masks,
+            relight: params.relight.clone(),
         }
     }
 
     /// Adjusts one pixel. Input channels are expected in [0, 1], clipped like
     /// a display; so is the result.
     pub fn apply_rgb(&self, rgb: [f32; 3]) -> [f32; 3] {
+        self.apply_rgb_without_position(rgb)
+    }
+
+    fn apply_relight(&self, rgb: [f32; 3], x: usize, y: usize, width: usize, height: usize) -> [f32; 3] {
+        if !self.relight.enabled || self.relight.strength <= 0.0 { return rgb; }
+        let mut out = if self.encoded { rgb.map(|v| lookup(&self.decode, v)) } else { rgb };
+        let min_dim = width.min(height).max(1) as f32;
+        let point = [(x as f32 + 0.5) / width.max(1) as f32,
+            (y as f32 + 0.5) / height.max(1) as f32];
+        for light in self.relight.lights {
+            if !light.enabled || light.intensity == 0.0 { continue; }
+            let dx = (point[0] - light.x.clamp(0.0, 1.0)) * width as f32 / min_dim;
+            let dy = (point[1] - light.y.clamp(0.0, 1.0)) * height as f32 / min_dim;
+            let r = (dx * dx + dy * dy).sqrt() / light.radius.clamp(0.02, 1.5);
+            let falloff = (1.0 - r).clamp(0.0, 1.0);
+            let amount = falloff * falloff * light.intensity.clamp(-1.0, 1.0)
+                * self.relight.strength.clamp(0.0, 1.0);
+            for c in 0..3 {
+                let color = light.color[c].clamp(0.0, 1.0);
+                out[c] = if amount >= 0.0 {
+                    out[c] + (1.0 - out[c]) * color * amount
+                } else {
+                    out[c] * (1.0 + amount * color)
+                }.clamp(0.0, 1.0);
+            }
+        }
+        if self.encoded { out.map(|v| lookup(&self.encode, v.sqrt())) } else { out }
+    }
+
+    /// Applies the finishing adjustments in the output color space.
+    fn apply_rgb_without_position(&self, rgb: [f32; 3]) -> [f32; 3] {
         let mut c = if self.encoded {
             rgb.map(|v| lookup(&self.decode, v))
         } else {
@@ -572,6 +761,7 @@ impl PostProcess {
         if (self.film_expand.enabled && self.film_expand.impact > 0.0)
             || (self.film_compression.enabled && self.film_compression.impact > 0.0)
             || self.color_separation.strength > 0.0
+            || !self.skin_shaper.is_identity()
             || !self.color_density.is_identity()
         {
         let mut display = c.map(|v| lookup(&self.encode, v.max(0.0).sqrt()));
@@ -606,6 +796,9 @@ impl PostProcess {
         if self.color_separation.strength > 0.0 {
             display = apply_color_separation(display, self.color_separation);
         }
+        if !self.skin_shaper.is_identity() {
+            display = apply_skin_shaper(display, self.skin_shaper);
+        }
         if !self.color_density.is_identity() {
             display = apply_color_density(display, self.color_density);
         }
@@ -621,7 +814,8 @@ impl PostProcess {
     /// Applies the preview/export pixel adjustments and samples every saved
     /// selection at this source-image coordinate.
     pub fn apply_rgb_at(&self, rgb: [f32; 3], x: usize, y: usize, width: usize, height: usize) -> [f32; 3] {
-        let mut out = self.apply_rgb(rgb);
+        let mut out = self.apply_rgb_without_position(rgb);
+        out = self.apply_relight(out, x, y, width, height);
         for layer in &self.background_masks {
             let mx = (x * layer.mask.width() as usize / width.max(1)).min(layer.mask.width() as usize - 1);
             let my = (y * layer.mask.height() as usize / height.max(1)).min(layer.mask.height() as usize - 1);
@@ -660,6 +854,16 @@ impl PostProcess {
                 method: self.color_separation.method,
                 color_wash: self.color_separation.color_wash,
             },
+            skin_shaper: spektrafilm_gpu::DisplaySkinShaper {
+                global_sat: self.skin_shaper.global_sat,
+                global_dens: self.skin_shaper.global_dens,
+                hue_rotate: self.skin_shaper.hue_rotate,
+                hue_center: self.skin_shaper.hue_center,
+                hue_range: self.skin_shaper.hue_range,
+                sigmoid_shift: self.skin_shaper.sigmoid_shift,
+                bellcurve_width: self.skin_shaper.bellcurve_width,
+                phighlighter: self.skin_shaper.phighlighter,
+            },
             film_compression: spektrafilm_gpu::DisplayFilmCompression {
                 enabled: self.film_compression.enabled,
                 impact: if self.film_compression.enabled { self.film_compression.impact / 100.0 } else { 0.0 },
@@ -674,6 +878,16 @@ impl PostProcess {
                 rgb_mode: self.film_expand.mode == FilmExpandMode::Rgb,
                 impact: if self.film_expand.enabled { self.film_expand.impact } else { 0.0 },
             },
+            relight_enabled: self.relight.enabled,
+            relight_strength: self.relight.strength,
+            relight_lights: self.relight.lights.map(|light| spektrafilm_gpu::DisplayRelightLight {
+                enabled: light.enabled,
+                x: light.x,
+                y: light.y,
+                radius: light.radius,
+                intensity: light.intensity,
+                color: light.color,
+            }),
         }
     }
 

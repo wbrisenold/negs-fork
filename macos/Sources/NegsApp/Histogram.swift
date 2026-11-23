@@ -80,29 +80,18 @@ struct Waveform: Equatable, Sendable {
     }
 }
 
-struct ChromaticityScope: Equatable, Sendable {
-    let size: Int
-    let bins: [UInt32]
-    let sampleCount: Int
-    init(size: Int = 128, bins: [UInt32] = []) {
-        self.size = size; self.bins = bins
-        sampleCount = Int(bins.reduce(0, +))
-    }
-}
-
-/// Distribution of display-referred pixel saturation, from neutral to vivid.
-struct SaturationScope: Equatable, Sendable {
-    let bins: [UInt32]
-    let sampleCount: Int
-
-    init(bins: [UInt32] = Array(repeating: 0, count: 256)) {
-        self.bins = bins
-        sampleCount = Int(bins.reduce(0, +))
-    }
-}
-
 struct ColorSample: Equatable, Sendable {
     let red: UInt8, green: UInt8, blue: UInt8
+    var hueDegrees: Double? {
+        let (r, g, b) = (Double(red) / 255, Double(green) / 255, Double(blue) / 255)
+        let high = max(r, g, b), low = min(r, g, b), delta = high - low
+        guard delta > 0 else { return nil }
+        let hue: Double
+        if high == r { hue = 60 * ((g - b) / delta).truncatingRemainder(dividingBy: 6) }
+        else if high == g { hue = 60 * ((b - r) / delta + 2) }
+        else { hue = 60 * ((r - g) / delta + 4) }
+        return hue < 0 ? hue + 360 : hue
+    }
     var xy: (Double, Double) {
         let r = Self.linear(Double(red) / 255), g = Self.linear(Double(green) / 255), b = Self.linear(Double(blue) / 255)
         let x = 0.4124564 * r + 0.3575761 * g + 0.1804375 * b
@@ -122,13 +111,55 @@ struct ImageScopes: Equatable, Sendable {
     var waveform = Waveform()
     var vectorscope = Vectorscope()
     var skinAnalysis = SkinAnalysis()
-    var chromaticity = ChromaticityScope()
-    var saturation = SaturationScope()
 
     /// BT.709 luma from the developed display-referred 8-bit RGB values.
     /// Keep the viewer diagnostics on the same signal and rounding rule.
     private static func displayLuma(red: UInt8, green: UInt8, blue: UInt8) -> UInt8 {
         UInt8((54 * Int(red) + 183 * Int(green) + 19 * Int(blue)) >> 8)
+    }
+    private static func encodeSRGB(_ value: Double) -> Double {
+        let index = Int((max(0, min(1, value)) * 4096).rounded())
+        return linearSRGBTable[index]
+    }
+    private static let srgbLinearByteTable = (0...255).map { ColorSample.linear(Double($0) / 255) }
+    private static let linearSRGBTable = (0...4096).map { index -> Double in
+        let value = Double(index) / 4096
+        return value <= 0.0031308 ? 12.92 * value : 1.055 * pow(value, 1 / 2.4) - 0.055
+    }
+    private static func saturationFalseColor(_ s: Double) -> (Double, Double, Double) {
+        switch s {
+        case ..<0.01: (0.00, 0.04, 0.04)
+        case ..<0.03: (0.03, 0.06, 0.12)
+        case ..<0.05: (0.05, 0.09, 0.19)
+        case ..<0.08: (0.05, 0.17, 0.28)
+        case ..<0.12: (0.13, 0.29, 0.21)
+        case ..<0.16: (0.18, 0.40, 0.27)
+        case ..<0.22: (0.46, 0.46, 0.46)
+        case ..<0.30: (0.67, 0.65, 0.22)
+        case ..<0.39: (0.62, 0.39, 0.18)
+        case ..<0.50: (0.52, 0.25, 0.22)
+        case ..<0.62: (0.41, 0.19, 0.16)
+        case ..<0.74: (0.37, 0.07, 0.07)
+        default: (0.30, 0.01, 0.01)
+        }
+    }
+
+    private static func exposureFalseColor(_ luma: Double) -> (Double, Double, Double) {
+        switch luma {
+        case 0.956...: (0.19, 0.01, 0.01)
+        case 0.911...: (0.26, 0.05, 0.05)
+        case 0.836...: (0.33, 0.15, 0.07)
+        case 0.728...: (0.44, 0.25, 0.13)
+        case 0.596...: (0.62, 0.39, 0.18)
+        case 0.457...: (0.67, 0.65, 0.22)
+        case 0.328...: (0.46, 0.46, 0.46)
+        case 0.222...: (0.18, 0.40, 0.27)
+        case 0.140...: (0.13, 0.29, 0.21)
+        case 0.077...: (0.05, 0.17, 0.28)
+        case 0.038...: (0.05, 0.09, 0.19)
+        case 0.019...: (0.04, 0.05, 0.10)
+        default: (0.00, 0.04, 0.04)
+        }
     }
 
     /// Transparent false-colour mask for clipped highlights (red) and
@@ -143,7 +174,9 @@ struct ImageScopes: Equatable, Sendable {
         surface.lock(options: .readOnly, seed: nil)
         defer { surface.unlock(options: .readOnly, seed: nil) }
         let sourceWidth = surface.width, sourceHeight = surface.height
-        let scale = min(1.0, sqrt(Double(1 << 22) / Double(sourceWidth * sourceHeight)))
+        // Two megapixels retains screen-scale clipping detail while keeping
+        // slider-driven refreshes cheap enough to finish before the next frame.
+        let scale = min(1.0, sqrt(Double(1 << 21) / Double(sourceWidth * sourceHeight)))
         let width = max(1, Int((Double(sourceWidth) * scale).rounded()))
         let height = max(1, Int((Double(sourceHeight) * scale).rounded()))
         let source = surface.baseAddress.assumingMemoryBound(to: UInt8.self)
@@ -185,6 +218,7 @@ struct ImageScopes: Equatable, Sendable {
     static func falseColorOverlay(_ surface: IOSurface) -> CGImage? {
         guard surface.width > 0, surface.height > 0, surface.bytesPerElement == 4,
               surface.planeCount <= 1, !Task.isCancelled else { return nil }
+        let isRec2020 = EditorModel.displaySpace(of: surface) == "Rec. 2020 (sRGB transfer)"
         surface.lock(options: .readOnly, seed: nil)
         defer { surface.unlock(options: .readOnly, seed: nil) }
         let sourceWidth = surface.width, sourceHeight = surface.height
@@ -192,7 +226,7 @@ struct ImageScopes: Equatable, Sendable {
         let width = max(1, Int((Double(sourceWidth) * scale).rounded()))
         let height = max(1, Int((Double(sourceHeight) * scale).rounded()))
         let source = surface.baseAddress.assumingMemoryBound(to: UInt8.self)
-        let rowBytes = surface.bytesPerRow, alpha = 224.0 / 255.0
+        let rowBytes = surface.bytesPerRow
         var rgba = [UInt8](repeating: 0, count: width * height * 4)
         for y in 0..<height {
             if Task.isCancelled { return nil }
@@ -200,25 +234,27 @@ struct ImageScopes: Equatable, Sendable {
             for x in 0..<width {
                 let sx = min(sourceWidth - 1, Int((Double(x) + 0.5) * Double(sourceWidth) / Double(width)))
                 let src = sy * rowBytes + sx * surface.bytesPerElement
-                // IOSurface preview pixels are BGRA; luma weights are RGB.
-                let luma = Int(displayLuma(red: source[src + 2], green: source[src + 1], blue: source[src]))
-                let color: (UInt8, UInt8, UInt8)
-                switch luma {
-                case ..<13: color = (14, 8, 52)       // 0–5 IRE: near-black
-                case ..<31: color = (34, 46, 190)     // 5–12 IRE: deep blue
-                case ..<64: color = (0, 164, 222)     // 12–25 IRE: cyan
-                case ..<112: color = (0, 178, 88)     // 25–44 IRE: green
-                case ..<148: color = (225, 210, 0)    // 44–58 IRE: yellow
-                case ..<179: color = (255, 132, 0)    // 58–70 IRE: orange
-                case ..<217: color = (226, 32, 28)    // 70–85 IRE: red
-                case ..<245: color = (213, 32, 196)   // 85–96 IRE: magenta
-                default: color = (245, 245, 245)      // 96–100 IRE: highlight
+                var r = Double(source[src + 2]) / 255
+                var g = Double(source[src + 1]) / 255
+                var b = Double(source[src]) / 255
+                if isRec2020 {
+                    r = Self.srgbLinearByteTable[Int(source[src + 2])]
+                    g = Self.srgbLinearByteTable[Int(source[src + 1])]
+                    b = Self.srgbLinearByteTable[Int(source[src])]
+                    let xx = 0.636958 * r + 0.144617 * g + 0.168881 * b
+                    let yy = 0.262700 * r + 0.677998 * g + 0.059302 * b
+                    let zz = 0.028073 * r + 0.163020 * g + 0.808907 * b
+                    r = Self.encodeSRGB(max(0, min(1, 3.240454 * xx - 1.537139 * yy - 0.498531 * zz)))
+                    g = Self.encodeSRGB(max(0, min(1, -0.969266 * xx + 1.876011 * yy + 0.041556 * zz)))
+                    b = Self.encodeSRGB(max(0, min(1, 0.055643 * xx - 0.204026 * yy + 1.057225 * zz)))
                 }
+                let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
+                let color = Self.exposureFalseColor(luma)
                 let offset = (y * width + x) * 4
-                rgba[offset] = UInt8((Double(color.0) * alpha).rounded())
-                rgba[offset + 1] = UInt8((Double(color.1) * alpha).rounded())
-                rgba[offset + 2] = UInt8((Double(color.2) * alpha).rounded())
-                rgba[offset + 3] = 224
+                rgba[offset] = UInt8((color.0 * 255).rounded())
+                rgba[offset + 1] = UInt8((color.1 * 255).rounded())
+                rgba[offset + 2] = UInt8((color.2 * 255).rounded())
+                rgba[offset + 3] = 255
             }
         }
         guard let provider = CGDataProvider(data: Data(rgba) as CFData) else { return nil }
@@ -228,13 +264,167 @@ struct ImageScopes: Equatable, Sendable {
                        provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
     }
 
-    /// Saturation heat map of the finished preview. Hue shows saturation level
-    /// (blue low, green mid, red high); the translucent fill keeps the image
-    /// visible underneath. The preview is already after the complete render
-    /// pipeline, so this diagnoses the signal the user is actually grading.
+    /// Display-referred saturation heatmap. Convert tagged Rec.2020 previews
+    /// to Rec.709, then apply the Neutral/DCTL saturation bands.
     static func saturationFalseColorOverlay(_ surface: IOSurface) -> CGImage? {
         guard surface.width > 0, surface.height > 0, surface.bytesPerElement == 4,
               surface.planeCount <= 1, !Task.isCancelled else { return nil }
+        let isRec2020 = EditorModel.displaySpace(of: surface) == "Rec. 2020 (sRGB transfer)"
+        surface.lock(options: .readOnly, seed: nil)
+        defer { surface.unlock(options: .readOnly, seed: nil) }
+        let sourceWidth = surface.width, sourceHeight = surface.height
+        // Half a megapixel is enough to diagnose a full-window preview. Keep
+        // this pass light enough to regenerate during slider interaction.
+        let scale = min(1.0, sqrt(Double(1 << 19) / Double(sourceWidth * sourceHeight)))
+        let width = max(1, Int((Double(sourceWidth) * scale).rounded()))
+        let height = max(1, Int((Double(sourceHeight) * scale).rounded()))
+        let source = surface.baseAddress.assumingMemoryBound(to: UInt8.self)
+        var rgba = [UInt8](repeating: 0, count: width * height * 4)
+        for y in 0..<height {
+            if Task.isCancelled { return nil }
+            let sy = min(sourceHeight - 1, Int((Double(y) + 0.5) * Double(sourceHeight) / Double(height)))
+            for x in 0..<width {
+                let sx = min(sourceWidth - 1, Int((Double(x) + 0.5) * Double(sourceWidth) / Double(width)))
+                let src = sy * surface.bytesPerRow + sx * surface.bytesPerElement
+                let encodedR = Double(source[src + 2]) / 255
+                let encodedG = Double(source[src + 1]) / 255
+                let encodedB = Double(source[src]) / 255
+                var red = encodedR
+                var green = encodedG
+                var blue = encodedB
+                if isRec2020 {
+                    red = Self.srgbLinearByteTable[Int(source[src + 2])]
+                    green = Self.srgbLinearByteTable[Int(source[src + 1])]
+                    blue = Self.srgbLinearByteTable[Int(source[src])]
+                    let x = 0.636958 * red + 0.144617 * green + 0.168881 * blue
+                    let y = 0.262700 * red + 0.677998 * green + 0.059302 * blue
+                    let z = 0.028073 * red + 0.163020 * green + 0.808907 * blue
+                    red = max(0, min(1, 3.240454 * x - 1.537139 * y - 0.498531 * z))
+                    green = max(0, min(1, -0.969266 * x + 1.876011 * y + 0.041556 * z))
+                    blue = max(0, min(1, 0.055643 * x - 0.204026 * y + 1.057225 * z))
+                    red = Self.encodeSRGB(red)
+                    green = Self.encodeSRGB(green)
+                    blue = Self.encodeSRGB(blue)
+                }
+                // sRGB preview channels already are Rec.709 display values;
+                // avoid a decode/encode round trip for every pixel.
+                let rec709R = red, rec709G = green, rec709B = blue
+                let maximum = max(rec709R, max(rec709G, rec709B))
+                let minimum = min(rec709R, min(rec709G, rec709B))
+                // Use HSV saturation (chroma divided by value), not chroma
+                // alone. Chroma falls as a pixel gets darker, which made the
+                // overlay confuse exposure with saturation.
+                let saturation = maximum > 0 ? (maximum - minimum) / maximum : 0
+                let color = Self.saturationFalseColor(saturation)
+                let offset = (y * width + x) * 4
+                rgba[offset] = UInt8((color.0 * 255).rounded())
+                rgba[offset + 1] = UInt8((color.1 * 255).rounded())
+                rgba[offset + 2] = UInt8((color.2 * 255).rounded())
+                rgba[offset + 3] = 255
+            }
+        }
+        guard let provider = CGDataProvider(data: Data(rgba) as CFData) else { return nil }
+        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+                       bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                       bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                       provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+    }
+
+    /// Skin-hue guide inspired by the Mononodes balance DCTL: hue close to
+    /// the traditional line is yellow, moving magenta is magenta, and moving
+    /// green is green. This is a chroma guide, not semantic skin detection.
+    static func skinToneFalseColorOverlay(_ surface: IOSurface) -> CGImage? {
+        guard surface.width > 0, surface.height > 0, surface.bytesPerElement == 4,
+              surface.planeCount <= 1, !Task.isCancelled else { return nil }
+        let isRec2020 = EditorModel.displaySpace(of: surface) == "Rec. 2020 (sRGB transfer)"
+        surface.lock(options: .readOnly, seed: nil)
+        defer { surface.unlock(options: .readOnly, seed: nil) }
+        let sourceWidth = surface.width, sourceHeight = surface.height
+        let scale = min(1.0, sqrt(Double(1 << 19) / Double(sourceWidth * sourceHeight)))
+        let width = max(1, Int((Double(sourceWidth) * scale).rounded()))
+        let height = max(1, Int((Double(sourceHeight) * scale).rounded()))
+        let source = surface.baseAddress.assumingMemoryBound(to: UInt8.self)
+        var rgba = [UInt8](repeating: 0, count: width * height * 4)
+        for y in 0..<height {
+            if Task.isCancelled { return nil }
+            let sy = min(sourceHeight - 1, Int((Double(y) + 0.5) * Double(sourceHeight) / Double(height)))
+            for x in 0..<width {
+                let sx = min(sourceWidth - 1, Int((Double(x) + 0.5) * Double(sourceWidth) / Double(width)))
+                let src = sy * surface.bytesPerRow + sx * surface.bytesPerElement
+                var r = Double(source[src + 2]) / 255
+                var g = Double(source[src + 1]) / 255
+                var b = Double(source[src]) / 255
+                if isRec2020 {
+                    r = Self.srgbLinearByteTable[Int(source[src + 2])]
+                    g = Self.srgbLinearByteTable[Int(source[src + 1])]
+                    b = Self.srgbLinearByteTable[Int(source[src])]
+                    let xx = 0.636958 * r + 0.144617 * g + 0.168881 * b
+                    let yy = 0.262700 * r + 0.677998 * g + 0.059302 * b
+                    let zz = 0.028073 * r + 0.163020 * g + 0.808907 * b
+                    r = Self.encodeSRGB(max(0, min(1, 3.240454 * xx - 1.537139 * yy - 0.498531 * zz)))
+                    g = Self.encodeSRGB(max(0, min(1, -0.969266 * xx + 1.876011 * yy + 0.041556 * zz)))
+                    b = Self.encodeSRGB(max(0, min(1, 0.055643 * xx - 0.204026 * yy + 1.057225 * zz)))
+                }
+                let maximum = max(r, max(g, b)), minimum = min(r, min(g, b))
+                let deltaRGB = maximum - minimum
+                guard deltaRGB > 0.0001 else { continue }
+                let lightness = (maximum + minimum) / 2
+                var hue: Double
+                if maximum == r { hue = ((g - b) / deltaRGB).truncatingRemainder(dividingBy: 6) }
+                else if maximum == g { hue = (b - r) / deltaRGB + 2 }
+                else { hue = (r - g) / deltaRGB + 4 }
+                hue *= 60
+                if hue < 0 { hue += 360 }
+
+                // MONO-Balance defaults: target hue 18.7°, skin range 5.74°,
+                // and magenta/green deviation range 18.53°. Outside that
+                // neighborhood the image remains unchanged.
+                let skinRange = 2 + (0.5 * 0.4) * 18.7
+                let deviationRange = 1.7 + (1.0 * 0.9) * 18.7
+                let hueDelta = wrappedDegrees(hue - 18.7)
+                let mappedHue: Double, mappedSaturation: Double
+                if abs(hueDelta) < skinRange {
+                    (mappedHue, mappedSaturation) = (60, 0.9)
+                } else if hueDelta > 0, abs(hueDelta) < deviationRange {
+                    (mappedHue, mappedSaturation) = (140, 0.6)
+                } else if hueDelta < 0, abs(hueDelta) < deviationRange {
+                    (mappedHue, mappedSaturation) = (300, 0.7)
+                } else { continue }
+
+                let chroma = (1 - abs(2 * lightness - 1)) * mappedSaturation
+                let sector = mappedHue / 60
+                let xComponent = chroma * (1 - abs(sector.truncatingRemainder(dividingBy: 2) - 1))
+                let match = lightness - chroma / 2
+                let vivid: (Double, Double, Double)
+                switch sector {
+                case ..<1: vivid = (chroma, xComponent, 0)
+                case ..<2: vivid = (xComponent, chroma, 0)
+                case ..<3: vivid = (0, chroma, xComponent)
+                case ..<4: vivid = (0, xComponent, chroma)
+                case ..<5: vivid = (xComponent, 0, chroma)
+                default: vivid = (chroma, 0, xComponent)
+                }
+                let color = (vivid.0 + match, vivid.1 + match, vivid.2 + match)
+                let offset = (y * width + x) * 4
+                rgba[offset] = UInt8((color.0 * 255).rounded())
+                rgba[offset + 1] = UInt8((color.1 * 255).rounded())
+                rgba[offset + 2] = UInt8((color.2 * 255).rounded())
+                rgba[offset + 3] = 255
+            }
+        }
+        guard let provider = CGDataProvider(data: Data(rgba) as CFData) else { return nil }
+        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+                       bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                       bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                       provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+    }
+
+    /// Highlights low-chroma pixels as neutral candidates on the finished
+    /// preview. This viewing aid leaves image brightness visible for judging.
+    static func neutralCandidateOverlay(_ surface: IOSurface) -> CGImage? {
+        guard surface.width > 0, surface.height > 0, surface.bytesPerElement == 4,
+              surface.planeCount <= 1, !Task.isCancelled else { return nil }
+        let isRec2020 = EditorModel.displaySpace(of: surface) == "Rec. 2020 (sRGB transfer)"
         surface.lock(options: .readOnly, seed: nil)
         defer { surface.unlock(options: .readOnly, seed: nil) }
         let sourceWidth = surface.width, sourceHeight = surface.height
@@ -249,30 +439,28 @@ struct ImageScopes: Equatable, Sendable {
             for x in 0..<width {
                 let sx = min(sourceWidth - 1, Int((Double(x) + 0.5) * Double(sourceWidth) / Double(width)))
                 let src = sy * surface.bytesPerRow + sx * surface.bytesPerElement
-                let red = Double(source[src + 2]), green = Double(source[src + 1]), blue = Double(source[src])
-                let maximum = max(red, green, blue), minimum = min(red, green, blue)
-                let saturation = maximum > 0 ? (maximum - minimum) / maximum : 0
-                // Blue → cyan → green → yellow → red, matching a familiar
-                // false-colour scale while leaving neutral pixels unobtrusive.
-                let hue = (2.0 / 3.0) * (1.0 - saturation)
-                let sector = hue * 6
-                let chroma = 1.0
-                let xValue = chroma * (1 - abs(sector.truncatingRemainder(dividingBy: 2) - 1))
-                let (r, g, b): (Double, Double, Double)
-                switch Int(sector) {
-                case 0: (r, g, b) = (chroma, xValue, 0)
-                case 1: (r, g, b) = (xValue, chroma, 0)
-                case 2: (r, g, b) = (0, chroma, xValue)
-                case 3: (r, g, b) = (0, xValue, chroma)
-                case 4: (r, g, b) = (xValue, 0, chroma)
-                default: (r, g, b) = (chroma, 0, xValue)
+                var red = Double(source[src + 2]) / 255
+                var green = Double(source[src + 1]) / 255
+                var blue = Double(source[src]) / 255
+                if isRec2020 {
+                    red = Self.srgbLinearByteTable[Int(source[src + 2])]
+                    green = Self.srgbLinearByteTable[Int(source[src + 1])]
+                    blue = Self.srgbLinearByteTable[Int(source[src])]
+                    let xx = 0.636958 * red + 0.144617 * green + 0.168881 * blue
+                    let yy = 0.262700 * red + 0.677998 * green + 0.059302 * blue
+                    let zz = 0.028073 * red + 0.163020 * green + 0.808907 * blue
+                    red = Self.encodeSRGB(max(0, min(1, 3.240454 * xx - 1.537139 * yy - 0.498531 * zz)))
+                    green = Self.encodeSRGB(max(0, min(1, -0.969266 * xx + 1.876011 * yy + 0.041556 * zz)))
+                    blue = Self.encodeSRGB(max(0, min(1, 0.055643 * xx - 0.204026 * yy + 1.057225 * zz)))
                 }
-                let offset = (y * width + x) * 4
-                let alpha = 42 + saturation * 138
-                rgba[offset] = UInt8((r * alpha).rounded())
-                rgba[offset + 1] = UInt8((g * alpha).rounded())
-                rgba[offset + 2] = UInt8((b * alpha).rounded())
-                rgba[offset + 3] = UInt8(alpha.rounded())
+                let brightness = (red + green + blue) / 3
+                guard abs(red - green) < 0.02, abs(green - blue) < 0.02,
+                      brightness > 0.1 else { continue }
+                let index = (y * width + x) * 4
+                rgba[index] = 0
+                rgba[index + 1] = 230
+                rgba[index + 2] = 0
+                rgba[index + 3] = 255
             }
         }
         guard let provider = CGDataProvider(data: Data(rgba) as CFData) else { return nil }
@@ -293,8 +481,6 @@ struct ImageScopes: Equatable, Sendable {
         let wantsWaveform = mode == nil || mode == .waveform
         let wantsVectorscope = mode == nil || mode == .vectorscope || mode == .skin
         let wantsSkin = mode == nil || mode == .skin
-        let wantsChromaticity = mode == .chromaticity
-        let wantsSaturation = mode == .saturation
         let width = Int(area.width), height = Int(area.height)
         // This also bounds very thin panoramas: a single common pixel stride
         // can exceed the budget when one of the dimensions is much shorter.
@@ -306,9 +492,6 @@ struct ImageScopes: Equatable, Sendable {
         var red = [UInt32](repeating: 0, count: wantsWaveform ? waveWidth * 256 : 0)
         var green = red, blue = red
         var histogram = Histogram()
-        let chromaSize = 128
-        var chromaBins = [UInt32](repeating: 0, count: wantsChromaticity ? chromaSize * chromaSize : 0)
-        var saturationBins = [UInt32](repeating: 0, count: wantsSaturation ? 256 : 0)
         let vectorSize = 128
         var vectorBins = [UInt32](repeating: 0, count: wantsVectorscope ? vectorSize * vectorSize : 0)
         var skinBins = [UInt32](repeating: 0, count: wantsSkin ? vectorSize * vectorSize : 0)
@@ -342,27 +525,6 @@ struct ImageScopes: Equatable, Sendable {
                 guard x >= 0, x < surface.width, y >= 0, y < surface.height else { continue }
                 let pixel = base + y * rowBytes + x * 4
                 let (r, g, b) = (Int(pixel[2]), Int(pixel[1]), Int(pixel[0]))
-                if wantsSaturation {
-                    let maximum = max(r, g, b)
-                    let minimum = min(r, g, b)
-                    let level = maximum == 0 ? 0 : (maximum - minimum) * 255 / maximum
-                    saturationBins[level] &+= 1
-                }
-                if wantsChromaticity {
-                    let rf = ColorSample.linear(Double(r) / 255), gf = ColorSample.linear(Double(g) / 255), bf = ColorSample.linear(Double(b) / 255)
-                    let x = 0.4124564 * rf + 0.3575761 * gf + 0.1804375 * bf
-                    let y = 0.2126729 * rf + 0.7151522 * gf + 0.0721750 * bf
-                    let z = 0.0193339 * rf + 0.1191920 * gf + 0.9503041 * bf
-                    let sum = x + y + z
-                    if sum > 1e-8 {
-                        let cx = x / sum, cy = y / sum
-                        if (0.0...0.8).contains(cx), (0.0...0.9).contains(cy) {
-                            let bx = min(chromaSize - 1, Int(cx / 0.8 * Double(chromaSize - 1)))
-                            let by = min(chromaSize - 1, Int(cy / 0.9 * Double(chromaSize - 1)))
-                            chromaBins[by * chromaSize + bx] &+= 1
-                        }
-                    }
-                }
                 if wantsHistogram {
                     histogram.red[r] += 1; histogram.green[g] += 1; histogram.blue[b] += 1
                 }
@@ -416,27 +578,14 @@ struct ImageScopes: Equatable, Sendable {
         return ImageScopes(histogram: histogram,
             waveform: wantsWaveform ? Waveform(width: waveWidth, red: red, green: green, blue: blue) : Waveform(),
             vectorscope: wantsVectorscope ? Vectorscope(size: vectorSize, bins: vectorBins, skinBins: skinBins) : Vectorscope(),
-            skinAnalysis: wantsSkin ? analysis : SkinAnalysis(),
-            chromaticity: wantsChromaticity ? ChromaticityScope(size: chromaSize, bins: chromaBins) : ChromaticityScope(),
-            saturation: wantsSaturation ? SaturationScope(bins: saturationBins) : SaturationScope())
+            skinAnalysis: wantsSkin ? analysis : SkinAnalysis())
     }
 
-    static func sample(_ surface: IOSurface, displayedPoint: CGPoint, crop: CropSettings, rotation: Int) -> ColorSample? {
-        guard surface.width > 0, surface.height > 0, surface.bytesPerElement == 4, (0...1).contains(displayedPoint.x), (0...1).contains(displayedPoint.y) else { return nil }
-        let area = crop.pixels(in: CGSize(width: surface.width, height: surface.height))
-        var u = displayedPoint.x, v = displayedPoint.y
-        switch (rotation % 4 + 4) % 4 {
-        case 1: (u, v) = (v, 1 - u)
-        case 2: (u, v) = (1 - u, 1 - v)
-        case 3: (u, v) = (1 - v, u)
-        default: break
-        }
-        let (cx, cy) = (Double(surface.width) / 2, Double(surface.height) / 2)
-        let (dx, dy) = (area.minX + u * area.width - cx, area.minY + v * area.height - cy)
-        let angle = -crop.angle * .pi / 180
-        let x = Int((cx + dx * cos(angle) - dy * sin(angle)).rounded(.down))
-        let y = Int((cy + dx * sin(angle) + dy * cos(angle)).rounded(.down))
-        guard x >= 0, x < surface.width, y >= 0, y < surface.height else { return nil }
+    static func sample(_ surface: IOSurface, sourcePoint: CGPoint) -> ColorSample? {
+        guard surface.width > 0, surface.height > 0, surface.bytesPerElement == 4,
+              (0...1).contains(sourcePoint.x), (0...1).contains(sourcePoint.y) else { return nil }
+        let x = min(Int(sourcePoint.x * CGFloat(surface.width)), surface.width - 1)
+        let y = min(Int(sourcePoint.y * CGFloat(surface.height)), surface.height - 1)
         surface.lock(options: .readOnly, seed: nil)
         defer { surface.unlock(options: .readOnly, seed: nil) }
         let pixel = surface.baseAddress.assumingMemoryBound(to: UInt8.self) + y * surface.bytesPerRow + x * 4
@@ -526,38 +675,6 @@ struct HistogramView: View {
     }
 }
 
-struct SaturationScopeView: View {
-    let scope: SaturationScope?
-
-    var body: some View {
-        Canvas { context, size in
-            scopeGrid(context: &context, size: size)
-            guard let scope, let peak = scope.bins.max(), peak > 0 else { return }
-            let logPeak = log1p(Double(peak))
-            let bottom = size.height - 12
-            let plotHeight = max(1, bottom - 4)
-            let binWidth = size.width / CGFloat(scope.bins.count)
-            for (index, count) in scope.bins.enumerated() where count > 0 {
-                let fraction = Double(index) / Double(scope.bins.count - 1)
-                let barHeight = plotHeight * CGFloat(log1p(Double(count)) / logPeak)
-                let rect = CGRect(x: CGFloat(index) * binWidth, y: bottom - barHeight,
-                                  width: max(1, binWidth + 0.25), height: barHeight)
-                let color = Color(hue: 0.49, saturation: fraction, brightness: 0.72 + 0.23 * fraction)
-                context.fill(Path(rect), with: .color(color.opacity(0.88)))
-            }
-            context.draw(Text("NEUTRAL").font(.system(size: 8, weight: .medium, design: .monospaced))
-                .foregroundColor(Theme.dim), at: CGPoint(x: 22, y: size.height - 5))
-            context.draw(Text("VIVID").font(.system(size: 8, weight: .medium, design: .monospaced))
-                .foregroundColor(Theme.dim), at: CGPoint(x: size.width - 18, y: size.height - 5))
-        }
-        .padding(6)
-        .background(Theme.bg, in: RoundedRectangle(cornerRadius: 3))
-        .accessibilityElement()
-        .accessibilityLabel("Saturation scope")
-        .accessibilityValue(scope == nil ? "No developed photograph" : "Pixel saturation distribution from neutral to vivid")
-    }
-}
-
 struct WaveformView: View {
     let waveform: Waveform?
 
@@ -621,7 +738,7 @@ private func scopeGrid(context: inout GraphicsContext, size: CGSize) {
 
 enum ScopeMode: String, CaseIterable, Sendable {
     case histogram = "Histogram", waveform = "Waveform", vectorscope = "Vectorscope", skin = "Skin Analysis"
-    case chromaticity = "CIE Chromaticity", saturation = "Saturation", picker = "Color Picker"
+    case picker = "Color Picker"
 
     var symbol: String {
         switch self {
@@ -629,8 +746,6 @@ enum ScopeMode: String, CaseIterable, Sendable {
         case .waveform: "waveform.path"
         case .vectorscope: "circle.hexagongrid"
         case .skin: "person.crop.circle"
-        case .chromaticity: "point.3.connected.trianglepath.dotted"
-        case .saturation: "circle.lefthalf.filled"
         case .picker: "eyedropper"
         }
     }
@@ -640,8 +755,6 @@ enum ScopeMode: String, CaseIterable, Sendable {
         case .histogram, .waveform: "RGB"
         case .vectorscope: "Cb · Cr"
         case .skin: "FACE CHROMA"
-        case .chromaticity: "CIE xy"
-        case .saturation: "SATURATION"
         case .picker: "SAMPLE"
         }
     }
@@ -652,9 +765,7 @@ struct ScopePanelView: View {
     let waveform: Waveform?
     let vectorscope: Vectorscope?
     let skinAnalysis: SkinAnalysis?
-    var chromaticity = ChromaticityScope()
     var colorSample: ColorSample?
-    var saturation = SaturationScope()
     var isUpdating = false
     var setScopeMode: (ScopeMode) -> Void = { _ in }
     var clippingEnabled = false
@@ -663,6 +774,10 @@ struct ScopePanelView: View {
     var setFalseColorEnabled: (Bool) -> Void = { _ in }
     var saturationOverlayEnabled = false
     var setSaturationOverlayEnabled: (Bool) -> Void = { _ in }
+    var skinToneOverlayEnabled = false
+    var setSkinToneOverlayEnabled: (Bool) -> Void = { _ in }
+    var neutralCandidatesEnabled = false
+    var setNeutralCandidatesEnabled: (Bool) -> Void = { _ in }
     @AppStorage("scopeMode") private var mode = ScopeMode.histogram
     /// Dragged with the handle below the scope; remembered.
     @AppStorage("scopeHeight.compactInspector") private var height = ScopePanelView.defaultHeight
@@ -682,13 +797,13 @@ struct ScopePanelView: View {
                 VStack(spacing: StudioStyle.Space.compact) {
                     if falseColorEnabled { FalseColorLegend().padding(.horizontal, 3) }
                     if saturationOverlayEnabled { SaturationOverlayLegend().padding(.horizontal, 3) }
+                    if skinToneOverlayEnabled { SkinToneOverlayLegend().padding(.horizontal, 3) }
+                    if neutralCandidatesEnabled { NeutralCandidateLegend().padding(.horizontal, 3) }
                     switch mode {
                     case .histogram: HistogramView(histogram: histogram)
                     case .waveform: WaveformView(waveform: waveform)
                     case .vectorscope: VectorscopeView(vectorscope: vectorscope, skinOnly: false)
                     case .skin: VectorscopeView(vectorscope: vectorscope, skinOnly: true, skinAnalysis: skinAnalysis)
-                    case .chromaticity: ChromaticityView(scope: chromaticity)
-                    case .saturation: SaturationScopeView(scope: histogram == nil ? nil : saturation)
                     case .picker: ColorPickerScopeView(sample: colorSample)
                     }
                 }
@@ -757,7 +872,27 @@ struct ScopePanelView: View {
                 }
                 .buttonStyle(.borderless)
                 .accessibilityLabel("Saturation overlay")
-                .help("Show a saturation heat map over the finished photograph: blue is low, red is high.")
+                .help("Show the color-space-aware saturation map over the developed photograph.")
+                Button {
+                    setSkinToneOverlayEnabled(!skinToneOverlayEnabled)
+                } label: {
+                    Image(systemName: skinToneOverlayEnabled ? "person.crop.circle.fill" : "person.crop.circle")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(skinToneOverlayEnabled ? Color.yellow : Color.secondary)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Skin tone overlay")
+                .help("Mark skin-hue pixels by their position relative to the vectorscope skin-tone line.")
+                Button {
+                    setNeutralCandidatesEnabled(!neutralCandidatesEnabled)
+                } label: {
+                    Image(systemName: neutralCandidatesEnabled ? "circle.lefthalf.filled" : "circle.lefthalf.striped.horizontal")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(neutralCandidatesEnabled ? Color.green : Color.secondary)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Highlight neutrals")
+                .help("Highlight pixels whose RGB channels are each within 2% and whose mean brightness exceeds 10%.")
                 Spacer()
                 Text(mode.signalLabel)
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
@@ -801,13 +936,27 @@ struct ScopePanelView: View {
     }
 }
 
+private struct NeutralCandidateLegend: View {
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle().fill(Color.green).frame(width: 7, height: 7)
+            Text("RGB channel spread <2% · mean brightness >10%")
+                .font(.system(size: 8, weight: .medium, design: .monospaced))
+                .foregroundStyle(Theme.dim)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+            Spacer(minLength: 0)
+        }
+    }
+}
+
 private struct FalseColorLegend: View {
     private let stops: [(String, Color)] = [
-        ("0", Color(red: 0.05, green: 0.03, blue: 0.2)), ("10", Color(red: 0.13, green: 0.18, blue: 0.75)),
-        ("25", Color(red: 0, green: 0.64, blue: 0.87)), ("44", Color(red: 0, green: 0.7, blue: 0.35)),
-        ("58", Color(red: 0.88, green: 0.82, blue: 0)), ("70", Color(red: 1, green: 0.52, blue: 0)),
-        ("85", Color(red: 0.88, green: 0.13, blue: 0.11)), ("96", Color(red: 0.84, green: 0.13, blue: 0.77)),
-        ("100", Color(white: 0.96))
+        (".02", Color(red: 0.00, green: 0.04, blue: 0.04)), (".08", Color(red: 0.05, green: 0.09, blue: 0.19)),
+        (".14", Color(red: 0.05, green: 0.17, blue: 0.28)), (".22", Color(red: 0.13, green: 0.29, blue: 0.21)),
+        (".33", Color(red: 0.18, green: 0.40, blue: 0.27)), (".46", Color(red: 0.46, green: 0.46, blue: 0.46)),
+        (".60", Color(red: 0.67, green: 0.65, blue: 0.22)), (".73", Color(red: 0.62, green: 0.39, blue: 0.18)),
+        (".91", Color(red: 0.33, green: 0.15, blue: 0.07)), (".96+", Color(red: 0.26, green: 0.05, blue: 0.05))
     ]
 
     var body: some View {
@@ -818,106 +967,76 @@ private struct FalseColorLegend: View {
                     Text(stop.0).font(.system(size: 8, weight: .medium, design: .monospaced)).foregroundStyle(.secondary)
                 }
             }
-            Text("IRE").font(.system(size: 8, weight: .semibold, design: .monospaced)).foregroundStyle(.tertiary)
+            Text("Y").font(.system(size: 8, weight: .semibold, design: .monospaced)).foregroundStyle(.tertiary)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("False color exposure scale in IRE")
+        .accessibilityLabel("Rec.709 luma false color scale using the Mono Balance exposure bands")
     }
 }
 
 private struct SaturationOverlayLegend: View {
     var body: some View {
-        HStack(spacing: 6) {
-            Text("SAT").font(.system(size: 8, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.tertiary)
-            LinearGradient(colors: [.blue, .cyan, .green, .yellow, .red], startPoint: .leading, endPoint: .trailing)
-                .frame(height: 5).clipShape(Capsule())
-            Text("LOW").font(.system(size: 8, weight: .medium, design: .monospaced)).foregroundStyle(.secondary)
-            Text("HIGH").font(.system(size: 8, weight: .medium, design: .monospaced)).foregroundStyle(.secondary)
+        let colors = [Color(red: 0.00, green: 0.04, blue: 0.04),
+                      Color(red: 0.03, green: 0.06, blue: 0.12),
+                      Color(red: 0.05, green: 0.09, blue: 0.19),
+                      Color(red: 0.05, green: 0.17, blue: 0.28),
+                      Color(red: 0.13, green: 0.29, blue: 0.21),
+                      Color(red: 0.18, green: 0.40, blue: 0.27),
+                      Color(red: 0.46, green: 0.46, blue: 0.46),
+                      Color(red: 0.67, green: 0.65, blue: 0.22),
+                      Color(red: 0.62, green: 0.39, blue: 0.18),
+                      Color(red: 0.52, green: 0.25, blue: 0.22),
+                      Color(red: 0.41, green: 0.19, blue: 0.16),
+                      Color(red: 0.37, green: 0.07, blue: 0.07),
+                      Color(red: 0.30, green: 0.01, blue: 0.01)]
+        VStack(spacing: 3) {
+            HStack(spacing: 6) {
+                Text("SAT").font(.system(size: 8, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                HStack(spacing: 0) {
+                    ForEach(Array(colors.enumerated()), id: \.offset) { _, color in
+                        Rectangle().fill(color)
+                    }
+                }
+                .frame(height: 7)
+                Text("0–100%").font(.system(size: 8, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            HStack(spacing: 3) {
+                Text("0–1% near-neutral")
+                Spacer(minLength: 2)
+                Text("16–22% midrange").foregroundStyle(Color(red: 0.72, green: 0.72, blue: 0.44))
+                Spacer(minLength: 2)
+                Text("74%+ strong · no fixed target")
+            }
+            .font(.system(size: 7, weight: .medium, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Saturation overlay scale: blue is low saturation, red is high")
+        .accessibilityLabel("DCTL saturation bands from near neutral to high saturation. No fixed saturation level is an ideal for every image.")
     }
 }
 
-private struct ChromaticityView: View {
-    let scope: ChromaticityScope
-    private let spectralLocus: [(Double, Double)] = [
-        (0.175,0.005),(0.174,0.005),(0.161,0.016),(0.144,0.030),(0.124,0.058),
-        (0.091,0.133),(0.045,0.295),(0.008,0.538),(0.014,0.751),(0.074,0.835),
-        (0.155,0.806),(0.230,0.754),(0.302,0.692),(0.373,0.625),(0.444,0.555),
-        (0.512,0.487),(0.575,0.424),(0.627,0.373),(0.666,0.334),(0.692,0.308),
-        (0.710,0.290),(0.724,0.276),(0.735,0.265),(0.758,0.242),(0.735,0.265)
-    ]
-    private let planckian: [(Double, Double)] = [
-        (0.653,0.344),(0.582,0.391),(0.527,0.413),(0.477,0.414),(0.437,0.404),
-        (0.381,0.377),(0.345,0.352),(0.314,0.324),(0.281,0.288)
-    ]
-
+private struct SkinToneOverlayLegend: View {
     var body: some View {
-        Canvas { context, size in
-            let plot = CGRect(x: 8, y: 5, width: max(1, size.width - 16), height: max(1, size.height - 10))
-            context.fill(Path(roundedRect: plot, cornerRadius: 5), with: .color(StudioStyle.plot))
-            func point(_ xy: (Double, Double)) -> CGPoint {
-                CGPoint(x: plot.minX + plot.width * xy.0 / 0.8,
-                        y: plot.maxY - plot.height * xy.1 / 0.9)
-            }
-            var grid = Path()
-            for x in stride(from: 0.2, through: 0.8, by: 0.2) {
-                let p = point((x, 0)); grid.move(to: CGPoint(x: p.x, y: plot.minY)); grid.addLine(to: CGPoint(x: p.x, y: plot.maxY))
-            }
-            for y in stride(from: 0.2, through: 0.8, by: 0.2) {
-                let p = point((0, y)); grid.move(to: CGPoint(x: plot.minX, y: p.y)); grid.addLine(to: CGPoint(x: plot.maxX, y: p.y))
-            }
-            context.stroke(grid, with: .color(Theme.line), lineWidth: 0.55)
-
-            var locus = Path()
-            for (index, xy) in spectralLocus.enumerated() {
-                let p = point(xy)
-                if index == 0 { locus.move(to: p) } else { locus.addLine(to: p) }
-            }
-            locus.closeSubpath()
-            context.fill(locus, with: .color(Color(red: 0.35, green: 0.24, blue: 0.08).opacity(0.22)))
-            context.stroke(locus, with: .color(Theme.dim.opacity(0.76)), lineWidth: 0.8)
-
-            func gamut(_ vertices: [(Double, Double)], color: Color, dash: [CGFloat] = []) {
-                var path = Path()
-                for (i, xy) in vertices.enumerated() { i == 0 ? path.move(to: point(xy)) : path.addLine(to: point(xy)) }
-                path.closeSubpath()
-                context.stroke(path, with: .color(color.opacity(0.85)), style: StrokeStyle(lineWidth: 0.9, dash: dash))
-            }
-            gamut([(0.64,0.33),(0.30,0.60),(0.15,0.06)], color: Theme.label)
-            gamut([(0.708,0.292),(0.170,0.797),(0.131,0.046)], color: Theme.accent, dash: [3,2])
-            var blackBody = Path()
-            for (i, xy) in planckian.enumerated() { i == 0 ? blackBody.move(to: point(xy)) : blackBody.addLine(to: point(xy)) }
-            context.stroke(blackBody, with: .color(Color(red: 0.40, green: 0.86, blue: 0.57)), style: StrokeStyle(lineWidth: 1, dash: [3,2]))
-
-            if scope.bins.count == scope.size * scope.size, let peak = scope.bins.max(), peak > 0 {
-                for y in 0..<scope.size { for x in 0..<scope.size {
-                    let count = scope.bins[y * scope.size + x]
-                    guard count > 0 else { continue }
-                    let xy = (Double(x) / Double(scope.size - 1) * 0.8, Double(y) / Double(scope.size - 1) * 0.9)
-                    let p = point(xy)
-                    let strength = min(0.78, 0.10 + log1p(Double(count)) / log1p(Double(peak)) * 0.65)
-                    let d = max(1.2, min(3.2, plot.width / CGFloat(scope.size) * 1.35))
-                    context.fill(Path(ellipseIn: CGRect(x: p.x-d/2, y: p.y-d/2, width: d, height: d)),
-                                 with: .color(Theme.accent.opacity(strength)))
-                }}
-            }
-            let d65 = point((0.3127,0.3290)), equalEnergy = point((1.0/3,1.0/3))
-            for (p, color) in [(d65, Theme.accent), (equalEnergy, Theme.warn)] {
-                var cross = Path(); cross.move(to: CGPoint(x:p.x-3,y:p.y)); cross.addLine(to: CGPoint(x:p.x+3,y:p.y))
-                cross.move(to: CGPoint(x:p.x,y:p.y-3)); cross.addLine(to: CGPoint(x:p.x,y:p.y+3))
-                context.stroke(cross, with: .color(color), lineWidth: 1.1)
-            }
-            context.draw(Text("D65").font(.system(size: 8, weight: .semibold, design: .monospaced)).foregroundColor(Theme.accent), at: CGPoint(x:d65.x+13,y:d65.y-6))
-            context.draw(Text("Rec.709  ·  Rec.2020  ·  Planckian locus").font(.system(size: 8, design: .monospaced)).foregroundColor(Theme.dim), at: CGPoint(x: plot.midX, y: plot.maxY-8))
+        HStack(spacing: 5) {
+            Circle().fill(Color.yellow).frame(width: 7, height: 7)
+            Text("Skin-tone line")
+            Circle().fill(Color(red: 0.92, green: 0.08, blue: 0.78)).frame(width: 7, height: 7)
+            Text("Magenta")
+            Circle().fill(Color.green).frame(width: 7, height: 7)
+            Text("Green")
+            Text("· hue guide, not a skin mask")
+                .foregroundStyle(.tertiary)
+            Spacer(minLength: 0)
         }
-        .padding(5)
-        .background(StudioStyle.panel, in: RoundedRectangle(cornerRadius: StudioStyle.Radius.panel))
-        .overlay(RoundedRectangle(cornerRadius: StudioStyle.Radius.panel).strokeBorder(StudioStyle.outline, lineWidth: 0.8))
-        .accessibilityElement().accessibilityLabel("CIE 1931 xy chromaticity diagram")
-        .accessibilityValue("Developed image chromaticity distribution with Rec. 709 and Rec. 2020 gamuts and the Planckian locus")
+        .font(.system(size: 8, weight: .medium, design: .monospaced))
+        .foregroundStyle(Theme.dim)
+        .lineLimit(1)
+        .minimumScaleFactor(0.72)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Skin hue guide: yellow is near the skin-tone line, magenta indicates magenta deviation, and green indicates green deviation. This is not a skin mask.")
     }
 }
 
@@ -986,19 +1105,30 @@ private struct VectorscopeView: View {
                     context.stroke(Path(ellipseIn: rect), with: .color(.primary.opacity(opacity)),
                                    lineWidth: fraction == 1 ? 0.9 : 0.65)
                 }
+                var ticks = Path()
+                for index in 0..<72 {
+                    let angle = Double(index) * .pi / 36
+                    let major = index % 6 == 0
+                    let inner = radius - (major ? 7.0 : 3.5)
+                    ticks.move(to: CGPoint(x: center.x + cos(angle) * inner,
+                                           y: center.y - sin(angle) * inner))
+                    ticks.addLine(to: CGPoint(x: center.x + cos(angle) * radius,
+                                              y: center.y - sin(angle) * radius))
+                }
+                context.stroke(ticks, with: .color(Color(red: 0.58, green: 0.46, blue: 0.12).opacity(0.8)), lineWidth: 0.65)
                 var cross = Path()
                 cross.move(to: CGPoint(x: center.x - radius, y: center.y)); cross.addLine(to: CGPoint(x: center.x + radius, y: center.y))
                 cross.move(to: CGPoint(x: center.x, y: center.y - radius)); cross.addLine(to: CGPoint(x: center.x, y: center.y + radius))
                 context.stroke(cross, with: .color(.primary.opacity(0.28)), lineWidth: 0.8)
 
-                for (label, degrees, hue) in targets {
+                for (label, degrees, _) in targets {
                     let angle = degrees * .pi / 180
-                    let tint = Color(hue: hue, saturation: 0.78, brightness: 0.96)
+                    let tint = Color(red: 0.62, green: 0.49, blue: 0.15)
                     var spoke = Path()
                     spoke.move(to: center)
                     spoke.addLine(to: CGPoint(x: center.x + cos(angle) * radius,
                                               y: center.y - sin(angle) * radius))
-                    context.stroke(spoke, with: .color(tint.opacity(0.11)), lineWidth: 0.65)
+                    context.stroke(spoke, with: .color(tint.opacity(0.08)), lineWidth: 0.55)
 
                     // The small outlined squares mark the broadcast 75% hue targets.
                     let targetCenter = CGPoint(x: center.x + cos(angle) * radius * 0.75,
@@ -1008,11 +1138,11 @@ private struct VectorscopeView: View {
                                             y: targetCenter.y - targetSize / 2,
                                             width: targetSize, height: targetSize)
                     context.stroke(Path(roundedRect: targetRect, cornerRadius: 1.5),
-                                   with: .color(tint.opacity(0.62)), lineWidth: 0.8)
+                                   with: .color(tint.opacity(0.84)), lineWidth: 0.8)
                     let labelCenter = CGPoint(x: center.x + cos(angle) * radius * 1.13,
                                               y: center.y - sin(angle) * radius * 1.13)
-                    context.draw(Text(label).font(.system(size: 9, weight: .bold, design: .rounded))
-                        .foregroundColor(tint.opacity(0.88)), at: labelCenter)
+                    context.draw(Text(label).font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundColor(tint.opacity(0.95)), at: labelCenter)
                 }
 
                 guard let vectorscope else { return }
@@ -1024,7 +1154,8 @@ private struct VectorscopeView: View {
                         .foregroundColor(.secondary), at: center)
                     return
                 }
-                let peak = Double(max(1, counts.max() ?? 1))
+                let occupied = counts.filter { $0 > 0 }.sorted()
+                let reference = Double(occupied.isEmpty ? 1 : occupied[min(occupied.count - 1, Int(Double(occupied.count - 1) * 0.98))])
                 for y in 0..<vectorscope.size {
                     for x in 0..<vectorscope.size {
                         let count = counts[y * vectorscope.size + x]
@@ -1038,12 +1169,9 @@ private struct VectorscopeView: View {
                         // hard-edged, opaque blob.
                         let dot = max(1.35, side / CGFloat(vectorscope.size) * 0.92)
                         let rect = CGRect(x: point.x - dot / 2, y: point.y - dot / 2, width: dot, height: dot)
-                        let density = log1p(Double(count)) / log1p(peak)
-                        let strength = min(0.62, 0.055 + pow(density, 0.72) * 0.48)
-                        let angle = atan2(-ny, nx) * 180 / .pi
-                        let tint = skinOnly
-                            ? Color(hue: 0.105, saturation: 0.82, brightness: 1)
-                            : Color(hue: vectorscopeHue(for: angle), saturation: 0.9, brightness: 1)
+                        let density = min(1, Double(count) / reference)
+                        let strength = min(0.92, 0.10 + pow(density, 0.55) * 0.78)
+                        let tint = skinOnly ? Color(red: 1.0, green: 0.84, blue: 0.28) : .white
                         context.fill(Path(ellipseIn: rect), with: .color(tint.opacity(strength)))
                     }
                 }
@@ -1078,22 +1206,4 @@ private struct VectorscopeView: View {
         .accessibilityElement().accessibilityLabel(skinOnly ? "Skin tone vectorscope" : "Vectorscope")
         .accessibilityValue(skinOnly ? skinAnalysis?.status ?? "No developed photograph" : "Chroma distribution of the developed photograph")
     }
-}
-
-/// Maps Rec.709 Cb/Cr hue angles to the familiar R/Y/G/C/B/M signal colors.
-private func vectorscopeHue(for angle: Double) -> Double {
-    let anchors: [(angle: Double, hue: Double)] = [
-        (49, 5.0 / 6), (103, 0), (175, 1.0 / 6),
-        (230, 2.0 / 6), (283, 3.0 / 6), (355, 4.0 / 6), (409, 5.0 / 6)
-    ]
-    var value = angle.truncatingRemainder(dividingBy: 360)
-    if value < 49 { value += 360 }
-    for pair in zip(anchors, anchors.dropFirst()) where value <= pair.1.angle {
-        let (start, end) = pair
-        var endHue = end.hue
-        if endHue < start.hue { endHue += 1 }
-        let fraction = (value - start.angle) / (end.angle - start.angle)
-        return (start.hue + (endHue - start.hue) * fraction).truncatingRemainder(dividingBy: 1)
-    }
-    return 0
 }

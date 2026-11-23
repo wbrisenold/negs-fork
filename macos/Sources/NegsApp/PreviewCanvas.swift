@@ -623,16 +623,11 @@ final class PhotographView: NSView {
         if maskPaintingEnabled, let maskStrokeBegan, let point = normalizedPhotoPoint(event) {
             paintingMask = true
             maskStrokeBegan(point)
-        } else if colorPickTapEnabled, let colorPicked {
-            let point = convert(event.locationInWindow, from: nil)
-            let size = displaySize
-            let photoRect = CGRect(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2,
-                                   width: size.width, height: size.height)
-            guard photoRect.contains(point), size.width > 0, size.height > 0 else { return }
-            var normalized = CGPoint(x: (point.x - photoRect.minX) / photoRect.width,
-                                     y: 1 - (point.y - photoRect.minY) / photoRect.height)
-            if turned { normalized = CGPoint(x: 1 - normalized.x, y: 1 - normalized.y) }
-            colorPicked(normalized)
+        } else if colorPickTapEnabled, let colorPicked, let point = normalizedPhotoPoint(event) {
+            // Convert through the actual photo layer so crop, straighten,
+            // quarter-turn, zoom, and the temporary upside-down view all map
+            // to the pixel under the pointer.
+            colorPicked(point)
         } else if event.clickCount == 2, let scroll = enclosingScrollView as? ImageScrollView {
             scroll.doubleClicked()
         } else if !grabbing { grabbing = true; NSCursor.closedHand.push() }

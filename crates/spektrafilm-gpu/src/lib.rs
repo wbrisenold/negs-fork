@@ -247,8 +247,34 @@ pub struct DisplayPost {
     /// Linear luminance → adjusted linear luminance, sampled on √Y.
     pub tone: Vec<f32>,
     pub color_separation: DisplayColorSeparation,
+    pub skin_shaper: DisplaySkinShaper,
     pub film_compression: DisplayFilmCompression,
     pub film_expand: DisplayFilmExpand,
+    pub relight_enabled: bool,
+    pub relight_strength: f32,
+    pub relight_lights: [DisplayRelightLight; 3],
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct DisplayRelightLight {
+    pub enabled: bool,
+    pub x: f32,
+    pub y: f32,
+    pub radius: f32,
+    pub intensity: f32,
+    pub color: [f32; 3],
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct DisplaySkinShaper {
+    pub global_sat: f32,
+    pub global_dens: f32,
+    pub hue_rotate: f32,
+    pub hue_center: f32,
+    pub hue_range: f32,
+    pub sigmoid_shift: f32,
+    pub bellcurve_width: f32,
+    pub phighlighter: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

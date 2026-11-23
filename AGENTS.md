@@ -28,6 +28,22 @@
 ## Build and package
 
 - Use `scripts/package_macos_app.sh` for a local app bundle. To build only Intel, set `MACOS_ARCHS=x86_64`. Verify the architecture with `lipo -archs` and the bundle with `scripts/verify_macos_package.py`.
+- For iterative macOS UI work and screenshot review, build the cached Intel **debug** executable instead of rebuilding the optimized release app and DMG after every edit. Reuse the SwiftPM cache, then stage the executable into the existing packaged app bundle so LaunchServices supplies the app identity and the native helper, data, and resources are available:
+
+  ```sh
+  rtk swift build --package-path macos \
+    --scratch-path target/macos-app/swift-x86_64-apple-macosx14.0 \
+    -c debug --triple x86_64-apple-macosx14.0
+  mkdir -p target/macos-app/debug-app
+  rm -rf target/macos-app/debug-app/Negs.app
+  ditto dist/negs-macos/Negs.app target/macos-app/debug-app/Negs.app
+  cp target/macos-app/swift-x86_64-apple-macosx14.0/x86_64-apple-macosx/debug/NegsApp \
+    target/macos-app/debug-app/Negs.app/Contents/MacOS/NegsApp
+  codesign --force --deep --sign - target/macos-app/debug-app/Negs.app
+  open -na target/macos-app/debug-app/Negs.app
+  ```
+
+  This reuses SwiftPM's debug cache and the helpers/resources from the existing Intel package. Use the release packaging script for the final Intel bundle/DMG and package acceptance, not for each visual iteration. Keep local caches with `CLEAN_BUILD_CACHE=0` when packaging during an iteration. Do not run debug and release builds concurrently.
 - Serialize local builds: run only one Cargo, SwiftPM, or packaging build at a time. Do not start a second build while one is running, including from another terminal or agent.
 - Reuse the established local outputs (`target/macos-app` for packaged app builds and SwiftPM scratch output under it); do not create dated, per-feature, or duplicate build directories. For this Intel workstation, use `MACOS_ARCHS=x86_64` and the default `BUILD_TARGET_DIR=target/macos-app`.
 - After a successful local package, `scripts/package_macos_app.sh` removes `target/macos-app`, the Intel test cache at `target/x86_64-apple-darwin`, and `target/debug`; the app and releases remain in `dist/`, and `target/release` is preserved. Set `CLEAN_BUILD_CACHE=0` to retain local caches when iterating.
