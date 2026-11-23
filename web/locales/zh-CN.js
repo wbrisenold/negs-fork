@@ -118,6 +118,12 @@ window.NEGS_I18N.dict = {
   "Negative exposure (EV)": "负片曝光 (EV)",
   "Film format (mm)": "胶片规格 (mm)",
   "Lens blur (µm)": "镜头模糊 (µm)",
+  "Color Filter": "滤色镜",
+  "Color filter": "滤色镜",
+  "Green": "绿",
+  "Yellow-green": "黄绿",
+  "Orange": "橙",
+  "Red": "红",
   "Lens Diffusion": "镜头柔光",
   "Filter": "滤镜",
   "Strength": "强度",
@@ -196,6 +202,7 @@ window.NEGS_I18N.dict = {
   "Scan & Color": "扫描与色彩",
   "Scanner": "扫描仪",
   "Lens blur (px)": "镜头模糊 (px)",
+  "Color noise reduction": "彩色噪点抑制",
   "Unsharp radius (px)": "锐化半径 (px)",
   "Unsharp amount": "锐化强度",
   "White correction": "白场校正",
@@ -271,9 +278,12 @@ window.NEGS_I18N.dict = {
   "Fotufilm films": "Fotufilm 胶片",
   "All": "全部",
   "From datasheets": "仅限数据表",
-  "None": "不显示",
+  "None": "无",
   "Films ported from Fotufilm. From datasheets hides the eight it models from sample photographs rather than the manufacturer’s data. Photos already using a hidden film keep it.":
     "从 Fotufilm 移植的胶片。“仅限数据表”会隐藏其中八款根据样片而非厂商数据建模的胶片。已在使用被隐藏胶片的照片会保留它。",
+  "Show Negs-built films": "显示 Negs 自制胶片",
+  "Films Negs prepared itself from Fujifilm’s datasheets, still being checked: the Eterna cine films; Pro 160S, 160C and 800Z, Superia 1600 and True Definition 400; and the Velvia 100F, Provia 400F and 400X, Sensia and 64T slides. Photos already using one keep it.":
+    "Negs 根据富士数据表自行制作、仍在核查中的胶片：Eterna 电影胶片；Pro 160S、160C 和 800Z、Superia 1600 与 True Definition 400；以及 Velvia 100F、Provia 400F 和 400X、Sensia 与 64T 反转片。已在使用其中某款的照片会保留它。",
   "Match new RAWs to camera brightness": "新 RAW 匹配相机亮度",
   "Start each RAW you open as bright as the camera showed it (Prep › Match camera brightness).":
     "打开的每张 RAW 都以相机呈现的亮度起步（预处理 › 匹配相机亮度）。",
@@ -647,6 +657,7 @@ window.NEGS_I18N.dict = {
   "How unevenly the veil falls across the print, as on a textured surface.": "这层薄纱落在照片上的不均匀程度，如同落在粗糙的表面上。",
   "Softens the veil’s unevenness, in pixels.": "柔化薄纱的不均匀分布，以像素计。",
   "Softness of the scanner’s lens, in pixels. 0 is off.": "扫描仪镜头的柔和程度，以像素计。0 为关闭。",
+  "Takes the colour out of the grain, as a lab scanner’s software does: the grain keeps its texture, but its red, green and blue specks turn neutral. Colour edges stay put. 0 is off.": "像冲印店扫描仪的软件那样去除颗粒中的色彩：颗粒保留其质感，但红、绿、蓝色斑变为中性。色彩边缘保持不变。0 为关闭。",
   "The radius of the scanner’s sharpening, in pixels.": "扫描仪锐化的半径，以像素计。",
   "The strength of the scanner’s sharpening. 0 is off, for sharpening later in another app.":
     "扫描仪锐化的强度。0 为关闭，留待之后在其他应用中锐化。",
@@ -689,7 +700,7 @@ window.NEGS_I18N.dict = {
   "Shapes how the paper develops: its contrast, per layer and per colour.": "塑造相纸的显影：各层、各色的反差。",
   "The colour and density of the paper itself, its whitest white.": "相纸本身的色彩与密度，即它的最白。",
   "Room light reflecting off the print’s surface.": "室内光在照片表面的反射。",
-  "Scans the finished print: sharpness and black and white points.": "扫描完成的照片：锐度和黑白场。",
+  "Scans the finished print: sharpness, colour noise, and black and white points.": "扫描完成的照片：锐度、彩色噪点和黑白场。",
   "How colours enter and leave the spectral simulation.": "颜色如何进出光谱模拟。",
   "How the file’s values are read: its colour space and curve.": "文件数值如何读取：色彩空间与曲线。",
   "The colour space the preview develops in.": "预览显影所用的色彩空间。",
@@ -722,6 +733,22 @@ window.NEGS_I18N.dict = {
 
   // ---- Prep › Exposure 的两种说明（app.js helpFor）----------------------------------
 
+  "No glass in front of the lens.": "镜头前不加滤镜。",
+  "Lightens foliage; darkens red lips and skin a little, for a tanned look.": "提亮树叶；红唇和皮肤略微变深，像晒过太阳。",
+  "Lightens foliage and darkens the sky a little. Kind to skin outdoors.": "提亮树叶，天空略微变暗。户外人像肤色自然。",
+  "Darkens blue sky a touch so clouds stand out. The everyday filter.": "蓝天略微变暗，云朵更突出。最常用的滤色镜。",
+  "Darker sky, stronger clouds, less haze. Hides freckles and blemishes.": "天空更暗，云层更醒目，雾霭更少。能淡化雀斑和瑕疵。",
+  "Near-black blue sky, bright red and brick, pale skin and lips. Cuts haze hard.": "蓝天近乎全黑，红色和砖墙变亮，皮肤和嘴唇发白。强力穿透雾霭。",
+  "Taking filters are made for black-and-white film. On colour film this one tints the whole photograph.":
+    "拍摄用滤色镜是为黑白胶片设计的。用在彩色胶片上，它会让整张照片偏色。",
+  "Takes {stops} stop on {film}; auto exposure gives it.": "在 {film} 上损失 {stops} 挡光；自动曝光会补回。",
+  "Takes {stops} stops on {film}; auto exposure gives it.": "在 {film} 上损失 {stops} 挡光；自动曝光会补回。",
+  "Takes {stops} stop on {film}.": "在 {film} 上损失 {stops} 挡光。",
+  "Takes {stops} stops on {film}.": "在 {film} 上损失 {stops} 挡光。",
+  "Which colours the glass holds back. The film’s own spectral sensitivity decides how much lighter or darker each turns grey.":
+    "滤色镜挡住哪些颜色。每种颜色变成多浅或多深的灰，由胶片自身的光谱感光度决定。",
+  "A coloured glass in front of the lens for black-and-white film. It changes which colours turn light or dark grey, from the film’s own spectral sensitivity, not as a tint.":
+    "黑白胶片用的镜头前彩色玻璃。它按胶片自身的光谱感光度，改变哪些颜色变成浅灰或深灰，而不是给照片染色。",
   "Brighter or darker than the match, in stops. It stays when the match changes with the film, paper or a preset.":
     "相对匹配亮度的增减，以挡为单位。随胶片、相纸或预设改变匹配时，它会保留。",
   "Brightens or darkens the scene before the film, in stops. Unlike Negative exposure, the print doesn’t make up for it.":

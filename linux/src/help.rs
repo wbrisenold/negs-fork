@@ -373,6 +373,10 @@ const PATHS: &[(&str, &str)] = &[
         "Softness of the scanner’s lens, in pixels. 0 is off.",
     ),
     (
+        "scanner.chroma_noise_reduction",
+        "Takes the colour out of the grain, as a lab scanner’s software does: the grain keeps its texture, but its red, green and blue specks turn neutral. Colour edges stay put. 0 is off.",
+    ),
+    (
         "scanner.unsharp_mask.0",
         "The radius of the scanner’s sharpening, in pixels.",
     ),
@@ -421,6 +425,10 @@ const GROUPS: &[(&str, &str)] = &[
         "A diffusion filter on the camera lens: highlights bloom into a soft halo.",
     ),
     (
+        "Color Filter",
+        "A coloured glass in front of the lens for black-and-white film. It changes which colours turn light or dark grey, from the film’s own spectral sensitivity, not as a tint.",
+    ),
+    (
         "Film Curves",
         "Shapes how the film develops: its contrast, per layer and per colour.",
     ),
@@ -455,7 +463,7 @@ const GROUPS: &[(&str, &str)] = &[
     ("Glare", "Room light reflecting off the print’s surface."),
     (
         "Scanner",
-        "Scans the finished print: sharpness and black and white points.",
+        "Scans the finished print: sharpness, colour noise, and black and white points.",
     ),
     (
         "Color Management",
@@ -624,7 +632,10 @@ mod tests {
         assert_eq!(swift_pairs(swift, "paths"), own(PATHS));
         assert_eq!(swift_pairs(swift, "groups"), own(GROUPS));
         assert!(swift.contains(&format!("static let film = \"{FILM}\"")));
-        assert!(swift.contains(&format!("static let paper = \"{PAPER}\"")));
+        // The Mac keeps the paper with a lock by "printed on"; here it's
+        // still the Settings toggle, so only the clause before "unless" is shared.
+        let shared = PAPER.split(", unless").next().unwrap();
+        assert!(swift.contains(&format!("static let paper = \"{shared}, unless ")));
     }
 
     #[test]

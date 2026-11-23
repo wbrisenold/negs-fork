@@ -32,6 +32,7 @@ export const PATHS = {
   // Lab: camera
   "camera.exposure_compensation_ev": "Over- or underexposes the film. With Enlarger › Exposure compensation on (the default), the print makes up for it: mid-tones keep their brightness while the negative’s density, grain and highlight and shadow detail change. To make the photograph brighter, use Prep › Exposure.",
   "camera.film_format_mm": "The film the photograph was taken on, by the frame’s long edge. Grain, halation, scatter and diffusion are all sized on the film, so a smaller format shows them larger.",
+  "camera.color_filter": "Which colours the glass holds back. The film’s own spectral sensitivity decides how much lighter or darker each turns grey.",
   "camera.lens_blur_um": "Softness of the taking lens, measured on the film. 0 is a perfect lens.",
 
   // Lens Diffusion
@@ -118,6 +119,7 @@ export const PATHS = {
   // Scanner
   "scanner.lens_blur": "Softness of the scanner’s lens, in pixels. 0 is off.",
   "scanner.unsharp_mask.0": "The radius of the scanner’s sharpening, in pixels.",
+  "scanner.chroma_noise_reduction": "Takes the colour out of the grain, as a lab scanner’s software does: the grain keeps its texture, but its red, green and blue specks turn neutral. Colour edges stay put. 0 is off.",
   "scanner.unsharp_mask.1": "The strength of the scanner’s sharpening. 0 is off, for sharpening later in another app.",
   "scanner.white_correction": "Sets the scan’s lightest tone to White level. Off, the highlights stay where the paper puts them. Mostly for slides.",
   "scanner.white_level": "The lightest tone with White correction on. 1 is full white.",
@@ -151,6 +153,7 @@ export const PATHS = {
 };
 
 export const GROUPS = {
+  "Color Filter": "A coloured glass in front of the lens for black-and-white film. It changes which colours turn light or dark grey, from the film’s own spectral sensitivity, not as a tint.",
   "Lens Diffusion": "A diffusion filter on the camera lens: highlights bloom into a soft halo.",
   "Film Curves": "Shapes how the film develops: its contrast, per layer and per colour.",
   "Grain": "The film’s silver grain, drawn from the stock’s measured granularity.",
@@ -161,7 +164,7 @@ export const GROUPS = {
   "Print Curves": "Shapes how the paper develops: its contrast, per layer and per colour.",
   "Print Base": "The colour and density of the paper itself, its whitest white.",
   "Glare": "Room light reflecting off the print’s surface.",
-  "Scanner": "Scans the finished print: sharpness and black and white points.",
+  "Scanner": "Scans the finished print: sharpness, colour noise, and black and white points.",
   "Color Management": "How colours enter and leave the spectral simulation.",
   "Input Colour": "How the file’s values are read: its colour space and curve.",
   "Output": "The colour space the preview develops in.",

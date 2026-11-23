@@ -39,6 +39,9 @@ pub fn solve_neutral_filter_shifts(
     midgray: f64,
 ) -> Result<(f64, f64), String> {
     let mut p = params.clone();
+    // Upstream sets `workflow.route` to the filmed print: the grey card is
+    // filmed even when the photograph is a scanned negative.
+    p.workflow = Default::default();
     p.io.scan_film = false;
     p.settings.use_enlarger_lut = false;
     p.settings.use_scanner_lut = false;
@@ -46,6 +49,7 @@ pub fn solve_neutral_filter_shifts(
     p.io.output_gamut_compress.algorithm = "off".into();
     p.io.output_gamut_compress.lightness_compression = None;
     p.film_render.grain.active = false;
+    p.scanner.chroma_noise_reduction = 0.0;
     p.film_render.glare.active = false;
     p.print_render.glare.active = false;
     p.io.crop = false;

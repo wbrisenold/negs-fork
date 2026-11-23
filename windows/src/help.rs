@@ -4,7 +4,14 @@
 
 /// A control's tooltip. A grain lane (`film_render.grain.rms_granularity.1`)
 /// shares its array's.
+/// Prep › Backlight, on a negative (`NegativeScanRows`; not in the Mac's
+/// `ControlHelp` table).
+pub const SCAN_ILLUMINANT: &str = "The light behind the negative while it was photographed or scanned. Daylight suits most light pads and scanners.";
+
 pub fn text(path: &str) -> Option<&'static str> {
+    if path == crate::negative::SCAN_ILLUMINANT {
+        return Some(SCAN_ILLUMINANT);
+    }
     let lookup = |p: &str| PATHS.iter().find(|(key, _)| *key == p).map(|(_, text)| *text);
     lookup(path).or_else(|| crate::state::grain_lane(path).and_then(|(field, _)| lookup(&format!("film_render.grain.{field}"))))
 }
@@ -14,7 +21,10 @@ pub fn group(title: &str) -> Option<&'static str> {
 }
 
 pub const FILM: &str = "The film the photograph is shot on: its colour response, contrast, grain and halation, from the stock’s measured data.";
-pub const PAPER: &str = "The paper the negative is printed on: its contrast, colour and blacks. Changing the film picks the paper it was made for, unless Settings › Keep paper when changing film is on.";
+pub const PAPER: &str = "The paper the negative is printed on: its contrast, colour and blacks. Changing the film picks the paper it was made for, unless the lock on “printed on”, under the photograph, is closed.";
+/// The paper lock, under the photograph and in the paper tray's foot: open, then closed.
+pub const PAPER_LOCK: &str = "Keep this paper when you change film. Open, a new film brings the paper made for it.";
+pub const PAPER_KEPT: &str = "This paper stays when you change film. Click to let a new film bring the paper made for it.";
 
 const PATHS: &[(&str, &str)] = &[
     // Prep: white balance and brightness
@@ -112,6 +122,7 @@ const PATHS: &[(&str, &str)] = &[
     ("print_render.glare.blur", "Softens the veil’s unevenness, in pixels."),
     // Scanner
     ("scanner.lens_blur", "Softness of the scanner’s lens, in pixels. 0 is off."),
+    ("scanner.chroma_noise_reduction", "Takes the colour out of the grain, as a lab scanner’s software does: the grain keeps its texture, but its red, green and blue specks turn neutral. Colour edges stay put. 0 is off."),
     ("scanner.unsharp_mask.0", "The radius of the scanner’s sharpening, in pixels."),
     ("scanner.unsharp_mask.1", "The strength of the scanner’s sharpening. 0 is off, for sharpening later in another app."),
     ("scanner.white_correction", "Sets the scan’s lightest tone to White level. Off, the highlights stay where the paper puts them. Mostly for slides."),
@@ -127,6 +138,7 @@ const PATHS: &[(&str, &str)] = &[
 
 const GROUPS: &[(&str, &str)] = &[
     ("Lens Diffusion", "A diffusion filter on the camera lens: highlights bloom into a soft halo."),
+    ("Color Filter", "A coloured glass in front of the lens for black-and-white film. It changes which colours turn light or dark grey, from the film’s own spectral sensitivity, not as a tint."),
     ("Film Curves", "Shapes how the film develops: its contrast, per layer and per colour."),
     ("Grain", "The film’s silver grain, drawn from the stock’s measured granularity."),
     ("Halation", "Light scattering inside the film and bouncing back off its base: a red glow around bright highlights."),
@@ -136,7 +148,7 @@ const GROUPS: &[(&str, &str)] = &[
     ("Print Curves", "Shapes how the paper develops: its contrast, per layer and per colour."),
     ("Print Base", "The colour and density of the paper itself, its whitest white."),
     ("Glare", "Room light reflecting off the print’s surface."),
-    ("Scanner", "Scans the finished print: sharpness and black and white points."),
+    ("Scanner", "Scans the finished print: sharpness, colour noise, and black and white points."),
     ("Color Management", "How colours enter and leave the spectral simulation."),
     ("Input Colour", "How the file’s values are read: its colour space and curve."),
     ("Output", "The colour space the preview develops in."),
@@ -167,7 +179,11 @@ mod tests {
         let own = |table: &[(&str, &str)]| table.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect::<Vec<_>>();
         assert_eq!(swift_pairs(swift, "paths"), own(PATHS));
         assert_eq!(swift_pairs(swift, "groups"), own(GROUPS));
-        assert!(swift.contains(&format!("static let film = \"{FILM}\"")) && swift.contains(&format!("static let paper = \"{PAPER}\"")));
+        // The Mac keeps the paper with a lock by "printed on"; here it's
+        // still the Settings toggle, so only the clause before "unless" is shared.
+        let paper = PAPER.split(", unless").next().unwrap();
+        assert!(swift.contains(&format!("static let film = \"{FILM}\"")) && swift.contains(&format!("static let paper = \"{paper}, unless ")));
+        assert!(swift.contains(&format!("static let paperLock = \"{PAPER_LOCK}\"")) && swift.contains(&format!("static let paperKept = \"{PAPER_KEPT}\"")));
     }
 
     /// Every inspector control and group explains itself (`ControlHelpTests`).
@@ -177,7 +193,7 @@ mod tests {
         let mut missing: Vec<&str> = vec![];
         for control in controls {
             match control {
-                Adjustment::BalancePrint { help, .. } => assert!(!help.is_empty()),
+                Adjustment::BalancePrint { help, .. } | Adjustment::FilterLink { help } => assert!(!help.is_empty()),
                 other if text(other.path()).is_none() => missing.push(other.path()),
                 _ => {}
             }

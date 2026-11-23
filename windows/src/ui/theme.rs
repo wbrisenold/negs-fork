@@ -1,7 +1,9 @@
 //! The colours every owner-draw and `WM_CTLCOLOR*` handler uses, one palette
-//! for the whole window: light or dark as the system's app theme says
-//! (switching live), the system colours in high contrast, and the accent
-//! colour from the system.
+//! for the whole window, made from the chosen theme's tokens (the macOS
+//! app's themes, below). The theme doesn't follow the system's light or dark
+//! mode: Plain is always light and Plain dark always dark. A new user starts
+//! on whichever of the two matches Windows (`first_launch_theme`). High
+//! contrast keeps the system colours.
 //!
 //! Dark common controls use the `DarkMode_Explorer` and `DarkMode_CFD`
 //! themes; dark menus and scroll bars need three undocumented uxtheme
@@ -11,6 +13,9 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::sync::LazyLock;
+
+use negs_core_sys::theme as core;
 
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Dwm::*;
@@ -62,6 +67,8 @@ pub struct Palette {
     pub canvas: [u8; 3],
 }
 
+/// The light system palette, for tests of drawing in it.
+#[cfg(test)]
 pub const LIGHT: Palette = Palette {
     window: rgb(0xfb, 0xfb, 0xfb),
     panel: rgb(0xf3, 0xf3, 0xf3),
@@ -82,28 +89,6 @@ pub const LIGHT: Palette = Palette {
     well: rgb(0xe4, 0xe4, 0xe4),
     selection: rgb(0xe5, 0xe5, 0xe5),
     canvas: [0x9a, 0x9a, 0x9a],
-};
-
-pub const DARK: Palette = Palette {
-    window: rgb(0x1c, 0x1c, 0x1c),
-    panel: rgb(0x20, 0x20, 0x20),
-    control: rgb(0x2d, 0x2d, 0x2d),
-    control_hover: rgb(0x32, 0x32, 0x32),
-    control_pressed: rgb(0x27, 0x27, 0x27),
-    subtle_hover: rgb(0x2d, 0x2d, 0x2d),
-    subtle_pressed: rgb(0x29, 0x29, 0x29),
-    border: rgb(0x3a, 0x3a, 0x3a),
-    strong_border: rgb(0x9a, 0x9a, 0x9a),
-    text: rgb(0xf2, 0xf2, 0xf2),
-    secondary: rgb(0xa8, 0xa8, 0xa8),
-    disabled: rgb(0x6e, 0x6e, 0x6e),
-    accent: rgb(0x60, 0xcd, 0xff),
-    accent_hover: rgb(0x5a, 0xbc, 0xe8),
-    accent_pressed: rgb(0x52, 0xab, 0xd2),
-    on_accent: rgb(0x00, 0x00, 0x00),
-    well: rgb(0x2f, 0x2f, 0x2f),
-    selection: rgb(0x33, 0x33, 0x33),
-    canvas: [0x2b, 0x2b, 0x2b],
 };
 
 /// High contrast: the system's colours only.
@@ -143,6 +128,11 @@ pub struct Theme {
 
 thread_local! {
     static CURRENT: Cell<Option<Theme>> = const { Cell::new(None) };
+    /// The theme chosen (View › Theme, kept in the settings).
+    static CHOSEN: Cell<ThemeName> = const { Cell::new(ThemeName::Darkroom) };
+    /// The tokens the window is drawn with: the shown theme's, or the
+    /// system's colours in high contrast.
+    static TOKENS: Cell<Tokens> = const { Cell::new(UNSET) };
     static BRUSHES: RefCell<HashMap<Color, isize>> = RefCell::new(HashMap::new());
 }
 
@@ -178,27 +168,127 @@ pub fn refresh() -> bool {
 
 fn detect() -> Theme {
     if high_contrast() {
-        return Theme { palette: high_contrast_palette(), dark: false, high_contrast: true };
+        let palette = high_contrast_palette();
+        let tokens = high_contrast_tokens(&palette);
+        TOKENS.with(|t| t.set(tokens));
+        return Theme { palette, dark: tokens.dark, high_contrast: true };
     }
-    // NEGS_THEME=light|dark overrides the system for tests and screenshots.
-    let dark = match std::env::var("NEGS_THEME").as_deref() {
-        Ok("dark") => true,
-        Ok("light") => false,
-        _ => apps_use_dark(),
+    let tokens = *shown().tokens();
+    TOKENS.with(|t| t.set(tokens));
+    Theme { palette: palette_of(&tokens), dark: tokens.dark, high_contrast: false }
+}
+
+/// `NEGS_THEME`, for tests and screenshots: a theme's name, or light and
+/// dark for Plain and Plain dark.
+fn forced() -> Option<ThemeName> {
+    let value = std::env::var("NEGS_THEME").ok()?;
+    match value.to_ascii_lowercase().as_str() {
+        "light" => Some(ThemeName::Plain),
+        "dark" => Some(ThemeName::PlainDark),
+        other => ThemeName::parse(other),
+    }
+}
+
+/// The theme a new user starts on: Plain, or Plain dark when Windows'
+/// apps are dark. It's stored at once, so it stays when Windows changes.
+pub fn first_launch_theme() -> ThemeName {
+    if apps_use_dark() { ThemeName::PlainDark } else { ThemeName::Plain }
+}
+
+/// The theme chosen, whatever `NEGS_THEME` forces.
+pub fn chosen() -> ThemeName {
+    CHOSEN.with(Cell::get)
+}
+
+/// Sets the theme chosen; `refresh` then repaints with it.
+pub fn set_chosen(theme: ThemeName) {
+    CHOSEN.with(|c| c.set(theme));
+}
+
+/// Whether `NEGS_THEME` decides the theme (View › Theme then only ticks).
+pub fn forced_by_environment() -> bool {
+    forced().is_some()
+}
+
+/// The theme the window shows: `NEGS_THEME`'s or the chosen one.
+pub fn shown() -> ThemeName {
+    forced().unwrap_or_else(chosen)
+}
+
+/// The tokens the window is drawn with now.
+pub fn tokens() -> Tokens {
+    current();
+    TOKENS.with(Cell::get)
+}
+
+/// The palette's roles from a theme's tokens, for what still paints with
+/// it: the inspector's controls (until phase 3), Settings, the strip.
+fn palette_of(t: &Tokens) -> Palette {
+    let h = &t.hex;
+    let toward_paper = |amount: f64| mix(gdi(h.panel), gdi(h.paper), amount);
+    let control = if t.dark { toward_paper(0.07) } else { mix(gdi(h.panel), gdi(0xffffff), 0.6) };
+    // Words on a filled control: the theme's own on its fill, else
+    // whichever of near black and white reads better on the pencil.
+    let on_accent = if h.accent == h.fill {
+        h.on_fill
+    } else if contrast(h.accent, 0x14120c) >= contrast(h.accent, 0xffffff) {
+        0x14120c
+    } else {
+        0xffffff
     };
-    let mut palette = if dark { DARK } else { LIGHT };
-    if let Some([light, base, deep]) = accent_palette() {
-        if dark {
-            palette.accent = light;
-            palette.accent_hover = mix(light, base, 0.2);
-            palette.accent_pressed = mix(light, base, 0.35);
-        } else {
-            palette.accent = deep;
-            palette.accent_hover = mix(deep, base, 0.25);
-            palette.accent_pressed = mix(deep, base, 0.45);
-        }
+    Palette {
+        window: gdi(h.bg),
+        panel: gdi(h.panel),
+        control,
+        control_hover: mix(control, gdi(h.paper), 0.05),
+        control_pressed: mix(control, gdi(h.paper), 0.1),
+        subtle_hover: toward_paper(0.07),
+        subtle_pressed: toward_paper(0.12),
+        border: gdi(h.line),
+        strong_border: gdi(h.track),
+        text: gdi(h.paper),
+        secondary: gdi(h.dim),
+        disabled: mix(gdi(h.panel), gdi(h.dim), 0.55),
+        accent: gdi(h.accent),
+        accent_hover: mix(gdi(h.accent), gdi(h.paper), 0.15),
+        accent_pressed: mix(gdi(h.accent), gdi(h.paper), 0.3),
+        on_accent: gdi(on_accent),
+        well: gdi(h.blank),
+        selection: toward_paper(0.12),
+        canvas: [(h.bg >> 16) as u8, (h.bg >> 8) as u8, h.bg as u8],
     }
-    Theme { palette, dark, high_contrast: false }
+}
+
+/// High contrast: the system's colours as tokens, for what Direct2D draws,
+/// with Plain's straight marks and system font.
+fn high_contrast_tokens(p: &Palette) -> Tokens {
+    let hex = |c: Color| ((c & 0xff) << 16) | (c & 0xff00) | ((c >> 16) & 0xff);
+    let h = Hex {
+        bg: hex(p.window),
+        panel: hex(p.panel),
+        film: hex(p.window),
+        grid: hex(p.window),
+        line: hex(p.border),
+        track: hex(p.text),
+        dim: hex(p.text),
+        label: hex(p.text),
+        paper: hex(p.text),
+        accent: hex(p.accent),
+        fill: hex(p.accent),
+        on_fill: hex(p.on_accent),
+        warn: hex(p.text),
+        blank: hex(p.window),
+    };
+    Tokens { hex: h, dark: luminance(h.bg) < 0.5, highlighter: false, plain: true, film: h }
+}
+
+/// The relative luminance of 0xRRGGBB (WCAG).
+pub fn luminance(rgb: u32) -> f64 {
+    unsafe { core::negs_theme_luminance(rgb) }
+}
+
+pub fn contrast(a: u32, b: u32) -> f64 {
+    unsafe { core::negs_theme_contrast(a, b) }
 }
 
 fn high_contrast() -> bool {
@@ -224,47 +314,15 @@ fn apps_use_dark() -> bool {
     status == ERROR_SUCCESS && value == 0
 }
 
-/// The system's accent shades (AccentPalette: light 3, 2, 1, base, dark 1,
-/// 2, 3, …): light 2, the base and dark 1.
-fn accent_palette() -> Option<[Color; 3]> {
-    let mut bytes = [0u8; 32];
-    let mut size = bytes.len() as u32;
-    let status = unsafe {
-        RegGetValueW(
-            HKEY_CURRENT_USER,
-            w!("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Accent"),
-            w!("AccentPalette"),
-            RRF_RT_REG_BINARY,
-            None,
-            Some(bytes.as_mut_ptr() as *mut _),
-            Some(&mut size),
-        )
-    };
-    if status != ERROR_SUCCESS || size < 32 {
-        return None;
-    }
-    let at = |i: usize| rgb(bytes[i * 4], bytes[i * 4 + 1], bytes[i * 4 + 2]);
-    Some([at(1), at(3), at(4)])
-}
-
 /// `a` moved towards `b` by `t`.
 pub fn mix(a: Color, b: Color, t: f64) -> Color {
-    let channel = |shift: u32| {
-        let (x, y) = (((a >> shift) & 0xff) as f64, ((b >> shift) & 0xff) as f64);
-        ((x + (y - x) * t).round() as u32) << shift
-    };
-    channel(0) | channel(8) | channel(16)
+    // Channel by channel, so a GDI colour (0x00bbggrr) mixes as well as a token.
+    unsafe { core::negs_theme_mix(a, b, t) }
 }
 
 /// A solid brush for `color`, kept for the life of the thread.
 pub fn brush(color: Color) -> HBRUSH {
     BRUSHES.with(|b| HBRUSH(*b.borrow_mut().entry(color).or_insert_with(|| unsafe { CreateSolidBrush(COLORREF(color)).0 as isize }) as *mut _))
-}
-
-/// The accent as the canvas wants it, `[r, g, b]`.
-pub fn accent_rgb() -> [u8; 3] {
-    let c = palette().accent;
-    [c as u8, (c >> 8) as u8, (c >> 16) as u8]
 }
 
 // MARK: The system's dark mode
@@ -341,6 +399,14 @@ fn set_app_mode(theme: Theme) {
     }
 }
 
+/// Whether the file dialogs come up dark. They follow Windows' own app
+/// mode, whatever the theme: forcing the app light (`set_app_mode`) left
+/// Windows 10's file dialog dark on a dark Windows (2026-11-19), so the
+/// Mac's way, where the theme sets the panels' appearance, isn't open here.
+pub fn dialogs_dark() -> bool {
+    !current().high_contrast && apps_use_dark()
+}
+
 /// Before the first window: menus follow the theme from the start.
 pub fn init() {
     let theme = current();
@@ -362,6 +428,14 @@ pub fn apply_window(hwnd: HWND) {
         if dark || build() >= 18362 {
             let _ = DwmSetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE(attribute), &value as *const _ as *const _, 4);
         }
+    }
+}
+
+/// Lets a window that isn't the app's own, such as a file dialog's
+/// control, take a dark theme.
+pub fn allow_dark(hwnd: HWND) {
+    if let Some(ux) = uxtheme() {
+        let _ = (ux.allow_dark_for_window)(hwnd, TRUE);
     }
 }
 
@@ -433,5 +507,288 @@ pub fn apply_all() {
     }
     unsafe {
         let _ = EnumThreadWindows(windows::Win32::System::Threading::GetCurrentThreadId(), Some(top), LPARAM(0));
+    }
+}
+
+// MARK: The redesign's themes
+
+// The macOS app's five themes (round 28), one token table each, exactly as
+// `AppTheme.swift` and `Theme.swift` have them (design/proposals/
+// IMPLEMENTATION-THEMES.md, IMPLEMENTATION.md §2.1). The title bar, the
+// status line, the empty window, the alert card and the canvas draw with
+// them directly; the rest reads the palette made from them (`palette_of`).
+
+/// A built-in theme. Darkroom is the default. On Windows, Plain follows
+/// Windows' light or dark setting (`resolved`); Plain dark is dark always.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ThemeName {
+    Darkroom,
+    ContactSheet,
+    LightTable,
+    Daylight,
+    Plain,
+    PlainDark,
+}
+
+impl ThemeName {
+    pub const ALL: [ThemeName; 6] = [Self::Darkroom, Self::ContactSheet, Self::LightTable, Self::Daylight, Self::Plain, Self::PlainDark];
+
+    /// The core's id (`NEGS_THEME_*`): the cases are in its order.
+    fn id(self) -> usize {
+        self as usize
+    }
+
+    /// The stored name, as the macOS app's `AppTheme` raw value.
+    pub fn key(self) -> &'static str {
+        NAMES[self.id()].0
+    }
+
+    /// A stored name or a title, any case, with or without spaces.
+    pub fn parse(text: &str) -> Option<Self> {
+        let id = unsafe { core::negs_theme_parse(text.as_ptr().cast(), text.len()) };
+        Self::ALL.get(usize::try_from(id).ok()?).copied()
+    }
+
+    pub fn title(self) -> &'static str {
+        NAMES[self.id()].1
+    }
+
+    /// The line under the swatches in Settings › Look.
+    pub fn hint(self) -> &'static str {
+        NAMES[self.id()].2
+    }
+
+    pub fn tokens(self) -> &'static Tokens {
+        &TABLE[self.id()]
+    }
+}
+
+/// One theme's colours as 0xRRGGBB, sRGB (Swift's `Palette.Hex`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Hex {
+    /// The sheet the photograph lies on, and the title band.
+    pub bg: u32,
+    /// The inspector, Settings and the alert.
+    pub panel: u32,
+    /// The strip, the tray and the leader.
+    pub film: u32,
+    /// Behind the grid.
+    pub grid: u32,
+    /// Rules between sections and modules.
+    pub line: u32,
+    /// Slider track, outlines, separators, outlined buttons.
+    pub track: u32,
+    /// Values at their default, hints, secondary words.
+    pub dim: u32,
+    /// Control labels.
+    pub label: u32,
+    /// What's being read: names, changed values, the focus box.
+    pub paper: u32,
+    /// The pencil's thin marks: rings, dots, fills, lines. Never words.
+    pub accent: u32,
+    /// The Export and Done buttons, and the words on them.
+    pub fill: u32,
+    pub on_fill: u32,
+    /// Errors and warnings, always as words.
+    pub warn: u32,
+    /// A tile not yet developed.
+    pub blank: u32,
+}
+
+impl Hex {
+    /// Every token with its Swift name, for swatches and checks.
+    pub fn named(&self) -> [(&'static str, u32); 14] {
+        [
+            ("bg", self.bg),
+            ("panel", self.panel),
+            ("film", self.film),
+            ("grid", self.grid),
+            ("line", self.line),
+            ("track", self.track),
+            ("dim", self.dim),
+            ("label", self.label),
+            ("paper", self.paper),
+            ("accent", self.accent),
+            ("fill", self.fill),
+            ("onFill", self.on_fill),
+            ("warn", self.warn),
+            ("blank", self.blank),
+        ]
+    }
+}
+
+/// A theme: its colours, the inks on its film, and how its marks are drawn.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tokens {
+    pub hex: Hex,
+    /// Light ink on dark: menus and pop-ups are drawn dark.
+    pub dark: bool,
+    /// The pencil under a word is a highlighter swiped behind its lower
+    /// half (Light table); strikes stay a pencil line in `accent`.
+    pub highlighter: bool,
+    /// The system font for the serif, and straight, upright pencil marks.
+    pub plain: bool,
+    /// The words and marks on the film (strip, tray, leader): the theme's
+    /// own, except where the film is dark under light panels (Contact sheet).
+    pub film: Hex,
+}
+
+/// Before the first `detect`, which sets the shown theme's.
+const UNSET_HEX: Hex = Hex {
+    bg: 0,
+    panel: 0,
+    film: 0,
+    grid: 0,
+    line: 0,
+    track: 0,
+    dim: 0,
+    label: 0,
+    paper: 0,
+    accent: 0,
+    fill: 0,
+    on_fill: 0,
+    warn: 0,
+    blank: 0,
+};
+const UNSET: Tokens = Tokens { hex: UNSET_HEX, dark: true, highlighter: false, plain: false, film: UNSET_HEX };
+
+fn hex_of(h: &core::negs_theme_hex_t) -> Hex {
+    Hex {
+        bg: h.bg,
+        panel: h.panel,
+        film: h.film,
+        grid: h.grid,
+        line: h.line,
+        track: h.track,
+        dim: h.dim,
+        label: h.label,
+        paper: h.paper,
+        accent: h.accent,
+        fill: h.fill,
+        on_fill: h.on_fill,
+        warn: h.warn,
+        blank: h.blank,
+    }
+}
+
+fn core_theme(id: usize) -> core::negs_theme_t {
+    let mut t = core::negs_theme_t::default();
+    assert_eq!(unsafe { core::negs_theme_get(id as u32, &mut t) }, 1, "the core has no theme {id}");
+    t
+}
+
+fn static_str(p: *const std::os::raw::c_char) -> &'static str {
+    // The core's names and hints are static, NUL-terminated UTF-8.
+    unsafe { std::ffi::CStr::from_ptr(p) }.to_str().expect("UTF-8 from the core")
+}
+
+/// The six themes' tokens, from the shared core (core/src/theme), in
+/// `ThemeName` order: the same tables the macOS app draws with.
+static TABLE: LazyLock<[Tokens; 6]> = LazyLock::new(|| {
+    assert_eq!(unsafe { core::negs_theme_count() } as usize, ThemeName::ALL.len());
+    std::array::from_fn(|id| {
+        let t = core_theme(id);
+        Tokens { hex: hex_of(&t.hex), dark: t.dark != 0, highlighter: t.highlighter != 0, plain: t.plain != 0, film: hex_of(&t.film) }
+    })
+});
+
+/// Each theme's key, title and Windows hint, from the core.
+static NAMES: LazyLock<[(&'static str, &'static str, &'static str); 6]> = LazyLock::new(|| {
+    std::array::from_fn(|id| {
+        let t = core_theme(id);
+        (static_str(t.key), static_str(t.title), static_str(unsafe { core::negs_theme_hint(id as u32, core::NEGS_PLATFORM_WINDOWS) }))
+    })
+});
+
+/// The T2 · Label tokens (IMPLEMENTATION.md §2.1).
+pub static DARKROOM: LazyLock<Tokens> = LazyLock::new(|| TABLE[0]);
+/// Ivory paper and the red grease pencil; the strip stays black film.
+#[cfg(test)]
+pub static CONTACT_SHEET: LazyLock<Tokens> = LazyLock::new(|| TABLE[1]);
+/// Soft warm grey with an amber pencil.
+#[cfg(test)]
+pub static DAYLIGHT: LazyLock<Tokens> = LazyLock::new(|| TABLE[3]);
+
+/// The highlighter's yellow and strength (Light table).
+pub const HIGHLIGHTER_INK: u32 = 0xffd23f;
+pub const HIGHLIGHTER_OPACITY: f32 = 0.85;
+/// Text selection: the pencil at this opacity, never the system blue (§4.9).
+pub const SELECTION_OPACITY: f32 = 0.32;
+/// Outside the crop box the photograph darkens with this, at `CROP_SHADE_OPACITY` (§4.10).
+pub const CROP_SHADE: u32 = 0x080706;
+pub const CROP_SHADE_OPACITY: f32 = 0.6;
+/// Disabled controls fade to this opacity (§2.1: 0.35–0.38).
+pub const DISABLED_OPACITY: f32 = 0.36;
+/// Strip frames other than the current one (§4.4).
+pub const STRIP_DIM: f32 = 0.42;
+
+impl Tokens {
+    /// What dims the window under an alert: black at 0.28 on a dark theme, a
+    /// warm brown at 0.12 on a light one (r28-light.html).
+    pub fn dimming(&self) -> (u32, f32) {
+        // sRGB 0.24, 0.16, 0.08.
+        if self.dark { (0x000000, 0.28) } else { (0x3d2914, 0.12) }
+    }
+    /// Words on a dark badge laid over a photograph: Darkroom's `paper` in
+    /// every theme, since the badge stays dark.
+    pub fn on_photo(&self) -> u32 {
+        DARKROOM.hex.paper
+    }
+    /// The strength of shadows under alerts and tags: softer on a light theme.
+    pub fn shadow_strength(&self) -> f32 {
+        if self.dark { 1.0 } else { 0.3 }
+    }
+}
+
+/// A token as a GDI colour (0x00bbggrr).
+pub fn gdi(hex: u32) -> Color {
+    rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
+}
+
+#[cfg(test)]
+mod core_tests {
+    use super::*;
+
+    /// The constants still written here are the core's.
+    #[test]
+    fn constants_are_the_cores() {
+        let mut c = core::negs_theme_constants_t::default();
+        unsafe { core::negs_theme_constants(&mut c) };
+        assert_eq!(HIGHLIGHTER_INK, c.highlighter_ink);
+        assert_eq!(CROP_SHADE, c.crop_shade);
+        for (here, core) in [
+            (HIGHLIGHTER_OPACITY, c.highlighter_opacity),
+            (SELECTION_OPACITY, c.selection_opacity),
+            (CROP_SHADE_OPACITY, c.crop_shade_opacity),
+            (DISABLED_OPACITY, c.disabled_opacity),
+            (STRIP_DIM, c.strip_dim),
+        ] {
+            assert_eq!(here, core as f32);
+        }
+        for dark in [true, false] {
+            let t = Tokens { dark, ..*DARKROOM };
+            let (rgb, alpha) = t.dimming();
+            let d = if dark { c.dimming_dark } else { c.dimming_light };
+            let channel = |shift: u32| ((rgb >> shift) & 0xff) as f64;
+            assert_eq!([channel(16), channel(8), channel(0)], [d[0], d[1], d[2]].map(|v| (v * 255.0).round()));
+            assert_eq!(alpha, d[3] as f32);
+            assert_eq!(t.shadow_strength(), (if dark { c.shadow_dark } else { c.shadow_light }) as f32);
+        }
+    }
+
+    #[test]
+    fn names_and_tables_come_from_the_core() {
+        for (i, theme) in ThemeName::ALL.into_iter().enumerate() {
+            assert_eq!(theme as usize, i);
+            assert_eq!(ThemeName::parse(theme.key()), Some(theme));
+            assert_eq!(ThemeName::parse(theme.title()), Some(theme));
+            assert!(!theme.hint().is_empty());
+        }
+        assert_eq!(ThemeName::parse("neon"), None);
+        assert_eq!(DARKROOM.hex.accent, 0xffd23f);
+        assert_eq!(CONTACT_SHEET.film.accent, 0xe2492f);
+        assert_eq!(ThemeName::Plain.hint(), "Black on light grey in the system font, with plain blue marks. The easiest to read. The default when Windows is light.");
+        assert_eq!(mix(0x000000, 0xffffff, 0.5), 0x808080);
+        assert!((contrast(0xffffff, 0x000000) - 21.0).abs() < 1e-12);
     }
 }

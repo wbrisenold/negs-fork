@@ -1117,12 +1117,52 @@ dependencies = [
 ]
 
 [[package]]
+name = "negs-core-library"
+version = "0.0.0"
+dependencies = [
+ "negs-core-sys",
+ "negs-library",
+]
+
+[[package]]
+name = "negs-core-marks"
+version = "0.0.0"
+dependencies = [
+ "negs-core-sys",
+]
+
+[[package]]
+name = "negs-core-rules"
+version = "0.0.0"
+dependencies = [
+ "image",
+ "negs-core-library",
+ "negs-core-sys",
+]
+
+[[package]]
+name = "negs-core-sys"
+version = "0.0.0"
+
+[[package]]
+name = "negs-library"
+version = "0.18.0"
+
+[[package]]
+name = "negs-marks"
+version = "0.18.0"
+
+[[package]]
 name = "negs-windows"
-version = "0.15.0"
+version = "0.18.0"
 dependencies = [
  "anyhow",
  "bytemuck",
  "image",
+ "negs-core-library",
+ "negs-core-marks",
+ "negs-core-rules",
+ "negs-core-sys",
  "pollster",
  "raw-window-handle",
  "rawler",
@@ -1695,7 +1735,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "spektrafilm-io"
-version = "0.15.0"
+version = "0.18.0"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -1711,7 +1751,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-math"
-version = "0.15.0"
+version = "0.18.0"
 dependencies = [
  "byteorder",
  "half",

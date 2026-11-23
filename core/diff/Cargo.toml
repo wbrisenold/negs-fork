@@ -1,0 +1,41 @@
+# The core's differential tests and benchmarks: the Rust oracles
+# (crates/negs-library, windows/marks, windows/src's pure modules) beside
+# the Odin core through its C ABI. Its own workspace, so the root
+# Cargo.lock stays as it is. Run with `python3 core/build.py diff`.
+[package]
+name = "negs-core-diff"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+
+[workspace]
+
+[features]
+# Count the core's allocations, so the differential tests check for leaks.
+track = ["negs-core-marks/track", "negs-core-sys/track", "negs-library/track", "negs-core-rules/track"]
+
+[dependencies]
+# The library suites (crates/negs-library/tests) compile against the core's
+# library under the oracle's name; the oracle itself is negs-library-rust.
+negs-library = { package = "negs-core-library", path = "../rust/library" }
+negs-library-rust = { package = "negs-library", path = "../../crates/negs-library" }
+negs-marks = { path = "../../windows/marks" }
+negs-core-marks = { path = "../rust/marks" }
+negs-core-sys = { path = "../rust/sys" }
+negs-core-rules = { path = "../rust/rules" }
+# The image crate the model/compare oracle resizes with, as windows/ has it.
+image = { version = "0.25", default-features = false }
+
+# crates/negs-library's own suites, unchanged, run against the core.
+[[test]]
+name = "fixtures"
+path = "../../crates/negs-library/tests/fixtures.rs"
+
+[[test]]
+name = "library"
+path = "../../crates/negs-library/tests/library.rs"
+
+[[test]]
+name = "state"
+path = "../../crates/negs-library/tests/state.rs"

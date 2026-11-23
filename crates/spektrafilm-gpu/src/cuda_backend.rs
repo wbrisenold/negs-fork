@@ -2466,6 +2466,11 @@ impl CudaBackend {
         &self,
         p: &FilmChainParams<'_>,
     ) -> Result<Option<ImageBuf>, Box<dyn std::error::Error + Send + Sync>> {
+        // TODO(ticket 33): a CUDA convert kernel. Until then a scanned
+        // negative renders per stage, its conversion on the CPU.
+        if matches!(p.front, FrontPass::ConvertFilm(_)) {
+            return Ok(None);
+        }
         let image = p.image;
         let n_pixels = image.pixel_count() as u32;
         let input_f32 = scalars_to_f32(&image.data);
@@ -2495,6 +2500,7 @@ impl CudaBackend {
                     .arg(&guard);
                 unsafe { launch.launch(LaunchConfig::for_num_elems(n_pixels)) }?;
             }
+            FrontPass::ConvertFilm(_) => unreachable!("returned above"),
         }
 
         if let Some(hp) = p.highlight_boost.as_ref() {
@@ -2853,6 +2859,11 @@ impl ComputeBackend for CudaBackend {
     }
 
     fn try_run_film_chain(&self, params: &FilmChainParams<'_>) -> Option<ImageBuf> {
+        // TODO(cuda): colour noise reduction isn't in the CUDA chain yet; the
+        // per-stage path renders it (on the CPU) instead.
+        if params.chroma_denoise.is_some() {
+            return None;
+        }
         match self.run_film_chain_resident(params) {
             Ok(out) => out,
             Err(e) => {
