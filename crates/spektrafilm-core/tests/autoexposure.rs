@@ -4,7 +4,10 @@
 
 use serde::Deserialize;
 use spektrafilm_core::stages::filming;
-use spektrafilm_math::{image::ImageBuf, precision::{from_f64, to_f64}};
+use spektrafilm_math::{
+    image::ImageBuf,
+    precision::{from_f64, to_f64},
+};
 use std::collections::BTreeMap;
 
 #[derive(Deserialize)]
@@ -48,7 +51,8 @@ fn frame(height: u32, width: u32, offset: f64, scale: f64) -> ImageBuf {
         for x in 0..w {
             let bright = (6 * y - 2 * h).pow(2) + (6 * x - (18 * w).div_euclid(5)).pow(2) <= h * h;
             for c in 0..3 {
-                let v = offset + scale * ((131 * y + 71 * x + 37 * c + (x * y) % 17) % 97) as f64 / 97.0;
+                let v = offset
+                    + scale * ((131 * y + 71 * x + 37 * c + (x * y) % 17) % 97) as f64 / 97.0;
                 data.push(from_f64(if bright { 4.0 * v } else { v }));
             }
         }
@@ -74,15 +78,29 @@ fn metering_preview_matches_python() {
         assert_eq!([preview.height, preview.width, 3], case.shape, "{label}");
         let values: Vec<f64> = preview.data.iter().map(|&v| to_f64(v)).collect();
         for (&i, &expected) in case.indices.iter().zip(&case.values) {
-            assert!((values[i] - expected).abs() < VALUE_TOLERANCE, "{label} [{i}]: {} vs {expected}", values[i]);
+            assert!(
+                (values[i] - expected).abs() < VALUE_TOLERANCE,
+                "{label} [{i}]: {} vs {expected}",
+                values[i]
+            );
         }
         let sum: f64 = values.iter().sum();
         let sum_sq: f64 = values.iter().map(|v| v * v).sum();
-        assert!((sum - case.sum).abs() < VALUE_TOLERANCE * values.len() as f64, "{label} sum {sum} vs {}", case.sum);
-        assert!((sum_sq - case.sum_sq).abs() < VALUE_TOLERANCE * values.len() as f64 * 16.0, "{label} sum of squares");
+        assert!(
+            (sum - case.sum).abs() < VALUE_TOLERANCE * values.len() as f64,
+            "{label} sum {sum} vs {}",
+            case.sum
+        );
+        assert!(
+            (sum_sq - case.sum_sq).abs() < VALUE_TOLERANCE * values.len() as f64 * 16.0,
+            "{label} sum of squares"
+        );
         for (method, expected) in &case.ev {
             let ev = filming::measure_raw_autoexposure_ev(&preview, method, 1.0);
-            assert!((ev - expected).abs() < EV_TOLERANCE, "{label} {method}: {ev} vs {expected}");
+            assert!(
+                (ev - expected).abs() < EV_TOLERANCE,
+                "{label} {method}: {ev} vs {expected}"
+            );
         }
     }
 }

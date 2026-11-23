@@ -64,7 +64,10 @@ fn black_and_white_collapses_set_values_to_channel_zero() {
     let dir = &params.film_render.dir_couplers;
     assert_eq!(dir.gamma_samelayer_rgb, Some([0.3; 3]));
     assert_eq!(dir.gamma_interlayer_r_to_gb, Some([0.0; 2]));
-    assert_eq!(params.film_render.halation.halation_strength, Some([0.2; 3]));
+    assert_eq!(
+        params.film_render.halation.halation_strength,
+        Some([0.2; 3])
+    );
 }
 
 #[test]
@@ -85,7 +88,10 @@ fn unset_values_serialize_as_null() {
         "film_render": {"halation": {"halation_strength": [0.1, 0.2, 0.3]}}
     }))
     .unwrap();
-    assert_eq!(set.film_render.halation.halation_strength, Some([0.1, 0.2, 0.3]));
+    assert_eq!(
+        set.film_render.halation.halation_strength,
+        Some([0.1, 0.2, 0.3])
+    );
 }
 
 /// The apps keep a saved `null` at these paths when restoring a session, so
@@ -102,7 +108,10 @@ fn nullable_paths_accept_null() {
         "film_render.dir_couplers.langmuir_donor_k_rgb[*]",
         "io.output_gamut_compress.lightness_compression",
     ] {
-        assert!(paths.iter().any(|p| p == required), "{required} missing from {paths:?}");
+        assert!(
+            paths.iter().any(|p| p == required),
+            "{required} missing from {paths:?}"
+        );
     }
     for path in &paths {
         let mut json = serde_json::to_value(RuntimeParams::default()).unwrap();
@@ -111,7 +120,9 @@ fn nullable_paths_accept_null() {
             None => (path.as_str(), false),
         };
         let pointer = format!("/{}", field.replace('.', "/"));
-        let slot = json.pointer_mut(&pointer).unwrap_or_else(|| panic!("{path} not in the schema"));
+        let slot = json
+            .pointer_mut(&pointer)
+            .unwrap_or_else(|| panic!("{path} not in the schema"));
         if all {
             for element in slot.as_array_mut().unwrap() {
                 *element = serde_json::Value::Null;

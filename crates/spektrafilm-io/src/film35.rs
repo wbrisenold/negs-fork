@@ -112,102 +112,288 @@ pub enum EdgePrint {
 /// Films not listed (Tri-X 7266 is only made in 16 mm and Super 8) get the
 /// generic strip.
 pub const STOCKS: &[(&str, Kind, EdgePrint)] = &[
-    ("agfa_agfachrome_100", Kind::Slide, EdgePrint::Still(&["AGFACHROME 100"])),
-    ("agfa_agfachrome_200", Kind::Slide, EdgePrint::Still(&["AGFACHROME 200"])),
-    ("agfa_agfachrome_50", Kind::Slide, EdgePrint::Still(&["AGFACHROME 50"])),
-    ("cinestill_400d", Kind::Negative, EdgePrint::Still(&["CINESTILL 400D"])),
-    ("cinestill_800t", Kind::Negative, EdgePrint::Still(&["CINESTILL 800T"])),
-    ("fotufilm_infrared_color", Kind::Slide, EdgePrint::Still(&["INFRARED"])),
-    ("fujifilm_acros_100_ii", Kind::BlackAndWhite, EdgePrint::Still(&["ACROS II"])),
-    ("fujifilm_astia_100f", Kind::Slide, EdgePrint::Still(&["FUJI RAP100F"])),
-    ("fujifilm_c200", Kind::Negative, EdgePrint::Still(&["FUJI", "200", "CA24"])),
+    (
+        "agfa_agfachrome_100",
+        Kind::Slide,
+        EdgePrint::Still(&["AGFACHROME 100"]),
+    ),
+    (
+        "agfa_agfachrome_200",
+        Kind::Slide,
+        EdgePrint::Still(&["AGFACHROME 200"]),
+    ),
+    (
+        "agfa_agfachrome_50",
+        Kind::Slide,
+        EdgePrint::Still(&["AGFACHROME 50"]),
+    ),
+    (
+        "cinestill_400d",
+        Kind::Negative,
+        EdgePrint::Still(&["CINESTILL 400D"]),
+    ),
+    (
+        "cinestill_800t",
+        Kind::Negative,
+        EdgePrint::Still(&["CINESTILL 800T"]),
+    ),
+    (
+        "fotufilm_infrared_color",
+        Kind::Slide,
+        EdgePrint::Still(&["INFRARED"]),
+    ),
+    (
+        "fujifilm_acros_100_ii",
+        Kind::BlackAndWhite,
+        EdgePrint::Still(&["ACROS II"]),
+    ),
+    (
+        "fujifilm_astia_100f",
+        Kind::Slide,
+        EdgePrint::Still(&["FUJI RAP100F"]),
+    ),
+    (
+        "fujifilm_c200",
+        Kind::Negative,
+        EdgePrint::Still(&["FUJI", "200", "CA24"]),
+    ),
     (
         "fujifilm_eterna_500",
         Kind::Negative,
-        EdgePrint::Cine { product: "8573", keykode: None },
+        EdgePrint::Cine {
+            product: "8573",
+            keykode: None,
+        },
     ),
     (
         "fujifilm_eterna_vivid_500",
         Kind::Negative,
-        EdgePrint::Cine { product: "8547", keykode: None },
+        EdgePrint::Cine {
+            product: "8547",
+            keykode: None,
+        },
     ),
     (
         "fujifilm_f64d",
         Kind::Negative,
-        EdgePrint::Cine { product: "8522", keykode: None },
+        EdgePrint::Cine {
+            product: "8522",
+            keykode: None,
+        },
     ),
-    ("fujifilm_pro_160ns", Kind::Negative, EdgePrint::Still(&["PRO160NS", "FUJI"])),
-    ("fujifilm_pro_400h", Kind::Negative, EdgePrint::Still(&["PRO400H", "FUJI"])),
-    ("fujifilm_provia_100f", Kind::Slide, EdgePrint::Still(&["FUJI RDPIII"])),
-    ("fujifilm_reala_100", Kind::Negative, EdgePrint::Still(&["FUJI", "REALA", "CS"])),
+    (
+        "fujifilm_pro_160ns",
+        Kind::Negative,
+        EdgePrint::Still(&["PRO160NS", "FUJI"]),
+    ),
+    (
+        "fujifilm_pro_400h",
+        Kind::Negative,
+        EdgePrint::Still(&["PRO400H", "FUJI"]),
+    ),
+    (
+        "fujifilm_provia_100f",
+        Kind::Slide,
+        EdgePrint::Still(&["FUJI RDPIII"]),
+    ),
+    (
+        "fujifilm_reala_100",
+        Kind::Negative,
+        EdgePrint::Still(&["FUJI", "REALA", "CS"]),
+    ),
     (
         "fujifilm_reala_500d",
         Kind::Negative,
-        EdgePrint::Cine { product: "8592", keykode: None },
+        EdgePrint::Cine {
+            product: "8592",
+            keykode: None,
+        },
     ),
-    ("fujifilm_superia_200", Kind::Negative, EdgePrint::Still(&["FUJI", "S-200"])),
-    ("fujifilm_velvia_100", Kind::Slide, EdgePrint::Still(&["FUJI RVP100"])),
-    ("fujifilm_velvia_50", Kind::Slide, EdgePrint::Still(&["FUJI RVP"])),
-    ("fujifilm_xtra_400", Kind::Negative, EdgePrint::Still(&["FUJI", "S-400", "CH23"])),
-    ("harman_phoenix_200", Kind::Negative, EdgePrint::Still(&["HARMAN PHOENIX 200"])),
+    (
+        "fujifilm_superia_200",
+        Kind::Negative,
+        EdgePrint::Still(&["FUJI", "S-200"]),
+    ),
+    (
+        "fujifilm_velvia_100",
+        Kind::Slide,
+        EdgePrint::Still(&["FUJI RVP100"]),
+    ),
+    (
+        "fujifilm_velvia_50",
+        Kind::Slide,
+        EdgePrint::Still(&["FUJI RVP"]),
+    ),
+    (
+        "fujifilm_xtra_400",
+        Kind::Negative,
+        EdgePrint::Still(&["FUJI", "S-400", "CH23"]),
+    ),
+    (
+        "harman_phoenix_200",
+        Kind::Negative,
+        EdgePrint::Still(&["HARMAN PHOENIX 200"]),
+    ),
     (
         "ilford_delta_3200",
         Kind::BlackAndWhite,
         EdgePrint::Still(&["ILFORD", "DELTA 3200 PROFESSIONAL"]),
     ),
-    ("ilford_fp4_plus", Kind::BlackAndWhite, EdgePrint::Still(&["ILFORD FP4 PLUS"])),
-    ("ilford_hp5_plus", Kind::BlackAndWhite, EdgePrint::Still(&["ILFORD HP5 PLUS"])),
-    ("kodak_2302", Kind::BlackAndWhite, EdgePrint::Print("2302 KODAK")),
+    (
+        "ilford_fp4_plus",
+        Kind::BlackAndWhite,
+        EdgePrint::Still(&["ILFORD FP4 PLUS"]),
+    ),
+    (
+        "ilford_hp5_plus",
+        Kind::BlackAndWhite,
+        EdgePrint::Still(&["ILFORD HP5 PLUS"]),
+    ),
+    (
+        "kodak_2302",
+        Kind::BlackAndWhite,
+        EdgePrint::Print("2302 KODAK"),
+    ),
     ("kodak_2383", Kind::Negative, EdgePrint::Print("2383 KODAK")),
     ("kodak_2393", Kind::Negative, EdgePrint::Print("2393 KODAK")),
-    ("kodak_aerochrome_1443", Kind::Slide, EdgePrint::Still(&["KODAK 1443"])),
-    ("kodak_aerocolor_2460", Kind::Negative, EdgePrint::Still(&["KODAK 2460"])),
+    (
+        "kodak_aerochrome_1443",
+        Kind::Slide,
+        EdgePrint::Still(&["KODAK 1443"]),
+    ),
+    (
+        "kodak_aerocolor_2460",
+        Kind::Negative,
+        EdgePrint::Still(&["KODAK 2460"]),
+    ),
     (
         "kodak_doublex",
         Kind::BlackAndWhite,
-        EdgePrint::Cine { product: "5222", keykode: Some("KE") },
+        EdgePrint::Cine {
+            product: "5222",
+            keykode: Some("KE"),
+        },
     ),
-    ("kodak_ektachrome_100", Kind::Slide, EdgePrint::Still(&["KODAK E100"])),
-    ("kodak_ektar_100", Kind::Negative, EdgePrint::Still(&["KODAK EKTAR 100"])),
-    ("kodak_gold_200", Kind::Negative, EdgePrint::Still(&["KODAK GB 200"])),
-    ("kodak_kodachrome_200", Kind::Slide, EdgePrint::Still(&["KODAK KL"])),
-    ("kodak_kodachrome_25", Kind::Slide, EdgePrint::Still(&["KODAK KM"])),
-    ("kodak_kodachrome_64", Kind::Slide, EdgePrint::Still(&["KODAK KR"])),
-    ("kodak_kodacolor_100", Kind::Negative, EdgePrint::Still(&["KODAK KODACOLOR 100"])),
-    ("kodak_portra_160", Kind::Negative, EdgePrint::Still(&["KODAK PORTRA 160"])),
-    ("kodak_portra_400", Kind::Negative, EdgePrint::Still(&["KODAK PORTRA 400"])),
-    ("kodak_portra_800", Kind::Negative, EdgePrint::Still(&["KODAK PORTRA 800"])),
-    ("kodak_portra_800_push1", Kind::Negative, EdgePrint::Still(&["KODAK PORTRA 800"])),
-    ("kodak_portra_800_push2", Kind::Negative, EdgePrint::Still(&["KODAK PORTRA 800"])),
-    ("kodak_tmax_100", Kind::BlackAndWhite, EdgePrint::Still(&["KODAK 100TMX"])),
-    ("kodak_trix400_d76_8min", Kind::BlackAndWhite, EdgePrint::Still(&["KODAK 400TX"])),
-    ("kodak_ultramax_400", Kind::Negative, EdgePrint::Still(&["KODAK GC 400-9"])),
+    (
+        "kodak_ektachrome_100",
+        Kind::Slide,
+        EdgePrint::Still(&["KODAK E100"]),
+    ),
+    (
+        "kodak_ektar_100",
+        Kind::Negative,
+        EdgePrint::Still(&["KODAK EKTAR 100"]),
+    ),
+    (
+        "kodak_gold_200",
+        Kind::Negative,
+        EdgePrint::Still(&["KODAK GB 200"]),
+    ),
+    (
+        "kodak_kodachrome_200",
+        Kind::Slide,
+        EdgePrint::Still(&["KODAK KL"]),
+    ),
+    (
+        "kodak_kodachrome_25",
+        Kind::Slide,
+        EdgePrint::Still(&["KODAK KM"]),
+    ),
+    (
+        "kodak_kodachrome_64",
+        Kind::Slide,
+        EdgePrint::Still(&["KODAK KR"]),
+    ),
+    (
+        "kodak_kodacolor_100",
+        Kind::Negative,
+        EdgePrint::Still(&["KODAK KODACOLOR 100"]),
+    ),
+    (
+        "kodak_portra_160",
+        Kind::Negative,
+        EdgePrint::Still(&["KODAK PORTRA 160"]),
+    ),
+    (
+        "kodak_portra_400",
+        Kind::Negative,
+        EdgePrint::Still(&["KODAK PORTRA 400"]),
+    ),
+    (
+        "kodak_portra_800",
+        Kind::Negative,
+        EdgePrint::Still(&["KODAK PORTRA 800"]),
+    ),
+    (
+        "kodak_portra_800_push1",
+        Kind::Negative,
+        EdgePrint::Still(&["KODAK PORTRA 800"]),
+    ),
+    (
+        "kodak_portra_800_push2",
+        Kind::Negative,
+        EdgePrint::Still(&["KODAK PORTRA 800"]),
+    ),
+    (
+        "kodak_tmax_100",
+        Kind::BlackAndWhite,
+        EdgePrint::Still(&["KODAK 100TMX"]),
+    ),
+    (
+        "kodak_trix400_d76_8min",
+        Kind::BlackAndWhite,
+        EdgePrint::Still(&["KODAK 400TX"]),
+    ),
+    (
+        "kodak_ultramax_400",
+        Kind::Negative,
+        EdgePrint::Still(&["KODAK GC 400-9"]),
+    ),
     (
         "kodak_verita_200d",
         Kind::Negative,
-        EdgePrint::Cine { product: "5206", keykode: None },
+        EdgePrint::Cine {
+            product: "5206",
+            keykode: None,
+        },
     ),
     (
         "kodak_vision3_200t",
         Kind::Negative,
-        EdgePrint::Cine { product: "5213", keykode: Some("EO") },
+        EdgePrint::Cine {
+            product: "5213",
+            keykode: Some("EO"),
+        },
     ),
     (
         "kodak_vision3_250d",
         Kind::Negative,
-        EdgePrint::Cine { product: "5207", keykode: Some("EN") },
+        EdgePrint::Cine {
+            product: "5207",
+            keykode: Some("EN"),
+        },
     ),
     (
         "kodak_vision3_500t",
         Kind::Negative,
-        EdgePrint::Cine { product: "5219", keykode: Some("EJ") },
+        EdgePrint::Cine {
+            product: "5219",
+            keykode: Some("EJ"),
+        },
     ),
     (
         "kodak_vision3_50d",
         Kind::Negative,
-        EdgePrint::Cine { product: "5203", keykode: Some("ER") },
+        EdgePrint::Cine {
+            product: "5203",
+            keykode: Some("ER"),
+        },
     ),
-    ("lomography_color_100", Kind::Negative, EdgePrint::Still(&["LOMOGRAPHY 100"])),
+    (
+        "lomography_color_100",
+        Kind::Negative,
+        EdgePrint::Still(&["LOMOGRAPHY 100"]),
+    ),
     (
         "lomography_lomochrome_metropolis",
         Kind::Negative,
@@ -233,12 +419,20 @@ fn font() -> &'static FontRef<'static> {
 
 fn srgb_to_linear(v: u8) -> f32 {
     let v = v as f32 / 255.0;
-    if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+    if v <= 0.04045 {
+        v / 12.92
+    } else {
+        ((v + 0.055) / 1.055).powf(2.4)
+    }
 }
 
 pub fn linear_to_srgb(v: f32) -> f32 {
     let v = v.clamp(0.0, 1.0);
-    if v <= 0.003_130_8 { v * 12.92 } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 }
+    if v <= 0.003_130_8 {
+        v * 12.92
+    } else {
+        1.055 * v.powf(1.0 / 2.4) - 0.055
+    }
 }
 
 fn linear(c: [u8; 3]) -> [f32; 3] {
@@ -261,7 +455,12 @@ impl Strip {
             .find(|(id, ..)| *id == film)
             .map(|&(_, kind, print)| (kind, print))
             .unwrap_or(GENERIC);
-        Self { format, kind, print, material: None }
+        Self {
+            format,
+            kind,
+            print,
+            material: None,
+        }
     }
 
     /// The strip for `film` with the scanned material from `data_dir`.
@@ -269,7 +468,8 @@ impl Strip {
         Self::load_with(
             &|name| {
                 let path = data_dir.join(name);
-                image::open(&path).with_context(|| format!("loading border material {}", path.display()))
+                image::open(&path)
+                    .with_context(|| format!("loading border material {}", path.display()))
             },
             film,
             format,
@@ -289,7 +489,10 @@ impl Strip {
                 && material.height() == (FILM_WIDTH * MATERIAL_PX_PER_MM).round() as u32,
             "{MATERIAL} has the wrong size"
         );
-        Ok(Self { material: Some(material), ..Self::new(film, format) })
+        Ok(Self {
+            material: Some(material),
+            ..Self::new(film, format)
+        })
     }
 
     /// Strip length (along the film) and gate width, in mm.
@@ -306,7 +509,12 @@ impl Strip {
         let (length, gate) = Self::size(format);
         let (length, gate, film) = (length as f64, gate as f64, FILM_WIDTH as f64);
         let height = GATE_HEIGHT as f64;
-        [(length - gate) / 2.0 / length, (film - height) / 2.0 / film, gate / length, height / film]
+        [
+            (length - gate) / 2.0 / length,
+            (film - height) / 2.0 / film,
+            gate / length,
+            height / film,
+        ]
     }
 
     /// Whether the strip has to turn to hold a `width` × `height` photograph.
@@ -434,7 +642,11 @@ impl Band {
             if let Some(outline) = font().outline_glyph(glyph) {
                 let bounds = outline.px_bounds();
                 outline.draw(|gx, gy, k| {
-                    self.add(bounds.min.x as i64 + gx as i64, bounds.min.y as i64 + gy as i64, k)
+                    self.add(
+                        bounds.min.x as i64 + gx as i64,
+                        bounds.min.y as i64 + gy as i64,
+                        k,
+                    )
                 });
             }
             pen += scaled.h_advance(id) + tracking;
@@ -564,7 +776,13 @@ fn box_blur(row: &mut [f32], r: usize, line: &mut Vec<f32>) {
     line.clear();
     line.extend_from_slice(row);
     let n = row.len() as i64;
-    let at = |i: i64| if (0..n).contains(&i) { line[i as usize] } else { 0.0 };
+    let at = |i: i64| {
+        if (0..n).contains(&i) {
+            line[i as usize]
+        } else {
+            0.0
+        }
+    };
     let mut sum: f32 = (-(r as i64)..=r as i64).map(at).sum();
     for (i, out) in row.iter_mut().enumerate() {
         *out = sum / (2 * r + 1) as f32;
@@ -575,7 +793,8 @@ fn box_blur(row: &mut [f32], r: usize, line: &mut Vec<f32>) {
 
 /// A well-mixed 32-bit hash of three integers.
 fn hash(a: u32, b: u32, c: u32) -> u32 {
-    let mut h = a.wrapping_mul(0x9E37_79B1) ^ b.wrapping_mul(0x85EB_CA77) ^ c.wrapping_mul(0xC2B2_AE3D);
+    let mut h =
+        a.wrapping_mul(0x9E37_79B1) ^ b.wrapping_mul(0x85EB_CA77) ^ c.wrapping_mul(0xC2B2_AE3D);
     h ^= h >> 16;
     h = h.wrapping_mul(0x7FEB_352D);
     h ^= h >> 15;
@@ -612,7 +831,11 @@ pub struct Renderer<'a> {
 impl<'a> Renderer<'a> {
     fn new(strip: &'a Strip, width: u32, height: u32, turned: bool) -> Self {
         let (length, gate) = Strip::size(strip.format);
-        let (along_px, across_px) = if turned { (height, width) } else { (width, height) };
+        let (along_px, across_px) = if turned {
+            (height, width)
+        } else {
+            (width, height)
+        };
         let (along, across) = (along_px as f32 / length, across_px as f32 / FILM_WIDTH);
         let scale = (along + across) / 2.0;
         let mut top = Band::new(0.0, PERF_EDGE, length, scale);
@@ -622,7 +845,10 @@ impl<'a> Renderer<'a> {
             _ => KS,
         };
         let seed = match strip.print {
-            EdgePrint::Still(words) => words.iter().flat_map(|w| w.bytes()).fold(17, |h, b| hash(h, b as u32, 3)),
+            EdgePrint::Still(words) => words
+                .iter()
+                .flat_map(|w| w.bytes())
+                .fold(17, |h, b| hash(h, b as u32, 3)),
             EdgePrint::Cine { product, .. } | EdgePrint::Print(product) => {
                 product.bytes().fold(29, |h, b| hash(h, b as u32, 5))
             }
@@ -658,7 +884,10 @@ impl<'a> Renderer<'a> {
                     (x as f32 + 0.5) / self.across,
                 )
             } else {
-                ((x as f32 + 0.5) / self.along, (y as f32 + 0.5) / self.across)
+                (
+                    (x as f32 + 0.5) / self.along,
+                    (y as f32 + 0.5) / self.across,
+                )
             };
             *pixel = self.shade(u, v, x as u32, y);
         }
@@ -682,7 +911,11 @@ impl<'a> Renderer<'a> {
 
         // Grain: clumps of GRAIN mm, averaged over larger pixels, partly
         // shared between the colour layers.
-        let strength = if self.grain { GRAIN_STRENGTH * (GRAIN / pixel).min(1.0) } else { 0.0 };
+        let strength = if self.grain {
+            GRAIN_STRENGTH * (GRAIN / pixel).min(1.0)
+        } else {
+            0.0
+        };
         let sample = |channel: u32| {
             if pixel >= GRAIN {
                 noise(x, y, channel)
@@ -704,7 +937,8 @@ impl<'a> Renderer<'a> {
         let (ink, glow) = band.sample(u, v);
         for c in 0..3 {
             let exposed = self.ink[c] * grain[c];
-            color[c] = color[c] * (1.0 - ink) + exposed * ink + self.ink[c] * glow * INK_GLOW_STRENGTH;
+            color[c] =
+                color[c] * (1.0 - ink) + exposed * ink + self.ink[c] * glow * INK_GLOW_STRENGTH;
         }
 
         // Dust on the film.
@@ -755,7 +989,11 @@ impl<'a> Renderer<'a> {
         let (w, h) = (material.width() as i64, material.height() as i64);
         let (x0, y0) = (x.floor() as i64, y.floor() as i64);
         let (fx, fy) = (x - x0 as f32, y - y0 as f32);
-        let at = |x: i64, y: i64| material.get_pixel(x.clamp(0, w - 1) as u32, y.clamp(0, h - 1) as u32).0;
+        let at = |x: i64, y: i64| {
+            material
+                .get_pixel(x.clamp(0, w - 1) as u32, y.clamp(0, h - 1) as u32)
+                .0
+        };
         let mut out = [0.0; 2];
         for (c, value) in out.iter_mut().enumerate() {
             let top = at(x0, y0)[c] as f32 * (1.0 - fx) + at(x0 + 1, y0)[c] as f32 * fx;
@@ -866,7 +1104,15 @@ mod tests {
         assert!(bell_howell(0.0, 0.0, BH.0 / 2.0, BH.1 / 2.0, BH.2) < 0.0);
         assert!(bell_howell(0.0, BH.1 / 2.0 + 0.01, BH.0 / 2.0, BH.1 / 2.0, BH.2) > 0.0);
         // The arcs cut the corners.
-        assert!(bell_howell(BH.0 / 2.0 - 0.01, BH.1 / 2.0 - 0.01, BH.0 / 2.0, BH.1 / 2.0, BH.2) > 0.0);
+        assert!(
+            bell_howell(
+                BH.0 / 2.0 - 0.01,
+                BH.1 / 2.0 - 0.01,
+                BH.0 / 2.0,
+                BH.1 / 2.0,
+                BH.2
+            ) > 0.0
+        );
     }
 
     #[test]

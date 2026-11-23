@@ -21,7 +21,9 @@ fn main() -> Result<()> {
         match arg.as_str() {
             "--decoder" => decoder = args.next().context("missing decoder")?.parse()?,
             "--iterations" => iterations = args.next().context("missing iterations")?.parse()?,
-            "--scale" => options.decode_scale = args.next().context("missing RAW scale")?.parse()?,
+            "--scale" => {
+                options.decode_scale = args.next().context("missing RAW scale")?.parse()?
+            }
             "--no-orient" => options.apply_orientation = false,
             "--lens-correction" => options.lens_correction.enabled = true,
             "--wb" => {

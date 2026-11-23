@@ -63,9 +63,7 @@ fn sanitize_spectral_inputs(
 }
 
 fn matrix_f32(m: &[[f64; 3]; 3]) -> Vec<f32> {
-    m.iter()
-        .flat_map(|r| r.iter().map(|&v| v as f32))
-        .collect()
+    m.iter().flat_map(|r| r.iter().map(|&v| v as f32)).collect()
 }
 
 fn flatten_curves_f32(v: &[[f64; 3]]) -> Vec<f32> {
@@ -80,8 +78,7 @@ fn is_uniform_grid(xs: &[f64]) -> bool {
     }
     let step = xs[1] - xs[0];
     let tol = step.abs().max(1.0) * 1e-6;
-    xs.windows(2)
-        .all(|w| ((w[1] - w[0]) - step).abs() <= tol)
+    xs.windows(2).all(|w| ((w[1] - w[0]) - step).abs() <= tol)
 }
 
 const MAX_BLUR_RADIUS: u32 = 256;
@@ -1744,7 +1741,9 @@ impl CudaBackend {
         n_pixels: u32,
         scale: f32,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let mut launch = self.stream.launch_builder(&self.log_to_linear_scaled_kernel);
+        let mut launch = self
+            .stream
+            .launch_builder(&self.log_to_linear_scaled_kernel);
         launch.arg(img).arg(&n_pixels).arg(&scale);
         unsafe { launch.launch(LaunchConfig::for_num_elems(n_pixels)) }?;
         Ok(())
@@ -1755,7 +1754,9 @@ impl CudaBackend {
         img: &mut CudaSlice<f32>,
         n_pixels: u32,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let mut launch = self.stream.launch_builder(&self.linear_to_log10_outer_kernel);
+        let mut launch = self
+            .stream
+            .launch_builder(&self.linear_to_log10_outer_kernel);
         launch.arg(img).arg(&n_pixels);
         unsafe { launch.launch(LaunchConfig::for_num_elems(n_pixels)) }?;
         Ok(())
@@ -1841,8 +1842,22 @@ impl CudaBackend {
         // `RefBlur` and docs/gpu-vs-cpu-quality.md; untested here (no NVIDIA
         // GPU).
         let avg = |v: [f32; 3]| (v[0] + v[1] + v[2]) / 3.0;
-        self.blur_device(img, scratch, &mut core, width, height, avg(hp.scatter_core_px))?;
-        self.blur_device(img, scratch, &mut tail, width, height, avg(hp.scatter_tail_px))?;
+        self.blur_device(
+            img,
+            scratch,
+            &mut core,
+            width,
+            height,
+            avg(hp.scatter_core_px),
+        )?;
+        self.blur_device(
+            img,
+            scratch,
+            &mut tail,
+            width,
+            height,
+            avg(hp.scatter_tail_px),
+        )?;
         {
             let [tr, tg, tb] = hp.scatter_tail_weight;
             let mut launch = self.stream.launch_builder(&self.scatter_mix_kernel);
@@ -1924,7 +1939,8 @@ impl CudaBackend {
         let n_samples = gp.interp_x.len() as u32;
         let mono = gp.monochrome as u32;
         let positive = gp.positive as u32;
-        let mut curves: Vec<f32> = Vec::with_capacity(gp.interp_x.len() * (6 + 3 * n_layers as usize));
+        let mut curves: Vec<f32> =
+            Vec::with_capacity(gp.interp_x.len() * (6 + 3 * n_layers as usize));
         curves.extend(gp.interp_x.iter().flatten());
         curves.extend(gp.interp_inv_dx.iter().flatten());
         curves.extend(gp.curves_layers.iter().flatten());
@@ -2044,8 +2060,16 @@ impl CudaBackend {
             let mut partials = unsafe { self.stream.alloc::<f64>(SUM_BLOCKS as usize * 6)? };
             {
                 let mut launch = self.stream.launch_builder(&self.grain_sum_kernel);
-                launch.arg(&n_pixels).arg(&cur).arg(&other).arg(&mut partials);
-                let cfg = LaunchConfig { grid_dim: (SUM_BLOCKS, 1, 1), block_dim: (256, 1, 1), shared_mem_bytes: 0 };
+                launch
+                    .arg(&n_pixels)
+                    .arg(&cur)
+                    .arg(&other)
+                    .arg(&mut partials);
+                let cfg = LaunchConfig {
+                    grid_dim: (SUM_BLOCKS, 1, 1),
+                    block_dim: (256, 1, 1),
+                    shared_mem_bytes: 0,
+                };
                 unsafe { launch.launch(cfg) }?;
             }
             let partials = self.stream.clone_dtoh(&partials)?;
@@ -2243,7 +2267,7 @@ impl CudaBackend {
             let positive = if dp.is_positive { 1u32 } else { 0u32 };
             let mut launch = self.stream.launch_builder(&self.dir_matmul_kernel);
             launch
-            .arg(&mut *density)
+                .arg(&mut *density)
                 .arg(&n_pixels)
                 .arg(&positive)
                 .arg(&dp.density_max[0])
@@ -2344,9 +2368,15 @@ impl CudaBackend {
         let cd_dev = self.stream.clone_htod(&cd_flat)?;
         let bd_dev = self.stream.clone_htod(&bd)?;
         let illu_dev = self.stream.clone_htod(&illu_f32)?;
-        let cmf_x_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_X_F32)?;
-        let cmf_y_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Y_F32)?;
-        let cmf_z_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Z_F32)?;
+        let cmf_x_dev = self
+            .stream
+            .clone_htod(&spektrafilm_math::spectral::CMF_X_F32)?;
+        let cmf_y_dev = self
+            .stream
+            .clone_htod(&spektrafilm_math::spectral::CMF_Y_F32)?;
+        let cmf_z_dev = self
+            .stream
+            .clone_htod(&spektrafilm_math::spectral::CMF_Z_F32)?;
         let mut out_dev = self.alloc_f32(n_pixels as usize * 3)?;
 
         let n_wl_u32 = n_wl as u32;
@@ -2500,8 +2530,7 @@ impl CudaBackend {
             unsafe { launch.launch(LaunchConfig::for_num_elems(n_pixels)) }?;
         }
 
-        let film_log_exp_f32: Vec<f32> =
-            p.film_log_exposure.iter().map(|&v| v as f32).collect();
+        let film_log_exp_f32: Vec<f32> = p.film_log_exposure.iter().map(|&v| v as f32).collect();
         let film_curves_f32 = flatten_curves_f32(p.film_density_curves_normalized);
         let film_log_exp_dev = self.stream.clone_htod(&film_log_exp_f32)?;
         let film_curves_dev = self.stream.clone_htod(&film_curves_f32)?;
@@ -2545,8 +2574,7 @@ impl CudaBackend {
             );
             film_bd.resize(p.film_channel_density.len(), 0.0);
             film_cd.resize(p.film_channel_density.len() * 3, 0.0);
-            let print_illu_f32: Vec<f32> =
-                p.print_illuminant.iter().map(|&v| v as f32).collect();
+            let print_illu_f32: Vec<f32> = p.print_illuminant.iter().map(|&v| v as f32).collect();
             let print_sens_f32 = flatten_curves_f32(p.print_sensitivity);
             let film_cd_dev = self.stream.clone_htod(&film_cd)?;
             let film_bd_dev = self.stream.clone_htod(&film_bd)?;
@@ -2560,7 +2588,10 @@ impl CudaBackend {
             // normalization, so the preflash must carry it too.
             let (print_norm, preflash_scale) =
                 if has_enlarger_diffusion && print_exposure_scale != 0.0 {
-                    ((p.print_normalization_factor / p.print_exposure_scale) as f32, 1.0)
+                    (
+                        (p.print_normalization_factor / p.print_exposure_scale) as f32,
+                        1.0,
+                    )
                 } else {
                     (p.print_normalization_factor as f32, p.print_exposure_scale)
                 };
@@ -2633,9 +2664,15 @@ impl CudaBackend {
         let scan_bd_dev = self.stream.clone_htod(&scan_bd)?;
         let view_illu_dev = self.stream.clone_htod(&view_illu_f32)?;
         let scan_matrix_dev = self.stream.clone_htod(&scan_matrix)?;
-        let cmf_x_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_X_F32)?;
-        let cmf_y_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Y_F32)?;
-        let cmf_z_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Z_F32)?;
+        let cmf_x_dev = self
+            .stream
+            .clone_htod(&spektrafilm_math::spectral::CMF_X_F32)?;
+        let cmf_y_dev = self
+            .stream
+            .clone_htod(&spektrafilm_math::spectral::CMF_Y_F32)?;
+        let cmf_z_dev = self
+            .stream
+            .clone_htod(&spektrafilm_math::spectral::CMF_Z_F32)?;
         let scan_n_wl = scan_cd_src.len() as u32;
         let scan_norm = p.scan_normalization as f32;
         let (bw_m, bw_q, bw_enable) = match p.bw_xyz_remap {
@@ -2756,9 +2793,11 @@ impl ComputeBackend for CudaBackend {
             cat,
             xyz_to_rgb,
         ) {
-            Ok(result) => {
-                ImageBuf::from_data(density_cmy.width, density_cmy.height, f32_to_scalars(result))
-            }
+            Ok(result) => ImageBuf::from_data(
+                density_cmy.width,
+                density_cmy.height,
+                f32_to_scalars(result),
+            ),
             Err(e) => {
                 tracing::warn!(error = %e, "CUDA scan_spectral failed; falling back to CPU");
                 cpu_backend::scan_spectral_cpu(
@@ -2793,9 +2832,11 @@ impl ComputeBackend for CudaBackend {
             normalization_factor,
             preflash,
         ) {
-            Ok(result) => {
-                ImageBuf::from_data(density_cmy.width, density_cmy.height, f32_to_scalars(result))
-            }
+            Ok(result) => ImageBuf::from_data(
+                density_cmy.width,
+                density_cmy.height,
+                f32_to_scalars(result),
+            ),
             Err(e) => {
                 tracing::warn!(error = %e, "CUDA print_spectral failed; falling back to CPU");
                 cpu_backend::print_spectral_cpu(

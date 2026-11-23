@@ -136,14 +136,26 @@ fn gamut_defaults_match_python() {
         // The f32 knees round-trip the Python literals.
         let python_knee = |k: [f64; 3]| k.map(|v| v as f32).map(f64::from);
         assert_eq!(
-            (input.algorithm.as_str(), input.boundary.as_str(), input.hull_detail, input.center.as_str()),
-            (fixture.input.algorithm.as_str(), fixture.input.boundary.as_str(), fixture.input.hull_detail,
-             fixture.input_center.as_str())
+            (
+                input.algorithm.as_str(),
+                input.boundary.as_str(),
+                input.hull_detail,
+                input.center.as_str()
+            ),
+            (
+                fixture.input.algorithm.as_str(),
+                fixture.input.boundary.as_str(),
+                fixture.input.hull_detail,
+                fixture.input_center.as_str()
+            )
         );
         assert_eq!(knee(input.knee), python_knee(fixture.input.knee));
         let output = &params.io.output_gamut_compress;
         assert_eq!(output.algorithm, fixture.output.algorithm);
         assert_eq!(knee(output.knee), python_knee(fixture.output.knee));
-        assert_eq!(output.lightness_compression.map(knee), fixture.output.lightness_compression.map(python_knee));
+        assert_eq!(
+            output.lightness_compression.map(knee),
+            fixture.output.lightness_compression.map(python_knee)
+        );
     }
 }

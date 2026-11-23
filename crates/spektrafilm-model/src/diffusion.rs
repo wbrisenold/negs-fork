@@ -617,7 +617,13 @@ pub fn apply_diffusion_filter_um(
 
 /// Kernel radius of the diffusion PSF: 8·λ_max captures 99.95% of a 2D
 /// exponential's energy; capped at `min(h, w)/2 − 1` for the reflect padding.
-fn psf_radius(cfg: &FamilyShape, df: &DiffusionFilter, pixel_size_um: f64, w: usize, h: usize) -> usize {
+fn psf_radius(
+    cfg: &FamilyShape,
+    df: &DiffusionFilter,
+    pixel_size_um: f64,
+    w: usize,
+    h: usize,
+) -> usize {
     let bloom_max_px = bloom_max_lambda_um(cfg) * df.spatial_scale / pixel_size_um;
     let radius = (8.0 * bloom_max_px).max(5.0).ceil() as usize;
     let cap = (h.min(w) / 2).saturating_sub(1).max(1);
@@ -637,7 +643,12 @@ pub struct DiffusionPsfSpec {
 
 /// See [`DiffusionPsfSpec`]. `None` when the filter is a no-op, exactly as in
 /// `apply_diffusion_filter_um`.
-pub fn diffusion_psf_spec(df: &DiffusionFilter, pixel_size_um: f64, width: u32, height: u32) -> Option<DiffusionPsfSpec> {
+pub fn diffusion_psf_spec(
+    df: &DiffusionFilter,
+    pixel_size_um: f64,
+    width: u32,
+    height: u32,
+) -> Option<DiffusionPsfSpec> {
     if df.strength <= 0.0 || df.spatial_scale <= 0.0 {
         return None;
     }
@@ -671,7 +682,11 @@ pub fn diffusion_psf_spec(df: &DiffusionFilter, pixel_size_um: f64, width: u32, 
         }
         v
     });
-    Some(DiffusionPsfSpec { p_s, radius, components })
+    Some(DiffusionPsfSpec {
+        p_s,
+        radius,
+        components,
+    })
 }
 
 /// Highlight-boost tone curve. Port of Python `boost_highlights`
@@ -883,7 +898,10 @@ pub fn diffusion_gpu_plan(
             .iter()
             .map(|c| [c[0] as f32, c[1] as f32, c[2] as f32])
             .collect(),
-        psf: spektrafilm_gpu::DiffusionPsf { radius: spec.radius as u32, components: spec.components },
+        psf: spektrafilm_gpu::DiffusionPsf {
+            radius: spec.radius as u32,
+            components: spec.components,
+        },
     })
 }
 
@@ -972,7 +990,11 @@ mod psf_spec_tests {
     /// The spec's exponentials rebuild the PSF the CPU convolves with.
     #[test]
     fn psf_spec_matches_the_cpu_psf() {
-        for (family, scale, warmth, w, h) in [("black_pro_mist", 1.0, 0.0, 900, 600), ("cinebloom", 2.0, 0.4, 400, 300), ("glimmerglass", 1.0, -0.5, 1200, 800)] {
+        for (family, scale, warmth, w, h) in [
+            ("black_pro_mist", 1.0, 0.0, 900, 600),
+            ("cinebloom", 2.0, 0.4, 400, 300),
+            ("glimmerglass", 1.0, -0.5, 1200, 800),
+        ] {
             let df = DiffusionFilter {
                 family,
                 strength: 0.8,
@@ -988,20 +1010,36 @@ mod psf_spec_tests {
             let pix = 5.8;
             let spec = diffusion_psf_spec(&df, pix, w, h).unwrap();
             let cfg = resolve_family_cfg(family_shape(family).unwrap(), &df);
-            assert_eq!(spec.radius, psf_radius(&cfg, &df, pix, w as usize, h as usize));
+            assert_eq!(
+                spec.radius,
+                psf_radius(&cfg, &df, pix, w as usize, h as usize)
+            );
             let k = 2 * spec.radius + 1;
             let psf = diffusion_filter_psf(k, &cfg, df.spatial_scale, pix, df.halo_warmth);
             for c in 0..3 {
                 let raw: Vec<f64> = (0..k * k)
                     .map(|p| {
-                        let (dx, dy) = ((p % k) as f64 - spec.radius as f64, (p / k) as f64 - spec.radius as f64);
+                        let (dx, dy) = (
+                            (p % k) as f64 - spec.radius as f64,
+                            (p / k) as f64 - spec.radius as f64,
+                        );
                         let r = (dx * dx + dy * dy).sqrt();
-                        spec.components[c].iter().map(|&(l, a)| a * (-r / l).exp()).sum::<f64>()
+                        spec.components[c]
+                            .iter()
+                            .map(|&(l, a)| a * (-r / l).exp())
+                            .sum::<f64>()
                     })
                     .collect();
                 let sum: f64 = raw.iter().sum();
-                let err = raw.iter().zip(&psf[c]).map(|(a, b)| (a / sum - b).abs()).fold(0.0, f64::max);
-                assert!(err < 1e-12 * psf[c].iter().cloned().fold(0.0, f64::max).max(1.0), "{family} channel {c}: {err}");
+                let err = raw
+                    .iter()
+                    .zip(&psf[c])
+                    .map(|(a, b)| (a / sum - b).abs())
+                    .fold(0.0, f64::max);
+                assert!(
+                    err < 1e-12 * psf[c].iter().cloned().fold(0.0, f64::max).max(1.0),
+                    "{family} channel {c}: {err}"
+                );
             }
         }
     }

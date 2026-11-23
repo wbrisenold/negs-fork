@@ -1,8 +1,8 @@
 //! RAW import white balance. See docs/raw-white-balance.md for upstream
 //! provenance and the differences between LibRaw and rawler development.
 
-use anyhow::{bail, ensure, Result};
-use rawler::{imgop::develop::Intermediate, RawImage};
+use anyhow::{Result, bail, ensure};
+use rawler::{RawImage, imgop::develop::Intermediate};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use spektrafilm_math::image::ImageBuf;
@@ -389,8 +389,18 @@ fn darktable_camera_coefficients(
         .ok_or_else(|| {
             anyhow::anyhow!("Darktable {} has no {preset_name} WB preset", camera.model)
         })?;
-    let tuning_min = preset.tunings.iter().map(|row| row.tuning).min().unwrap_or(0);
-    let tuning_max = preset.tunings.iter().map(|row| row.tuning).max().unwrap_or(0);
+    let tuning_min = preset
+        .tunings
+        .iter()
+        .map(|row| row.tuning)
+        .min()
+        .unwrap_or(0);
+    let tuning_max = preset
+        .tunings
+        .iter()
+        .map(|row| row.tuning)
+        .max()
+        .unwrap_or(0);
     // Some camera entries expose preset gains without any fine-tuning rows.
     // Treat stale/non-supported tuning values as the nearest recorded value
     // instead of failing RAW development.

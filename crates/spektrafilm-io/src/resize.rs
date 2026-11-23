@@ -47,7 +47,11 @@ impl Fit {
 /// Lanczos-3 filter in linear light: an encoded image is decoded with its
 /// space's transfer function first and encoded again after, so fine grain
 /// averages to the same brightness it has at full size.
-pub fn fit(image: &ImageBuf, fit: Fit, encoding: impl Into<crate::encoding::Encoding>) -> Option<ImageBuf> {
+pub fn fit(
+    image: &ImageBuf,
+    fit: Fit,
+    encoding: impl Into<crate::encoding::Encoding>,
+) -> Option<ImageBuf> {
     let (width, height) = fit.dimensions(image.width, image.height);
     if (width, height) == (image.width, image.height) {
         return None;
@@ -136,7 +140,10 @@ fn taps(src: usize, dst: usize) -> Vec<(usize, Vec<f64>)> {
 pub fn catmull_rom(image: &ImageBuf, (width, height): (u32, u32)) -> ImageBuf {
     assert!(image.width > 0 && image.height > 0 && width > 0 && height > 0);
     let (sw, dw) = (image.width as usize, width as usize);
-    let (columns, rows) = (catmull_rom_taps(image.width, width), catmull_rom_taps(image.height, height));
+    let (columns, rows) = (
+        catmull_rom_taps(image.width, width),
+        catmull_rom_taps(image.height, height),
+    );
     let mut data = vec![from_f64(0.0); dw * height as usize * 3];
     data.par_chunks_mut(dw * 3)
         .zip(rows.par_iter())
@@ -201,7 +208,9 @@ fn catmull_rom_taps(src: u32, dst: u32) -> Vec<(usize, Vec<f32>)> {
 fn bc_cubic(x: f32, b: f32, c: f32) -> f32 {
     let a = x.abs();
     let k = if a < 1.0 {
-        (12.0 - 9.0 * b - 6.0 * c) * a.powi(3) + (-18.0 + 12.0 * b + 6.0 * c) * a.powi(2) + (6.0 - 2.0 * b)
+        (12.0 - 9.0 * b - 6.0 * c) * a.powi(3)
+            + (-18.0 + 12.0 * b + 6.0 * c) * a.powi(2)
+            + (6.0 - 2.0 * b)
     } else if a < 2.0 {
         (-b - 6.0 * c) * a.powi(3)
             + (6.0 * b + 30.0 * c) * a.powi(2)
@@ -234,7 +243,15 @@ mod tests {
     #[test]
     fn fit_resamples_in_the_output_spaces_linear_light() {
         let encoding = crate::encoding::Encoding::new("ProPhoto RGB", true);
-        let img = ImageBuf::from_data(64, 32, [0.3f32, 0.6, 0.15].repeat(64 * 32).into_iter().map(from_f32).collect());
+        let img = ImageBuf::from_data(
+            64,
+            32,
+            [0.3f32, 0.6, 0.15]
+                .repeat(64 * 32)
+                .into_iter()
+                .map(from_f32)
+                .collect(),
+        );
         let small = fit(&img, Fit::LongEdge(16), encoding).unwrap();
         for px in small.data.chunks_exact(3) {
             for (v, want) in px.iter().zip([0.3, 0.6, 0.15]) {
@@ -268,7 +285,9 @@ mod tests {
     /// The old early resize: `image`'s Catmull–Rom, clamped to [0, 1].
     fn image_crate(image: &ImageBuf, (w, h): (u32, u32)) -> Vec<f32> {
         let data: Vec<f32> = image.data.iter().map(|&v| to_f32(v)).collect();
-        let src = ::image::ImageBuffer::<::image::Rgb<f32>, _>::from_raw(image.width, image.height, data).unwrap();
+        let src =
+            ::image::ImageBuffer::<::image::Rgb<f32>, _>::from_raw(image.width, image.height, data)
+                .unwrap();
         ::image::imageops::resize(&src, w, h, ::image::imageops::FilterType::CatmullRom).into_raw()
     }
 
@@ -289,7 +308,15 @@ mod tests {
     /// clamped, the value is kept: above 1, and the undershoot below 0.
     #[test]
     fn catmull_rom_matches_the_image_crate_wherever_it_did_not_clip() {
-        let sizes = [(37, 23, 101, 59), (101, 59, 37, 23), (64, 48, 64, 97), (64, 48, 13, 48), (5, 3, 1, 1), (1, 1, 7, 4), (40, 30, 120, 90)];
+        let sizes = [
+            (37, 23, 101, 59),
+            (101, 59, 37, 23),
+            (64, 48, 64, 97),
+            (64, 48, 13, 48),
+            (5, 3, 1, 1),
+            (1, 1, 7, 4),
+            (40, 30, 120, 90),
+        ];
         for (i, &(sw, sh, dw, dh)) in sizes.iter().enumerate() {
             for scale in [0.98, 2.5] {
                 let image = noise(sw, sh, scale, 7 + i as u64);
@@ -300,7 +327,11 @@ mod tests {
                 for (k, (&a, &b)) in old.iter().zip(&new.data).enumerate() {
                     let b = to_f32(b);
                     if a > 0.0 && a < 1.0 {
-                        assert_eq!(a.to_bits(), b.to_bits(), "{sw}x{sh}->{dw}x{dh} at {k}: {a} vs {b}");
+                        assert_eq!(
+                            a.to_bits(),
+                            b.to_bits(),
+                            "{sw}x{sh}->{dw}x{dh} at {k}: {a} vs {b}"
+                        );
                     } else if a == 0.0 {
                         assert!(b <= 0.0, "{b}");
                     } else {
@@ -323,7 +354,10 @@ mod tests {
             let flat = ImageBuf::from_data(9, 7, vec![from_f64(value); 9 * 7 * 3]);
             for size in [(27, 21), (4, 3)] {
                 let out = catmull_rom(&flat, size);
-                assert!(out.data.iter().all(|&v| (to_f64(v) - value).abs() < 1e-6), "{value} at {size:?}");
+                assert!(
+                    out.data.iter().all(|&v| (to_f64(v) - value).abs() < 1e-6),
+                    "{value} at {size:?}"
+                );
             }
         }
         // A bright impulse above 1 keeps its energy past the clip, and the
@@ -347,7 +381,9 @@ mod tests {
             }
         }
         // Overshoot of a [0, 1] edge rises above 1: the old resize clipped it.
-        let edge: Vec<Scalar> = (0..16 * 3).map(|i| from_f64(if i / 3 < 8 { 0.0 } else { 1.0 })).collect();
+        let edge: Vec<Scalar> = (0..16 * 3)
+            .map(|i| from_f64(if i / 3 < 8 { 0.0 } else { 1.0 }))
+            .collect();
         let edge = ImageBuf::from_data(16, 1, edge);
         let up = catmull_rom(&edge, (48, 1));
         assert!(up.data.iter().any(|&v| to_f64(v) > 1.0));

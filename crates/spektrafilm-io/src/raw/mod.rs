@@ -40,7 +40,9 @@ impl FromStr for RawDecoderPreference {
             "apple9" => Ok(Self::Apple9),
             "apple8" => Ok(Self::Apple8),
             "rawler" => Ok(Self::Rawler),
-            _ => bail!("Unknown RAW decoder {value:?}; choose auto, apple, apple9, apple8, or rawler"),
+            _ => bail!(
+                "Unknown RAW decoder {value:?}; choose auto, apple, apple9, apple8, or rawler"
+            ),
         }
     }
 }
@@ -119,7 +121,12 @@ impl RawDecoder for RawlerDecoder {
     /// Applies the corrections in DNG opcodes and Sony and Fujifilm
     /// metadata ([`crate::lens`]).
     fn decode(&self, path: &Path, options: RawDecodeOptions) -> Result<RawImage> {
-        let raw = crate::load_raw_rawler(path, options.apply_orientation, options.white_balance, options.lens_correction)?;
+        let raw = crate::load_raw_rawler(
+            path,
+            options.apply_orientation,
+            options.white_balance,
+            options.lens_correction,
+        )?;
         Ok(RawImage {
             image: raw.image,
             as_shot_white_balance: raw.as_shot_white_balance,
@@ -211,7 +218,9 @@ pub fn decode_raw(
     // Camera-specific channel gains must be set before demosaicing. Apple RAW
     // returns rendered RGB, so use Rawler for this mode on every platform.
     if options.white_balance.mode == crate::RawWhiteBalanceMode::CameraPreset {
-        return RawlerDecoder.decode(path, options).map(|raw| DecodedRaw::new(raw, &RawlerDecoder));
+        return RawlerDecoder
+            .decode(path, options)
+            .map(|raw| DecodedRaw::new(raw, &RawlerDecoder));
     }
     #[cfg(all(target_os = "macos", feature = "apple-raw"))]
     if preference == RawDecoderPreference::Auto {
@@ -220,12 +229,23 @@ pub fn decode_raw(
         return AppleRawDecoder
             .decode(path, options)
             .map(|raw| DecodedRaw::new(raw, &AppleRawDecoder));
-    } else if matches!(preference, RawDecoderPreference::Apple9 | RawDecoderPreference::Apple8) {
-        let decoder = apple::AppleRawVersion(if preference == RawDecoderPreference::Apple9 { 9 } else { 8 });
-        return decoder.decode(path, options)
+    } else if matches!(
+        preference,
+        RawDecoderPreference::Apple9 | RawDecoderPreference::Apple8
+    ) {
+        let decoder = apple::AppleRawVersion(if preference == RawDecoderPreference::Apple9 {
+            9
+        } else {
+            8
+        });
+        return decoder
+            .decode(path, options)
             .map(|raw| DecodedRaw::new(raw, &AppleRawDecoder));
     }
-    if matches!(preference, RawDecoderPreference::Apple | RawDecoderPreference::Apple9 | RawDecoderPreference::Apple8) {
+    if matches!(
+        preference,
+        RawDecoderPreference::Apple | RawDecoderPreference::Apple9 | RawDecoderPreference::Apple8
+    ) {
         bail!("Apple RAW decoding requires macOS and the apple-raw Cargo feature");
     }
     RawlerDecoder
@@ -302,13 +322,20 @@ mod tests {
             ([2, 0, 0], [1, 0, 0], false),
             ([1, 2, 0], [1, 1, 0], false),
         ] {
-            let backends = modes.map(|mode| Backend { calls: AtomicUsize::new(0), mode });
+            let backends = modes.map(|mode| Backend {
+                calls: AtomicUsize::new(0),
+                mode,
+            });
             let result = decode_compatible(
                 &[&backends[0], &backends[1], &backends[2]],
-                Path::new("test.orf"), RawDecodeOptions::default(),
+                Path::new("test.orf"),
+                RawDecodeOptions::default(),
             );
             assert_eq!(result.is_ok(), success, "{modes:?}");
-            assert_eq!(backends.each_ref().map(|b| b.calls.load(Ordering::SeqCst)), expected_calls);
+            assert_eq!(
+                backends.each_ref().map(|b| b.calls.load(Ordering::SeqCst)),
+                expected_calls
+            );
             if modes == [1, 1, 1] {
                 let error = result.err().unwrap();
                 assert!(error.is::<UnsupportedRaw>());
@@ -319,8 +346,14 @@ mod tests {
 
     #[test]
     fn forced_apple_generations_are_explicit_diagnostic_preferences() {
-        assert_eq!("apple9".parse::<RawDecoderPreference>().unwrap(), RawDecoderPreference::Apple9);
-        assert_eq!("apple8".parse::<RawDecoderPreference>().unwrap(), RawDecoderPreference::Apple8);
+        assert_eq!(
+            "apple9".parse::<RawDecoderPreference>().unwrap(),
+            RawDecoderPreference::Apple9
+        );
+        assert_eq!(
+            "apple8".parse::<RawDecoderPreference>().unwrap(),
+            RawDecoderPreference::Apple8
+        );
         assert!("apple7".parse::<RawDecoderPreference>().is_err());
     }
 
@@ -352,13 +385,15 @@ mod tests {
         let path = Path::new(&path);
         let options = RawDecodeOptions::default();
         let upright = AppleRawDecoder.decode(path, options)?.image;
-        let sensor = AppleRawDecoder.decode(
-            path,
-            RawDecodeOptions {
-                apply_orientation: false,
-                ..options
-            },
-        )?.image;
+        let sensor = AppleRawDecoder
+            .decode(
+                path,
+                RawDecodeOptions {
+                    apply_orientation: false,
+                    ..options
+                },
+            )?
+            .image;
         let orientation = raw_exif_orientation(&RawSource::new(path)?, &RawDecodeParams::default());
         let transformed = sensor.oriented(orientation);
         assert_eq!(
@@ -380,34 +415,38 @@ mod tests {
             ..options
         };
         let day = AppleRawDecoder.decode(path, daylight)?.image;
-        let identity = AppleRawDecoder.decode(
-            path,
-            RawDecodeOptions {
-                white_balance: RawWhiteBalance {
-                    mode: RawWhiteBalanceMode::Custom,
-                    temperature: 6504.0,
-                    tint: 1.0,
-                    ..Default::default()
+        let identity = AppleRawDecoder
+            .decode(
+                path,
+                RawDecodeOptions {
+                    white_balance: RawWhiteBalance {
+                        mode: RawWhiteBalanceMode::Custom,
+                        temperature: 6504.0,
+                        tint: 1.0,
+                        ..Default::default()
+                    },
+                    ..options
                 },
-                ..options
-            },
-        )?.image;
+            )?
+            .image;
         assert_eq!(
             day.data, identity.data,
             "custom daylight must be exactly daylight"
         );
-        let tinted = AppleRawDecoder.decode(
-            path,
-            RawDecodeOptions {
-                white_balance: RawWhiteBalance {
-                    mode: RawWhiteBalanceMode::Custom,
-                    temperature: 3200.0,
-                    tint: 0.8,
-                    ..Default::default()
+        let tinted = AppleRawDecoder
+            .decode(
+                path,
+                RawDecodeOptions {
+                    white_balance: RawWhiteBalance {
+                        mode: RawWhiteBalanceMode::Custom,
+                        temperature: 3200.0,
+                        tint: 0.8,
+                        ..Default::default()
+                    },
+                    ..options
                 },
-                ..options
-            },
-        )?.image;
+            )?
+            .image;
         assert!(
             day.data
                 .iter()
@@ -443,7 +482,10 @@ mod tests {
             (off.image.width, off.image.height),
             (on.image.width, on.image.height)
         );
-        assert_eq!(off.image.data != on.image.data, on.lens_correction_supported);
+        assert_eq!(
+            off.image.data != on.image.data,
+            on.lens_correction_supported
+        );
         Ok(())
     }
 
@@ -457,16 +499,24 @@ mod tests {
         let path = std::env::var_os("SPEKTRAFILM_RAW_TEST_FILE")
             .context("SPEKTRAFILM_RAW_TEST_FILE is required")?;
         let path = Path::new(&path);
-        let apple = AppleRawDecoder.decode(path, RawDecodeOptions::default())?.image;
+        let apple = AppleRawDecoder
+            .decode(path, RawDecodeOptions::default())?
+            .image;
         let upright = AppleRawDecoder.decode(
             path,
-            RawDecodeOptions { apply_orientation: false, ..Default::default() },
+            RawDecodeOptions {
+                apply_orientation: false,
+                ..Default::default()
+            },
         )?;
         let src = rawler::rawsource::RawSource::new(path)?;
         let orientation = crate::raw_exif_orientation(&src, &Default::default());
         let ours = upright.image.oriented(orientation);
         assert_eq!((ours.width, ours.height), (apple.width, apple.height));
-        assert!(ours.data == apple.data, "orientation {orientation} differs from Apple's");
+        assert!(
+            ours.data == apple.data,
+            "orientation {orientation} differs from Apple's"
+        );
         Ok(())
     }
 
@@ -480,20 +530,38 @@ mod tests {
         let path = std::env::var_os("SPEKTRAFILM_RAW_TEST_FILE")
             .context("SPEKTRAFILM_RAW_TEST_FILE is required")?;
         let path = Path::new(&path);
-        for lens_correction in [LensCorrection { enabled: false }, LensCorrection { enabled: true }] {
-            let whole = AppleRawDecoder.decode(path, RawDecodeOptions { lens_correction, ..Default::default() })?;
+        for lens_correction in [
+            LensCorrection { enabled: false },
+            LensCorrection { enabled: true },
+        ] {
+            let whole = AppleRawDecoder.decode(
+                path,
+                RawDecodeOptions {
+                    lens_correction,
+                    ..Default::default()
+                },
+            )?;
             let full = &whole.image;
             assert!(whole.reduced_from.is_none());
             let reduced = AppleRawDecoder.decode(
                 path,
-                RawDecodeOptions { lens_correction, max_long_side: 1200, ..Default::default() },
+                RawDecodeOptions {
+                    lens_correction,
+                    max_long_side: 1200,
+                    ..Default::default()
+                },
             )?;
             assert_eq!(reduced.reduced_from, Some((full.width, full.height)));
-            assert_eq!(reduced.lens_correction_supported, whole.lens_correction_supported);
+            assert_eq!(
+                reduced.lens_correction_supported,
+                whole.lens_correction_supported
+            );
             let small = &reduced.image;
             assert_eq!(small.width.max(small.height), 1200);
             let aspect = |w: u32, h: u32| w as f64 / h as f64;
-            assert!((aspect(full.width, full.height) - aspect(small.width, small.height)).abs() < 0.01);
+            assert!(
+                (aspect(full.width, full.height) - aspect(small.width, small.height)).abs() < 0.01
+            );
             let region = |image: &ImageBuf, cx: u32, cy: u32| -> [f64; 3] {
                 let (x0, x1) = (image.width * cx / 8, image.width * (cx + 1) / 8);
                 let (y0, y1) = (image.height * cy / 8, image.height * (cy + 1) / 8);
@@ -513,13 +581,22 @@ mod tests {
                 for cx in 0..8 {
                     let (a, b) = (region(full, cx, cy), region(small, cx, cy));
                     for c in 0..3 {
-                        assert!((a[c] - b[c]).abs() < 0.01, "region {cx},{cy} channel {c}: {} and {}", a[c], b[c]);
+                        assert!(
+                            (a[c] - b[c]).abs() < 0.01,
+                            "region {cx},{cy} channel {c}: {} and {}",
+                            a[c],
+                            b[c]
+                        );
                     }
                 }
             }
             let wide = AppleRawDecoder.decode(
                 path,
-                RawDecodeOptions { lens_correction, max_long_side: 100_000, ..Default::default() },
+                RawDecodeOptions {
+                    lens_correction,
+                    max_long_side: 100_000,
+                    ..Default::default()
+                },
             )?;
             assert!(wide.reduced_from.is_none());
             assert!(wide.image.data == full.data);
@@ -533,23 +610,48 @@ mod tests {
     #[test]
     #[ignore = "requires local camera RAW files in SPEKTRAFILM_TEST_RAWS"]
     fn apple_raw_chooses_the_generation_trying_9_then_8_did() -> Result<()> {
-        let paths = std::env::var_os("SPEKTRAFILM_TEST_RAWS").context("set SPEKTRAFILM_TEST_RAWS")?;
+        let paths =
+            std::env::var_os("SPEKTRAFILM_TEST_RAWS").context("set SPEKTRAFILM_TEST_RAWS")?;
         for path in std::env::split_paths(&paths) {
             for options in [
                 RawDecodeOptions::default(),
-                RawDecodeOptions { lens_correction: LensCorrection { enabled: true }, max_long_side: 1200, ..Default::default() },
+                RawDecodeOptions {
+                    lens_correction: LensCorrection { enabled: true },
+                    max_long_side: 1200,
+                    ..Default::default()
+                },
             ] {
                 let started = std::time::Instant::now();
-                let tried = decode_compatible(&[&apple::AppleRawVersion(9), &apple::AppleRawVersion(8)], &path, options)?;
+                let tried = decode_compatible(
+                    &[&apple::AppleRawVersion(9), &apple::AppleRawVersion(8)],
+                    &path,
+                    options,
+                )?;
                 let tried_time = started.elapsed();
                 let started = std::time::Instant::now();
                 let chosen = AppleRawDecoder.decode(&path, options)?;
-                eprintln!("{}: {:?}, tried 9 then 8 {tried_time:?}, chosen {:?}", path.display(), chosen.decoder_version, started.elapsed());
-                assert_eq!(chosen.decoder_version, tried.decoder_version, "{}", path.display());
-                assert_eq!((chosen.image.width, chosen.image.height), (tried.image.width, tried.image.height));
+                eprintln!(
+                    "{}: {:?}, tried 9 then 8 {tried_time:?}, chosen {:?}",
+                    path.display(),
+                    chosen.decoder_version,
+                    started.elapsed()
+                );
+                assert_eq!(
+                    chosen.decoder_version,
+                    tried.decoder_version,
+                    "{}",
+                    path.display()
+                );
+                assert_eq!(
+                    (chosen.image.width, chosen.image.height),
+                    (tried.image.width, tried.image.height)
+                );
                 assert!(chosen.image.data == tried.image.data, "{}", path.display());
                 assert_eq!(chosen.reduced_from, tried.reduced_from);
-                assert_eq!(chosen.lens_correction_supported, tried.lens_correction_supported);
+                assert_eq!(
+                    chosen.lens_correction_supported,
+                    tried.lens_correction_supported
+                );
             }
         }
         Ok(())

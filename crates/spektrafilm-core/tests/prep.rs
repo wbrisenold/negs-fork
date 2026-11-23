@@ -273,7 +273,10 @@ fn resident_and_submitted_gpu_apply_prep_and_invalidate_source_uploads() {
             }
             if variation == 4 {
                 // Exposure alone: folded into the front pass, not prepared.
-                p.prep = PrepParams { exposure_ev: -0.85, ..Default::default() };
+                p.prep = PrepParams {
+                    exposure_ev: -0.85,
+                    ..Default::default()
+                };
             }
             let (ready, neutral) = prepared(&source, &p);
             let pipe = pipeline(p).with_autoexposure_ev(0.4);
@@ -307,12 +310,16 @@ fn a_prepared_frame_is_reused_only_while_what_prep_reads_is_unchanged() {
         if let Some(frame) = frame {
             pipe = pipe.with_prepared_frame(frame.clone());
         }
-        bits(&pipe.process_resident_borrowed(&source, &gpu).expect("GPU resident Prep"))
+        bits(
+            &pipe
+                .process_resident_borrowed(&source, &gpu)
+                .expect("GPU resident Prep"),
+        )
     };
     let frame = prep::PreparedFrame::default();
     let mut edits: Vec<Box<dyn Fn(&mut RuntimeParams)>> = vec![
         Box::new(|_| {}),
-        Box::new(|_| {}), // reused
+        Box::new(|_| {}),                              // reused
         Box::new(|p| p.enlarger.print_exposure = 1.3), // reused: after Prep
         Box::new(|p| p.camera.exposure_compensation_ev = 0.2),
         Box::new(|p| p.prep.exposure_ev = 0.3),

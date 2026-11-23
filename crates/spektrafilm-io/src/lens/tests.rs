@@ -26,7 +26,10 @@ fn warp_body(planes: &[[f64; 6]], centre: (f64, f64)) -> Vec<u8> {
 }
 
 fn dng_profile(bytes: &[u8]) -> Profile {
-    Profile { source: Source::Dng, model: Model::Dng(dng::parse(bytes).unwrap()) }
+    Profile {
+        source: Source::Dng,
+        model: Model::Dng(dng::parse(bytes).unwrap()),
+    }
 }
 
 #[test]
@@ -141,16 +144,25 @@ fn vignette_only_profiles_do_not_resample() {
 /// Values from a Sony ARW (`DSC09488.ARW`).
 #[test]
 fn sony_coefficients_follow_darktable() {
-    let dist = [16., -2., 0., 2., 4., 6., 9., 12., 13., 14., 13., 10., 2., -10., -28., -52., -84.];
-    let ca = [
-        32., -640., -512., -384., -256., -256., -256., -256., -128., -128., -128., -128., -128., -128., 0., 0., 0.,
-        -1024., -768., -640., -512., -512., -512., -640., -512., -512., -512., -512., -512., -512., -512., -512., -384.,
+    let dist = [
+        16., -2., 0., 2., 4., 6., 9., 12., 13., 14., 13., 10., 2., -10., -28., -52., -84.,
     ];
-    let vig = [16., 0., 96., 448., 1024., 1744., 2560., 3472., 4432., 5424., 6432., 7440., 8432., 9424., 10400., 11344., 12256.];
+    let ca = [
+        32., -640., -512., -384., -256., -256., -256., -256., -128., -128., -128., -128., -128.,
+        -128., 0., 0., 0., -1024., -768., -640., -512., -512., -512., -640., -512., -512., -512.,
+        -512., -512., -512., -512., -512., -384.,
+    ];
+    let vig = [
+        16., 0., 96., 448., 1024., 1744., 2560., 3472., 4432., 5424., 6432., 7440., 8432., 9424.,
+        10400., 11344., 12256.,
+    ];
     let r = sony_radial(&dist, &ca, &vig).unwrap();
     assert_eq!(r.knots_dist[0], 0.5 / 15.0);
     assert_eq!(r.cor[1][15], 1.0 - 84.0 / 16384.0);
-    assert_eq!(r.cor[0][0], (1.0 - 2.0 / 16384.0) * (1.0 - 640.0 / 2097152.0));
+    assert_eq!(
+        r.cor[0][0],
+        (1.0 - 2.0 / 16384.0) * (1.0 - 640.0 / 2097152.0)
+    );
     // No vignetting correction at the centre; about +0.9 EV in the corner.
     assert_eq!(r.vig[0], 1.0);
     let corner_ev = -r.vig[15].log2();
@@ -187,13 +199,20 @@ fn fujifilm_coefficients_follow_darktable() {
 /// `DistortionInfo` from a Panasonic RW2 (`6269228880.rw2`).
 #[test]
 fn panasonic_distortion_follows_darktable() {
-    let v: [i16; 16] = [-10583, -3487, 1, 642, 252, -12, 335, -1535, 2150, 616, 344, 428, 3605, 1116, 31400, -4762];
+    let v: [i16; 16] = [
+        -10583, -3487, 1, 642, 252, -12, 335, -1535, 2150, 616, 344, 428, 3605, 1116, 31400, -4762,
+    ];
     let bytes: Vec<u8> = v.iter().flat_map(|x| x.to_le_bytes()).collect();
     let r = panasonic_radial(&bytes).unwrap();
     assert_eq!(r.cor[1][0], 1.0);
     // a, b, c > 0: barrel; the source radius shrinks toward the corner.
     let corner = r.cor[1][15];
-    let (scale, a, b, c) = (1.0 / (1.0 - 12.0 / 32768.0), 2150.0 / 32768.0, 252.0 / 32768.0, 428.0 / 32768.0);
+    let (scale, a, b, c) = (
+        1.0 / (1.0 - 12.0 / 32768.0),
+        2150.0 / 32768.0,
+        252.0 / 32768.0,
+        428.0 / 32768.0,
+    );
     let rd = corner;
     let ru = rd + scale * (a * rd.powi(3) + b * rd.powi(5) + c * rd.powi(7));
     assert!((ru - 1.0).abs() < 1e-6, "{ru}");
@@ -208,7 +227,14 @@ fn panasonic_distortion_follows_darktable() {
 #[test]
 fn olympus_coefficients_follow_darktable() {
     let dist = [0.0, 0.0, 0.0, 1.0];
-    let ca = [-0.000128627, 0.00019455, -0.0000100136, 0.00019634, -0.000285864, 0.0000486374];
+    let ca = [
+        -0.000128627,
+        0.00019455,
+        -0.0000100136,
+        0.00019634,
+        -0.000285864,
+        0.0000486374,
+    ];
     let r = olympus_radial(Some(&dist), Some(&ca)).unwrap();
     assert!(r.cor[1].iter().all(|&g| g == 1.0));
     let (red, blue) = (r.cor[0][15], r.cor[2][15]);
@@ -226,7 +252,10 @@ fn real_files_have_profiles() {
     let files = std::env::var("SPEKTRAFILM_LENS_TEST_FILES").unwrap();
     for path in files.split(':') {
         let p = read_profile(Path::new(path));
-        eprintln!("{path}: {:?}", p.as_ref().map(|p| (p.source, p.warps(), p.vignettes())));
+        eprintln!(
+            "{path}: {:?}",
+            p.as_ref().map(|p| (p.source, p.warps(), p.vignettes()))
+        );
         assert!(p.is_some(), "{path}");
     }
 }
@@ -245,7 +274,11 @@ fn bench_resample() {
         for _ in 0..3 {
             let t = std::time::Instant::now();
             apply(&mut img, &p, None);
-            eprintln!("{name} 24 MP: {:?} ({} threads)", t.elapsed(), rayon::current_num_threads());
+            eprintln!(
+                "{name} 24 MP: {:?} ({} threads)",
+                t.elapsed(),
+                rayon::current_num_threads()
+            );
         }
     }
 }

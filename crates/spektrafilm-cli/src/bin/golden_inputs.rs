@@ -61,8 +61,12 @@ fn main() -> Result<()> {
         write(&out_dir.join(format!("photo_{stem}.tif")), w, h, &data)?;
     }
 
-    let synthetic: [(&str, fn(u32, u32) -> [f64; 3]); 4] =
-        [("ramp", ramp), ("gamut", gamut), ("noise", noise), ("edges", edges)];
+    let synthetic: [(&str, fn(u32, u32) -> [f64; 3]); 4] = [
+        ("ramp", ramp),
+        ("gamut", gamut),
+        ("noise", noise),
+        ("edges", edges),
+    ];
     for (name, pattern) in synthetic {
         let mut data = Vec::with_capacity((SYNTH_W * SYNTH_H * 3) as usize);
         for y in 0..SYNTH_H {
@@ -70,7 +74,12 @@ fn main() -> Result<()> {
                 data.extend_from_slice(&pattern(x, y));
             }
         }
-        write(&out_dir.join(format!("synth_{name}.tif")), SYNTH_W, SYNTH_H, &data)?;
+        write(
+            &out_dir.join(format!("synth_{name}.tif")),
+            SYNTH_W,
+            SYNTH_H,
+            &data,
+        )?;
     }
     Ok(())
 }
@@ -167,10 +176,17 @@ fn noise(x: u32, y: u32) -> [f64; 3] {
 
 /// A 32 px checkerboard of 0.002 and 40 with a bright disk in the middle.
 fn edges(x: u32, y: u32) -> [f64; 3] {
-    let (dx, dy) = (x as i64 - (SYNTH_W / 2) as i64, y as i64 - (SYNTH_H / 2) as i64);
+    let (dx, dy) = (
+        x as i64 - (SYNTH_W / 2) as i64,
+        y as i64 - (SYNTH_H / 2) as i64,
+    );
     if dx * dx + dy * dy < 80 * 80 {
         return [200.0, 150.0, 80.0];
     }
-    let v = if (x / 32 + y / 32) % 2 == 0 { 0.002 } else { 40.0 };
+    let v = if (x / 32 + y / 32) % 2 == 0 {
+        0.002
+    } else {
+        40.0
+    };
     [v, v, v]
 }

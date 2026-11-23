@@ -30,19 +30,43 @@ fn transmittances_match_python() {
     let fixture: Fixture =
         serde_json::from_str(include_str!("fixtures/color_filters_python_28bf883.json")).unwrap();
     assert_eq!(fixture.wavelengths.len(), 81);
-    assert_eq!((fixture.wavelengths[0], fixture.wavelengths[80]), (380.0, 780.0));
-    let keys: Vec<&str> = color_filters::COLOR_FILTER_LIBRARY.iter().map(|spec| spec.key).collect();
-    let frozen: Vec<&str> = fixture.filters.iter().map(|filter| filter.key.as_str()).collect();
+    assert_eq!(
+        (fixture.wavelengths[0], fixture.wavelengths[80]),
+        (380.0, 780.0)
+    );
+    let keys: Vec<&str> = color_filters::COLOR_FILTER_LIBRARY
+        .iter()
+        .map(|spec| spec.key)
+        .collect();
+    let frozen: Vec<&str> = fixture
+        .filters
+        .iter()
+        .map(|filter| filter.key.as_str())
+        .collect();
     assert_eq!(keys, frozen);
-    for (filter, spec) in fixture.filters.iter().zip(color_filters::COLOR_FILTER_LIBRARY) {
+    for (filter, spec) in fixture
+        .filters
+        .iter()
+        .zip(color_filters::COLOR_FILTER_LIBRARY)
+    {
         assert_eq!(filter.label, spec.label);
-        let actual = color_filters::transmittance(&data_dir(), &filter.key).unwrap().unwrap();
+        let actual = color_filters::transmittance(&data_dir(), &filter.key)
+            .unwrap()
+            .unwrap();
         assert_eq!(actual.len(), 81);
         for (i, (a, e)) in actual.iter().zip(&filter.transmittance).enumerate() {
-            assert!((a - e).abs() < 1e-12, "{} at {} nm: {a} vs {e}", filter.key, fixture.wavelengths[i]);
+            assert!(
+                (a - e).abs() < 1e-12,
+                "{} at {} nm: {a} vs {e}",
+                filter.key,
+                fixture.wavelengths[i]
+            );
         }
     }
-    assert_eq!(color_filters::transmittance(&data_dir(), "none").unwrap(), None);
+    assert_eq!(
+        color_filters::transmittance(&data_dir(), "none").unwrap(),
+        None
+    );
     assert!(color_filters::transmittance(&data_dir(), "hoya_typo").is_err());
 }
 
@@ -56,9 +80,15 @@ fn film_density(film: &str, color_filter: &str) -> Vec<f64> {
     params.film_render.halation.active = false;
     params.film_render.dir_couplers.active = false;
     let film_profile = profile::load_profile_by_name(&data, film).unwrap();
-    let pipeline = Pipeline::new_with_spectral(film_profile.clone(), film_profile, params, &data).unwrap();
+    let pipeline =
+        Pipeline::new_with_spectral(film_profile.clone(), film_profile, params, &data).unwrap();
     let image = ImageBuf::from_data(1, 1, vec![from_f64(0.184); 3]);
-    pipeline.process(image, &CpuBackend).data.iter().map(|&v| v as f64).collect()
+    pipeline
+        .process(image, &CpuBackend)
+        .data
+        .iter()
+        .map(|&v| v as f64)
+        .collect()
 }
 
 /// A filter changes the render through the film's sensitivity, "none" is
@@ -69,7 +99,10 @@ fn filters_reach_the_film_exposure() {
     let r1 = film_density("kodak_portra_400", "hoya_r1");
     assert_eq!(none, film_density("kodak_portra_400", "none"));
     assert!(r1.iter().all(|v| v.is_finite()));
-    assert!(none.iter().zip(&r1).any(|(a, b)| (a - b).abs() > 1e-3), "{none:?} vs {r1:?}");
+    assert!(
+        none.iter().zip(&r1).any(|(a, b)| (a - b).abs() > 1e-3),
+        "{none:?} vs {r1:?}"
+    );
     let mut params = RuntimeParams::default();
     params.camera.color_filter = "hoya_typo".into();
     let data = data_dir();

@@ -38,7 +38,9 @@ fn main() -> Result<()> {
     let densities: Vec<f64> = (0..N).map(|_| rnd.uniform() * 7.0 - 3.0).collect();
     let positive: Vec<f64> = (0..N).map(|_| rnd.uniform() * 8.0 + 1e-9).collect();
     let small: Vec<f64> = (0..N).map(|_| rnd.uniform() * 2.0 - 1.0).collect();
-    let ev: Vec<f32> = (0..N).map(|_| (rnd.uniform() * 12.0 - 6.0) as f32).collect();
+    let ev: Vec<f32> = (0..N)
+        .map(|_| (rnd.uniform() * 12.0 - 6.0) as f32)
+        .collect();
 
     // f64 functions on the shapes the engine uses.
     let f64_probes: [(&str, Box<dyn Fn(usize) -> f64>); 10] = [
@@ -55,23 +57,38 @@ fn main() -> Result<()> {
     ];
     for (name, f) in &f64_probes {
         let v: Vec<f64> = (0..N).map(f).collect();
-        write(out, &format!("math_{name}.f64"), v.iter().flat_map(|x| x.to_le_bytes()))?;
+        write(
+            out,
+            &format!("math_{name}.f64"),
+            v.iter().flat_map(|x| x.to_le_bytes()),
+        )?;
     }
     // The engine's 10^x helper (vForce `vvpow` on Apple, `powf` elsewhere).
     let mut v = densities.clone();
     spektrafilm_math::vforce::exp10_inplace(&mut v);
-    write(out, "math_exp10_inplace.f64", v.iter().flat_map(|x| x.to_le_bytes()))?;
+    write(
+        out,
+        "math_exp10_inplace.f64",
+        v.iter().flat_map(|x| x.to_le_bytes()),
+    )?;
 
     // f32 functions (auto-exposure and exposure compensation use 2f32.powf).
     let f32_probes: [(&str, Box<dyn Fn(usize) -> f32>); 4] = [
         ("pow2", Box::new(|i| 2f32.powf(ev[i]))),
-        ("powf", Box::new(|i| (positive[i] as f32).powf(small[i] as f32 * 3.0))),
+        (
+            "powf",
+            Box::new(|i| (positive[i] as f32).powf(small[i] as f32 * 3.0)),
+        ),
         ("exp", Box::new(|i| (densities[i] as f32).exp())),
         ("log10", Box::new(|i| (positive[i] as f32).log10())),
     ];
     for (name, f) in &f32_probes {
         let v: Vec<f32> = (0..N).map(f).collect();
-        write(out, &format!("math_{name}.f32"), v.iter().flat_map(|x| x.to_le_bytes()))?;
+        write(
+            out,
+            &format!("math_{name}.f32"),
+            v.iter().flat_map(|x| x.to_le_bytes()),
+        )?;
     }
 
     // Poisson: the multiplication sampler below λ = 10, PTRS at and above it,
@@ -120,14 +137,25 @@ fn poisson(out: &Path, name: &str, seed: u32, lambdas: &[f64]) -> Result<()> {
     let mut rng = Mt::new(seed);
     let mut v: Vec<u64> = lambdas.iter().map(|&l| rk_poisson(&mut rng, l)).collect();
     v.push(rng.next_u32() as u64);
-    write(out, &format!("{name}.u64"), v.iter().flat_map(|x| x.to_le_bytes()))
+    write(
+        out,
+        &format!("{name}.u64"),
+        v.iter().flat_map(|x| x.to_le_bytes()),
+    )
 }
 
 fn binomial(out: &Path, name: &str, seed: u32, cases: &[(u64, f64)]) -> Result<()> {
     let mut rng = Mt::new(seed);
-    let mut v: Vec<u64> = cases.iter().map(|&(n, p)| rk_binomial(&mut rng, n, p)).collect();
+    let mut v: Vec<u64> = cases
+        .iter()
+        .map(|&(n, p)| rk_binomial(&mut rng, n, p))
+        .collect();
     v.push(rng.next_u32() as u64);
-    write(out, &format!("{name}.u64"), v.iter().flat_map(|x| x.to_le_bytes()))
+    write(
+        out,
+        &format!("{name}.u64"),
+        v.iter().flat_map(|x| x.to_le_bytes()),
+    )
 }
 
 fn write(out: &Path, name: &str, bytes: impl Iterator<Item = u8>) -> Result<()> {

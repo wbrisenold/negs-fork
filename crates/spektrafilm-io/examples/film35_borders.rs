@@ -46,7 +46,10 @@ fn main() -> Result<()> {
             save(&strip.preview(scale), &dir.join(format!("{film}.png")))?;
         }
         let window = Strip::window(format).map(|v| (v * 1e6).round() / 1e6);
-        frames.insert(format.name().into(), serde_json::json!({ "window": window }));
+        frames.insert(
+            format.name().into(),
+            serde_json::json!({ "window": window }),
+        );
         eprintln!("{}: {} strips", dir.display(), films.clone().count());
     }
     fs::write(

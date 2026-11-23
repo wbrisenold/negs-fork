@@ -49,8 +49,14 @@ fn start() {
             .copied()
             .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
             .unwrap_or("panic");
-        let location = info.location().map(|l| format!(" at {}:{}", l.file(), l.line())).unwrap_or_default();
-        report_panic(INSTANCE.load(Ordering::Relaxed), &format!("{message}{location}"));
+        let location = info
+            .location()
+            .map(|l| format!(" at {}:{}", l.file(), l.line()))
+            .unwrap_or_default();
+        report_panic(
+            INSTANCE.load(Ordering::Relaxed),
+            &format!("{message}{location}"),
+        );
     }));
 }
 
@@ -85,7 +91,8 @@ pub fn register_data(path: &str, bytes: Vec<u8>) {
 /// registered; `web/make-catalog.mjs` runs it at build time.
 #[wasm_bindgen]
 pub fn catalog(stocks: Vec<String>) -> Result<String, JsError> {
-    let catalog = spektrafilm_core::catalog::catalog(Path::new(DATA_DIR), stocks).map_err(|e| JsError::new(&e.to_string()))?;
+    let catalog = spektrafilm_core::catalog::catalog(Path::new(DATA_DIR), stocks)
+        .map_err(|e| JsError::new(&e.to_string()))?;
     Ok(catalog.to_string())
 }
 
@@ -111,7 +118,12 @@ pub fn balance_print(film: &str, paper: &str, params_json: &str) -> Result<Balan
     // when it solved.
     let missing = missing();
     if !missing.is_empty() {
-        return Ok(Balanced { m_filter_shift: 0.0, y_filter_shift: 0.0, elapsed_ms: 0.0, missing });
+        return Ok(Balanced {
+            m_filter_shift: 0.0,
+            y_filter_shift: 0.0,
+            elapsed_ms: 0.0,
+            missing,
+        });
     }
     let (m, y) = solved.map_err(|e| JsError::new(&e))?;
     Ok(Balanced {
@@ -152,10 +164,21 @@ pub fn import_preset(text: &str, current_json: &str) -> Result<PresetResult, JsE
     Ok(match imported {
         Ok(preset) => {
             let params = spektrafilm_core::presets::apply(&preset.params, &current);
-            let params = serde_json::to_string(&params).map_err(|e| JsError::new(&e.to_string()))?;
-            PresetResult { film: preset.film, paper: preset.paper, text: params, error: String::new(), missing }
+            let params =
+                serde_json::to_string(&params).map_err(|e| JsError::new(&e.to_string()))?;
+            PresetResult {
+                film: preset.film,
+                paper: preset.paper,
+                text: params,
+                error: String::new(),
+                missing,
+            }
         }
-        Err(error) => PresetResult { error, missing, ..Default::default() },
+        Err(error) => PresetResult {
+            error,
+            missing,
+            ..Default::default()
+        },
     })
 }
 
@@ -169,8 +192,16 @@ pub fn export_preset(film: &str, paper: &str, params_json: &str) -> Result<Prese
     let exported = spektrafilm_core::presets::export(film, paper, &params, Path::new(DATA_DIR));
     let missing = missing();
     Ok(match exported {
-        Ok(text) => PresetResult { text, missing, ..Default::default() },
-        Err(error) => PresetResult { error, missing, ..Default::default() },
+        Ok(text) => PresetResult {
+            text,
+            missing,
+            ..Default::default()
+        },
+        Err(error) => PresetResult {
+            error,
+            missing,
+            ..Default::default()
+        },
     })
 }
 
@@ -180,14 +211,28 @@ pub fn export_preset(film: &str, paper: &str, params_json: &str) -> Result<Prese
 /// a missing data file can fall back silently, so register the `missing`
 /// files and export again even when it succeeded.
 #[wasm_bindgen(js_name = exportLut)]
-pub fn export_lut(film: &str, paper: &str, params_json: &str, size: u32) -> Result<PresetResult, JsError> {
+pub fn export_lut(
+    film: &str,
+    paper: &str,
+    params_json: &str,
+    size: u32,
+) -> Result<PresetResult, JsError> {
     let params = parse_params(params_json).map_err(js_error)?;
     data_fs::take_missing();
-    let exported = spektrafilm_core::lut_export::cube(Path::new(DATA_DIR), film, paper, params, size);
+    let exported =
+        spektrafilm_core::lut_export::cube(Path::new(DATA_DIR), film, paper, params, size);
     let missing = missing();
     Ok(match exported {
-        Ok(text) => PresetResult { text, missing, ..Default::default() },
-        Err(error) => PresetResult { error, missing, ..Default::default() },
+        Ok(text) => PresetResult {
+            text,
+            missing,
+            ..Default::default()
+        },
+        Err(error) => PresetResult {
+            error,
+            missing,
+            ..Default::default()
+        },
     })
 }
 
@@ -224,7 +269,8 @@ pub fn add_border(
     use spektrafilm_io::border;
     let started = web_time::Instant::now();
     let style: border::BorderStyle = style.parse().map_err(js_error)?;
-    let options: border::BorderOptions = serde_json::from_str(options_json).map_err(|e| JsError::new(&e.to_string()))?;
+    let options: border::BorderOptions =
+        serde_json::from_str(options_json).map_err(|e| JsError::new(&e.to_string()))?;
     let encoding = Encoding::new("sRGB", true);
     let pixels = (width as usize) * (height as usize);
     if rgba.len() != pixels * 4 {
@@ -237,10 +283,17 @@ pub fn add_border(
         .collect();
     let image = ImageBuf::from_data(width, height, data);
     data_fs::take_missing();
-    let bordered = border::add_border_with(&image, style, &options, film, encoding, &load_data_image);
+    let bordered =
+        border::add_border_with(&image, style, &options, film, encoding, &load_data_image);
     let missing = missing();
     if !missing.is_empty() {
-        return Ok(Bordered { width: 0, height: 0, rgba: Vec::new(), elapsed_ms: 0.0, missing });
+        return Ok(Bordered {
+            width: 0,
+            height: 0,
+            rgba: Vec::new(),
+            elapsed_ms: 0.0,
+            missing,
+        });
     }
     let mut bordered = bordered.map_err(js_error)?;
     drop(image);
@@ -250,7 +303,9 @@ pub fn add_border(
     let mut out = Vec::with_capacity(bordered.data.len() / 3 * 4);
     for p in bordered.data.chunks_exact(3) {
         for &v in p {
-            out.push((spektrafilm_math::precision::to_f32(v).clamp(0.0, 1.0) * 255.0).round() as u8);
+            out.push(
+                (spektrafilm_math::precision::to_f32(v).clamp(0.0, 1.0) * 255.0).round() as u8,
+            );
         }
         out.push(255);
     }
@@ -276,7 +331,8 @@ pub struct Bordered {
 
 /// A registered image in the data directory, decoded.
 fn load_data_image(path: &str) -> anyhow::Result<image::DynamicImage> {
-    let bytes = data_fs::read(&Path::new(DATA_DIR).join(path)).map_err(|e| anyhow::anyhow!("{path}: {e}"))?;
+    let bytes = data_fs::read(&Path::new(DATA_DIR).join(path))
+        .map_err(|e| anyhow::anyhow!("{path}: {e}"))?;
     Ok(image::load_from_memory(&bytes)?)
 }
 
@@ -369,7 +425,11 @@ impl Engine {
     /// The WebGPU engine. Fails without WebGPU.
     #[wasm_bindgen(js_name = newGpu)]
     pub async fn new_gpu() -> Result<Engine, JsError> {
-        let gpu = Rc::new(WgpuBackend::new_async().await.ok_or_else(|| JsError::new("no WebGPU adapter"))?);
+        let gpu = Rc::new(
+            WgpuBackend::new_async()
+                .await
+                .ok_or_else(|| JsError::new("no WebGPU adapter"))?,
+        );
         Ok(Self::with_backend(gpu.clone(), Some(gpu)))
     }
 
@@ -391,7 +451,9 @@ impl Engine {
             thumbnail_autoexposure: Vec::new(),
             shown: None,
         };
-        Engine { state: Rc::new(RefCell::new(state)) }
+        Engine {
+            state: Rc::new(RefCell::new(state)),
+        }
     }
 
     /// Present renders asked to on `canvas` (the WebGPU engine only), which
@@ -400,8 +462,12 @@ impl Engine {
     #[wasm_bindgen(js_name = setCanvas)]
     pub fn set_canvas(&self, canvas: web_sys::OffscreenCanvas) -> Result<(), JsError> {
         let mut state = self.state.borrow_mut();
-        let gpu = state.gpu.clone().ok_or_else(|| JsError::new("only the WebGPU engine presents"))?;
-        gpu.set_canvas(wgpu::SurfaceTarget::OffscreenCanvas(canvas)).map_err(|e| JsError::new(&e))?;
+        let gpu = state
+            .gpu
+            .clone()
+            .ok_or_else(|| JsError::new("only the WebGPU engine presents"))?;
+        gpu.set_canvas(wgpu::SurfaceTarget::OffscreenCanvas(canvas))
+            .map_err(|e| JsError::new(&e))?;
         state.canvas = true;
         Ok(())
     }
@@ -441,7 +507,14 @@ impl Engine {
         let started = web_time::Instant::now();
         let border = match border.len() {
             36 => {
-                let v = |i: usize| [border[4 * i], border[4 * i + 1], border[4 * i + 2], border[4 * i + 3]];
+                let v = |i: usize| {
+                    [
+                        border[4 * i],
+                        border[4 * i + 1],
+                        border[4 * i + 2],
+                        border[4 * i + 3],
+                    ]
+                };
                 BorderView {
                     photo: v(0),
                     canvas: v(1),
@@ -458,8 +531,18 @@ impl Engine {
         };
         // Inverse normalized affine rows, output/source extents, clipping
         // and whether leveling requires filtered sampling (web/crop.js).
-        let transform = transform.try_into().unwrap_or([1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0]);
-        let view = View { width, height, rect: [x, y, w, h], background: [r, g, b], original, border, transform };
+        let transform = transform
+            .try_into()
+            .unwrap_or([1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0]);
+        let view = View {
+            width,
+            height,
+            rect: [x, y, w, h],
+            background: [r, g, b],
+            original,
+            border,
+            transform,
+        };
         let (drawn_tx, drawn_rx) = futures_channel::oneshot::channel();
         let drawing = gpu.show(
             view,
@@ -471,7 +554,9 @@ impl Engine {
             if !drawing {
                 return Ok(JsValue::from(-1.0));
             }
-            drawn_rx.await.map_err(|_| JsValue::from("GPU drawing was cancelled"))?;
+            drawn_rx
+                .await
+                .map_err(|_| JsValue::from("GPU drawing was cancelled"))?;
             Ok(JsValue::from(started.elapsed().as_secs_f64() * 1000.0))
         })
     }
@@ -507,7 +592,8 @@ impl Engine {
     #[wasm_bindgen(js_name = shownRect)]
     pub fn shown_rect(&self) -> Vec<f32> {
         let gpu = self.state.borrow().gpu.clone();
-        gpu.and_then(|gpu| gpu.shown()).map_or(Vec::new(), |shown| shown.to_vec())
+        gpu.and_then(|gpu| gpu.shown())
+            .map_or(Vec::new(), |shown| shown.to_vec())
     }
 
     /// Limit the WebGPU engine's diffusion FFT grid to `bytes` (0: none),
@@ -540,7 +626,13 @@ impl Engine {
     /// to RAWs only, as spektrafilm-io's loaders apply it; an invalid active
     /// Custom value fails a RAW's load. [`Engine::input_colour`] then says
     /// what the photograph was read as.
-    pub fn load(&self, bytes: &[u8], max_dim: u32, max_pixels: f64, white_balance: Option<String>) -> Result<Vec<u32>, JsError> {
+    pub fn load(
+        &self,
+        bytes: &[u8],
+        max_dim: u32,
+        max_pixels: f64,
+        white_balance: Option<String>,
+    ) -> Result<Vec<u32>, JsError> {
         let wb = parse_white_balance(white_balance.as_deref())?;
         // The last photograph goes first, so its memory holds the new one's
         // decode: wasm's memory never shrinks, so its peak is what stays.
@@ -556,7 +648,13 @@ impl Engine {
     /// RGB pixels and its [`Decoded::colour`]. Its decode's memory then
     /// stays with the module that made it, which can end.
     #[wasm_bindgen(js_name = loadDecoded)]
-    pub fn load_decoded(&self, pixels: Vec<f32>, width: u32, height: u32, colour: &str) -> Result<(), JsError> {
+    pub fn load_decoded(
+        &self,
+        pixels: Vec<f32>,
+        width: u32,
+        height: u32,
+        colour: &str,
+    ) -> Result<(), JsError> {
         self.forget();
         if pixels.len() != width as usize * height as usize * 3 {
             return Err(JsError::new("decoded pixels don't match their size"));
@@ -572,7 +670,10 @@ impl Engine {
     #[wasm_bindgen(js_name = inputColour)]
     pub fn input_colour(&self) -> Option<String> {
         let state = self.state.borrow();
-        state.input_colour.as_ref().and_then(|c| serde_json::to_string(c).ok())
+        state
+            .input_colour
+            .as_ref()
+            .and_then(|c| serde_json::to_string(c).ok())
     }
 
     fn keep(&self, image: ImageBuf, colour: spektrafilm_io::InputColour) {
@@ -617,14 +718,24 @@ impl Engine {
     /// interpretation, the output colour space). `present` keeps it on the
     /// canvas, if there is one, for views with `original` to draw
     /// ([`Engine::show`]); otherwise the [`Rendered`] carries its bytes.
-    pub fn original(&self, params_json: &str, max_dim: u32, present: bool) -> Result<Rendered, JsError> {
+    pub fn original(
+        &self,
+        params_json: &str,
+        max_dim: u32,
+        present: bool,
+    ) -> Result<Rendered, JsError> {
         let started = web_time::Instant::now();
         let mut params = parse_params(params_json).map_err(js_error)?;
         let mut stages = Stages::new(started);
         let mut state = self.state.borrow_mut();
-        let (source, key) = state.source_at(max_dim, false).ok_or_else(|| JsError::new("no image loaded"))?;
+        let (source, key) = state
+            .source_at(max_dim, false)
+            .ok_or_else(|| JsError::new("no image loaded"))?;
         stages.mark("resample");
-        let colour = state.input_colour.clone().ok_or_else(|| JsError::new("no image loaded"))?;
+        let colour = state
+            .input_colour
+            .clone()
+            .ok_or_else(|| JsError::new("no image loaded"))?;
         params.io.apply_input_colour(&colour);
         let (encoding, converted) = preview::original_encoding(&params, &colour, &source);
         let gpu = state.gpu.clone().filter(|_| present && state.canvas);
@@ -638,9 +749,18 @@ impl Engine {
         {
             stages.mark("gpu");
             let (width, height) = (source.width, source.height);
-            return Ok(Rendered::original(width, height, Vec::new(), true, &state, started, stages));
+            return Ok(Rendered::original(
+                width,
+                height,
+                Vec::new(),
+                true,
+                &state,
+                started,
+                stages,
+            ));
         }
-        let (width, height, mut rgba) = preview::display_rgba(converted.as_ref().unwrap_or(&source), usize::MAX, encoding);
+        let (width, height, mut rgba) =
+            preview::display_rgba(converted.as_ref().unwrap_or(&source), usize::MAX, encoding);
         let (width, height) = (width as u32, height as u32);
         stages.mark("display");
         let presented = gpu.is_some_and(|gpu| gpu.set_original(width, height, &rgba));
@@ -648,7 +768,9 @@ impl Engine {
             rgba = Vec::new();
             stages.mark("upload");
         }
-        Ok(Rendered::original(width, height, rgba, presented, &state, started, stages))
+        Ok(Rendered::original(
+            width, height, rgba, presented, &state, started, stages,
+        ))
     }
 
     /// Develop the loaded photograph on `film`, printed on `paper` (ignored
@@ -668,10 +790,19 @@ impl Engine {
     ) -> js_sys::Promise {
         let state = self.state.clone();
         wasm_bindgen_futures::future_to_promise(async move {
-            render(&state, &film, &paper, &params_json, max_dim, interactive, present, false)
-                .await
-                .map(JsValue::from)
-                .map_err(JsValue::from)
+            render(
+                &state,
+                &film,
+                &paper,
+                &params_json,
+                max_dim,
+                interactive,
+                present,
+                false,
+            )
+            .await
+            .map(JsValue::from)
+            .map_err(JsValue::from)
         })
     }
 
@@ -679,13 +810,28 @@ impl Engine {
     /// display quantisation, for the native golden harness's numeric gates.
     /// Uses the same pipeline and resident GPU chain, not a CPU substitute.
     #[wasm_bindgen(js_name = renderRaw)]
-    pub fn render_raw(&self, film: String, paper: String, params_json: String, max_dim: u32) -> js_sys::Promise {
+    pub fn render_raw(
+        &self,
+        film: String,
+        paper: String,
+        params_json: String,
+        max_dim: u32,
+    ) -> js_sys::Promise {
         let state = self.state.clone();
         wasm_bindgen_futures::future_to_promise(async move {
-            render(&state, &film, &paper, &params_json, max_dim, false, false, true)
-                .await
-                .map(JsValue::from)
-                .map_err(JsValue::from)
+            render(
+                &state,
+                &film,
+                &paper,
+                &params_json,
+                max_dim,
+                false,
+                false,
+                true,
+            )
+            .await
+            .map(JsValue::from)
+            .map_err(JsValue::from)
         })
     }
     /// Prep › Match camera brightness: the `prep.exposure_ev` that makes the
@@ -697,29 +843,59 @@ impl Engine {
     /// and `elapsed_ms`. Fails with the engine's reason
     /// ([`brightness_failure`] words it).
     #[wasm_bindgen(js_name = placeExposure)]
-    pub fn place_exposure(&self, film: String, paper: String, params_json: String, reference: Vec<f32>, width: u32, height: u32) -> js_sys::Promise {
+    pub fn place_exposure(
+        &self,
+        film: String,
+        paper: String,
+        params_json: String,
+        reference: Vec<f32>,
+        width: u32,
+        height: u32,
+    ) -> js_sys::Promise {
         let state = self.state.clone();
         wasm_bindgen_futures::future_to_promise(async move {
-            place_exposure(&state, &film, &paper, &params_json, reference, width, height)
-                .await
-                .map(JsValue::from)
-                .map_err(JsValue::from)
+            place_exposure(
+                &state,
+                &film,
+                &paper,
+                &params_json,
+                reference,
+                width,
+                height,
+            )
+            .await
+            .map(JsValue::from)
+            .map_err(JsValue::from)
         })
     }
 }
 
 /// [`Engine::place_exposure`].
-async fn place_exposure(state: &RefCell<State>, film: &str, paper: &str, params_json: &str, reference: Vec<f32>, width: u32, height: u32) -> Result<String, JsError> {
+async fn place_exposure(
+    state: &RefCell<State>,
+    film: &str,
+    paper: &str,
+    params_json: &str,
+    reference: Vec<f32>,
+    width: u32,
+    height: u32,
+) -> Result<String, JsError> {
     let started = web_time::Instant::now();
     let mut params = parse_params(params_json).map_err(js_error)?;
     params.prep.validate().map_err(|e| JsError::new(&e))?;
     if width < 2 || height < 2 || reference.len() != width as usize * height as usize * 3 {
-        return Err(JsError::new("The camera-preview reference doesn't match its size"));
+        return Err(JsError::new(
+            "The camera-preview reference doesn't match its size",
+        ));
     }
     let reference = ImageBuf::from_data(width, height, reference);
     let (pipeline, source, backend) = {
         let mut state = state.borrow_mut();
-        let source = state.source.clone().ok_or_else(|| JsError::new("no image loaded"))?.0;
+        let source = state
+            .source
+            .clone()
+            .ok_or_else(|| JsError::new("no image loaded"))?
+            .0;
         if let Some(colour) = &state.input_colour {
             params.io.apply_input_colour(colour);
         }
@@ -728,12 +904,16 @@ async fn place_exposure(state: &RefCell<State>, film: &str, paper: &str, params_
         // The render's calibrated pipeline when it's this one, else one
         // of its own, as the helper does; the render's stays.
         let pipeline = match &state.pipeline {
-            Some((cached, pipeline)) if *cached == key => pipeline.clone().with_params(params.clone()),
+            Some((cached, pipeline)) if *cached == key => {
+                pipeline.clone().with_params(params.clone())
+            }
             _ => {
                 data_fs::take_missing();
                 let built = calibrate(film, paper, &params);
                 if !missing().is_empty() {
-                    return Err(JsError::new("Render the photograph with these stocks before matching"));
+                    return Err(JsError::new(
+                        "Render the photograph with these stocks before matching",
+                    ));
                 }
                 built.map_err(|e| JsError::new(&e))?
             }
@@ -742,12 +922,21 @@ async fn place_exposure(state: &RefCell<State>, film: &str, paper: &str, params_
             .metering
             .get_or_insert_with(|| spektrafilm_core::stages::filming::metering_preview(&source))
             .clone();
-        (pipeline.with_metering_preview(metering), source, state.backend.clone())
+        (
+            pipeline.with_metering_preview(metering),
+            source,
+            state.backend.clone(),
+        )
     };
     let mut renderer = Trials(backend);
-    let placement = spektrafilm_core::exposure_placement::place_exposure_with(&pipeline, &source, &reference, &mut renderer)
-        .await
-        .map_err(|e| JsError::new(&e))?;
+    let placement = spektrafilm_core::exposure_placement::place_exposure_with(
+        &pipeline,
+        &source,
+        &reference,
+        &mut renderer,
+    )
+    .await
+    .map_err(|e| JsError::new(&e))?;
     let mut result = serde_json::to_value(placement).map_err(|e| js_error(e.into()))?;
     result["elapsed_ms"] = serde_json::json!(started.elapsed().as_secs_f64() * 1000.0);
     Ok(result.to_string())
@@ -758,7 +947,11 @@ async fn place_exposure(state: &RefCell<State>, film: &str, paper: &str, params_
 /// for the CPU engine or what the chain doesn't cover.
 struct Trials(Rc<dyn ComputeBackend>);
 impl spektrafilm_core::exposure_placement::Renderer for Trials {
-    fn render<'a>(&'a mut self, pipeline: &'a Pipeline, image: ImageBuf) -> spektrafilm_core::exposure_placement::Rendering<'a, ImageBuf> {
+    fn render<'a>(
+        &'a mut self,
+        pipeline: &'a Pipeline,
+        image: ImageBuf,
+    ) -> spektrafilm_core::exposure_placement::Rendering<'a, ImageBuf> {
         Box::pin(async move {
             let backend = self.0.as_ref();
             if backend.is_gpu() {
@@ -766,8 +959,12 @@ impl spektrafilm_core::exposure_placement::Renderer for Trials {
                 let on_mapped = Box::new(move || {
                     let _ = mapped_tx.send(());
                 });
-                if let Some(pending) = pipeline.submit_resident(&image, None, backend, ChainOutput::Scan, on_mapped) {
-                    mapped_rx.await.map_err(|_| "GPU readback was cancelled".to_string())?;
+                if let Some(pending) =
+                    pipeline.submit_resident(&image, None, backend, ChainOutput::Scan, on_mapped)
+                {
+                    mapped_rx
+                        .await
+                        .map_err(|_| "GPU readback was cancelled".to_string())?;
                     if let ChainResult::Scan(output) = pipeline.finish_submitted(pending, backend) {
                         return Ok(output);
                     }
@@ -786,8 +983,14 @@ impl spektrafilm_core::exposure_placement::Renderer for Trials {
 fn metered_key(film: &str, params: &RuntimeParams) -> String {
     let io = &params.io;
     let calibration = preview::preview_pipeline_cache_key(film, "", params);
-    serde_json::json!([calibration, params.camera.auto_exposure_method, io.input_color_space, io.input_cctf_decoding, params.settings])
-        .to_string()
+    serde_json::json!([
+        calibration,
+        params.camera.auto_exposure_method,
+        io.input_color_space,
+        io.input_cctf_decoding,
+        params.settings
+    ])
+    .to_string()
 }
 
 /// The calibrated spectral pipeline for these stocks, from the registered
@@ -809,13 +1012,27 @@ impl Engine {
     /// pipeline, uploads and prepared frames as they are. It keeps the
     /// source reduced to the last size, and up to `pipelines` calibrated
     /// pipelines (at least one).
-    pub fn thumbnail(&self, film: String, paper: String, params_json: String, long_side: u32, pipelines: u32) -> js_sys::Promise {
+    pub fn thumbnail(
+        &self,
+        film: String,
+        paper: String,
+        params_json: String,
+        long_side: u32,
+        pipelines: u32,
+    ) -> js_sys::Promise {
         let state = self.state.clone();
         wasm_bindgen_futures::future_to_promise(async move {
-            thumbnail(&state, &film, &paper, &params_json, long_side, pipelines.max(1) as usize)
-                .await
-                .map(JsValue::from)
-                .map_err(JsValue::from)
+            thumbnail(
+                &state,
+                &film,
+                &paper,
+                &params_json,
+                long_side,
+                pipelines.max(1) as usize,
+            )
+            .await
+            .map(JsValue::from)
+            .map_err(JsValue::from)
         })
     }
 
@@ -830,7 +1047,14 @@ impl Engine {
 }
 
 /// [`Engine::thumbnail`].
-async fn thumbnail(state: &RefCell<State>, film: &str, paper: &str, params_json: &str, long_side: u32, pipelines: usize) -> Result<Rendered, JsError> {
+async fn thumbnail(
+    state: &RefCell<State>,
+    film: &str,
+    paper: &str,
+    params_json: &str,
+    long_side: u32,
+    pipelines: usize,
+) -> Result<Rendered, JsError> {
     let started = web_time::Instant::now();
     let mut stages = Stages::new(started);
     if !(16..=1280).contains(&long_side) {
@@ -843,7 +1067,9 @@ async fn thumbnail(state: &RefCell<State>, film: &str, paper: &str, params_json:
     spektrafilm_core::image_size::clear(&mut params);
     let (pipeline, source, backend) = {
         let mut state = state.borrow_mut();
-        let size = state.size_at(long_side).ok_or_else(|| JsError::new("no image loaded"))?;
+        let size = state
+            .size_at(long_side)
+            .ok_or_else(|| JsError::new("no image loaded"))?;
         let source = match state.thumbnail_source.clone() {
             Some(image) if (image.width, image.height) == size => image,
             _ => {
@@ -863,7 +1089,11 @@ async fn thumbnail(state: &RefCell<State>, film: &str, paper: &str, params_json:
             params.io.apply_input_colour(colour);
         }
         let key = preview::preview_pipeline_cache_key(film, paper, &params);
-        let calibrated = match state.thumbnail_pipelines.iter().position(|(k, _)| *k == key) {
+        let calibrated = match state
+            .thumbnail_pipelines
+            .iter()
+            .position(|(k, _)| *k == key)
+        {
             Some(index) => state.thumbnail_pipelines.remove(index).1,
             None => match &state.pipeline {
                 Some((cached, pipeline)) if *cached == key => pipeline.clone(),
@@ -886,14 +1116,21 @@ async fn thumbnail(state: &RefCell<State>, film: &str, paper: &str, params_json:
         }
         if params.camera.auto_exposure {
             let full = state.source.as_ref().unwrap().0.clone();
-            let metering = state.metering.get_or_insert_with(|| spektrafilm_core::stages::filming::metering_preview(&full)).clone();
+            let metering = state
+                .metering
+                .get_or_insert_with(|| spektrafilm_core::stages::filming::metering_preview(&full))
+                .clone();
             pipeline = pipeline.with_metering_preview(metering.clone());
             // The render's EV when it metered these stocks, else this
             // stock's last.
             let metered = metered_key(film, &params);
             let ev = match state.autoexposure.as_ref().filter(|(k, _)| *k == metered) {
                 Some((_, ev)) => *ev,
-                None => match state.thumbnail_autoexposure.iter().position(|(k, _)| *k == metered) {
+                None => match state
+                    .thumbnail_autoexposure
+                    .iter()
+                    .position(|(k, _)| *k == metered)
+                {
                     Some(index) => state.thumbnail_autoexposure.remove(index).1,
                     None => {
                         let ev = pipeline.frame_autoexposure_ev(&metering);
@@ -918,7 +1155,10 @@ async fn thumbnail(state: &RefCell<State>, film: &str, paper: &str, params_json:
     });
     let encoded = params.io.output_cctf_encoding;
     let output = if pipeline.display_on_gpu(backend.as_ref()) {
-        ChainOutput::Rgba8 { encoded, post: pipeline.display_post().map(std::sync::Arc::new) }
+        ChainOutput::Rgba8 {
+            encoded,
+            post: pipeline.display_post().map(std::sync::Arc::new),
+        }
     } else {
         ChainOutput::Scan
     };
@@ -929,9 +1169,14 @@ async fn thumbnail(state: &RefCell<State>, film: &str, paper: &str, params_json:
     };
     let (result, used_backend) = match submitted {
         Some(pending) => {
-            mapped_rx.await.map_err(|_| JsError::new("GPU readback was cancelled"))?;
+            mapped_rx
+                .await
+                .map_err(|_| JsError::new("GPU readback was cancelled"))?;
             stages.mark("gpu");
-            (pipeline.finish_submitted(pending, backend.as_ref()), backend.name().to_owned())
+            (
+                pipeline.finish_submitted(pending, backend.as_ref()),
+                backend.name().to_owned(),
+            )
         }
         None => {
             let (output, used) = pipeline
@@ -951,7 +1196,11 @@ async fn thumbnail(state: &RefCell<State>, film: &str, paper: &str, params_json:
             let (width, height, rgba) = preview::display_rgba(&output, usize::MAX, encoding);
             (width as u32, height as u32, rgba)
         }
-        ChainResult::Rgba8 { width, height, rgba } => (width, height, rgba),
+        ChainResult::Rgba8 {
+            width,
+            height,
+            rgba,
+        } => (width, height, rgba),
         ChainResult::Presented { .. } => return Err(JsError::new("A preview was presented")),
     };
     stages.mark("display");
@@ -993,10 +1242,18 @@ impl Reference {
 pub fn camera_reference(bytes: &[u8], width: u32, height: u32) -> Result<Reference, JsError> {
     use spektrafilm_io::brightness;
     match brightness::camera_preview(bytes, (width, height)).and_then(brightness::linear) {
-        Ok(image) => Ok(Reference { pixels: image.data, width: image.width, height: image.height }),
+        Ok(image) => Ok(Reference {
+            pixels: image.data,
+            width: image.width,
+            height: image.height,
+        }),
         Err(e) => {
             let (note, photograph) = brightness::failure(&e);
-            Err(JsError::new(&if photograph { format!("UNUSABLE: {note}") } else { note }))
+            Err(JsError::new(&if photograph {
+                format!("UNUSABLE: {note}")
+            } else {
+                note
+            }))
         }
     }
 }
@@ -1010,13 +1267,16 @@ pub fn brightness_failure(reason: &str) -> Vec<String> {
     vec![note, if photograph { "photograph" } else { "edit" }.into()]
 }
 
-
 /// The size an image of `width` × `height` is kept at, within `max_dim` on
 /// its longer side and `max_pixels` in all (0: no limit): the longer side the
 /// page's `renderSide` caps a render at, so the largest render is this copy.
 fn kept_size(width: u32, height: u32, max_dim: u32, max_pixels: f64) -> (u32, u32) {
     let (long, short) = (width.max(height) as f64, width.min(height) as f64);
-    let mut side = if max_dim == 0 { long } else { long.min(max_dim as f64) };
+    let mut side = if max_dim == 0 {
+        long
+    } else {
+        long.min(max_dim as f64)
+    };
     if max_pixels > 0.0 && side * side * short / long > max_pixels {
         side = (max_pixels * long / short).sqrt().floor();
     }
@@ -1063,28 +1323,56 @@ impl Decoded {
 /// Decode a photograph as [`Engine::load`] does, without an engine,
 /// developing a RAW at `white_balance` as `load` does.
 #[wasm_bindgen(js_name = decode)]
-pub fn decode_kept(bytes: &[u8], max_dim: u32, max_pixels: f64, white_balance: Option<String>) -> Result<Decoded, JsError> {
+pub fn decode_kept(
+    bytes: &[u8],
+    max_dim: u32,
+    max_pixels: f64,
+    white_balance: Option<String>,
+) -> Result<Decoded, JsError> {
     let wb = parse_white_balance(white_balance.as_deref())?;
     let (image, colour, (full_width, full_height)) = decode_photo(bytes, max_dim, max_pixels, wb)?;
     let colour = serde_json::to_string(&colour).map_err(|e| js_error(e.into()))?;
     let (width, height) = (image.width, image.height);
-    Ok(Decoded { pixels: image.data, width, height, full_width, full_height, colour, bounded: false })
+    Ok(Decoded {
+        pixels: image.data,
+        width,
+        height,
+        full_width,
+        full_height,
+        colour,
+        bounded: false,
+    })
 }
 
 /// Benchmark-only opt-in. Default `decode`/Engine::load remain legacy.
 /// `force` also selects small Bayer files; neither mode affects rasters or
 /// uncapped desktop loads. Unsupported selected RAWs fail before full RGB.
 #[wasm_bindgen(js_name = decodeBounded)]
-pub fn decode_bounded(bytes: &[u8], max_dim: u32, max_pixels: f64, force: bool, white_balance: Option<String>) -> Result<Decoded, JsError> {
+pub fn decode_bounded(
+    bytes: &[u8],
+    max_dim: u32,
+    max_pixels: f64,
+    force: bool,
+    white_balance: Option<String>,
+) -> Result<Decoded, JsError> {
     let wb = parse_white_balance(white_balance.as_deref())?;
     let mode = (max_pixels > 0.0).then_some(if force {
         spektrafilm_io::bounded::Mode::ForceBayer
     } else {
         spektrafilm_io::bounded::Mode::LargeBayer
     });
-    let (image, colour, (full_width, full_height), bounded) = decode_photo_mode(bytes, max_dim, max_pixels, mode, wb)?;
+    let (image, colour, (full_width, full_height), bounded) =
+        decode_photo_mode(bytes, max_dim, max_pixels, mode, wb)?;
     let colour = serde_json::to_string(&colour).map_err(|e| js_error(e.into()))?;
-    Ok(Decoded { width: image.width, height: image.height, pixels: image.data, full_width, full_height, colour, bounded })
+    Ok(Decoded {
+        width: image.width,
+        height: image.height,
+        pixels: image.data,
+        full_width,
+        full_height,
+        colour,
+        bounded,
+    })
 }
 
 /// The kept image, how to read it and its size as decoded, upright.
@@ -1134,10 +1422,22 @@ fn decode_photo_mode(
             // An invalid active Custom WB is the reason, not a damaged image.
             wb.validate().map_err(js_error)?;
             if let Some(mode) = mode {
-                let kept = spektrafilm_io::bounded::load_raw_bytes_kept(bytes, wb, max_dim, max_pixels, mode).map_err(js_error)?;
+                let kept = spektrafilm_io::bounded::load_raw_bytes_kept(
+                    bytes, wb, max_dim, max_pixels, mode,
+                )
+                .map_err(js_error)?;
                 let (width, height) = kept.full_size;
-                let full = if (5..=8).contains(&kept.orientation) { (height, width) } else { (width, height) };
-                return Ok((kept.image.oriented(kept.orientation), spektrafilm_io::InputColour::raw("rawler"), full, kept.bounded));
+                let full = if (5..=8).contains(&kept.orientation) {
+                    (height, width)
+                } else {
+                    (width, height)
+                };
+                return Ok((
+                    kept.image.oriented(kept.orientation),
+                    spektrafilm_io::InputColour::raw("rawler"),
+                    full,
+                    kept.bounded,
+                ));
             }
             // A camera RAW the decoder knows but can't read says so;
             // anything else may have been a damaged image.
@@ -1148,7 +1448,8 @@ fn decode_photo_mode(
                     spektrafilm_io::XTransDemosaic::Markesteijn
                 }
             };
-            let (image, exif) = spektrafilm_io::load_raw_bytes_unoriented_with(bytes, wb, xtrans).map_err(|raw| {
+            let (image, exif) = spektrafilm_io::load_raw_bytes_unoriented_with(bytes, wb, xtrans)
+                .map_err(|raw| {
                 let raw = format!("{raw:#}");
                 match raw.split_once("DecoderFailed(\"") {
                     Some((_, reason)) => JsError::new(reason.split('"').next().unwrap_or(&raw)),
@@ -1169,7 +1470,11 @@ fn decode_photo_mode(
         drop(image);
         small
     };
-    let full = if (5..=8).contains(&orientation) { (height, width) } else { (width, height) };
+    let full = if (5..=8).contains(&orientation) {
+        (height, width)
+    } else {
+        (width, height)
+    };
     Ok((image.oriented(orientation), colour, full, false))
 }
 
@@ -1238,24 +1543,35 @@ async fn render(
     let started = web_time::Instant::now();
     let mut params = parse_params(params_json).map_err(js_error)?;
     let mut stages = Stages::new(started);
-    if present && let Some(rendered) = repost(state, film, paper, &params, max_dim, interactive, started).await? {
+    if present
+        && let Some(rendered) =
+            repost(state, film, paper, &params, max_dim, interactive, started).await?
+    {
         return Ok(rendered);
     }
     let (pipeline, (source, source_key), backend, gpu) = {
         let mut state = state.borrow_mut();
         if !state.backend.is_gpu() {
-            let (width, height) = state.size_at(max_dim).ok_or_else(|| JsError::new("no image loaded"))?;
+            let (width, height) = state
+                .size_at(max_dim)
+                .ok_or_else(|| JsError::new("no image loaded"))?;
             // The exact CPU convolution keeps three complex FFT planes
             // alive, plus the PSF, RGB images, and decoded source. Leave
             // room for those in wasm32's 4 GiB address space. The iPad
             // reproduction requested a 2.7 GiB Vec (itself > isize::MAX).
             // Reject before resampling or constructing the large PSF.
             const MAX_FFT_BUFFER_BYTES: u64 = 512 * 1024 * 1024;
-            if preview::cpu_diffusion_fft_buffer_bytes(&params, width, height) > MAX_FFT_BUFFER_BYTES {
-                return Err(JsError::new("BROWSER_RENDER_LIMIT: Diffusion at this resolution needs too much memory in this browser. Reduce its spatial scale or use the desktop app for full-resolution export."));
+            if preview::cpu_diffusion_fft_buffer_bytes(&params, width, height)
+                > MAX_FFT_BUFFER_BYTES
+            {
+                return Err(JsError::new(
+                    "BROWSER_RENDER_LIMIT: Diffusion at this resolution needs too much memory in this browser. Reduce its spatial scale or use the desktop app for full-resolution export.",
+                ));
             }
         }
-        let source = state.source_at(max_dim, interactive).ok_or_else(|| JsError::new("no image loaded"))?;
+        let source = state
+            .source_at(max_dim, interactive)
+            .ok_or_else(|| JsError::new("no image loaded"))?;
         stages.mark("resample");
         if let Some(colour) = &state.input_colour {
             params.io.apply_input_colour(colour);
@@ -1265,7 +1581,11 @@ async fn render(
         if state.pipeline.as_ref().is_none_or(|(old, _)| old != &key) {
             state.pipeline = None;
             // A stock preview's, when a tile's stock was chosen.
-            let previewed = state.thumbnail_pipelines.iter().find(|(k, _)| *k == key).map(|(_, p)| Ok(p.clone()));
+            let previewed = state
+                .thumbnail_pipelines
+                .iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, p)| Ok(p.clone()));
             let built = previewed.unwrap_or_else(|| calibrate(film, paper, &params));
             let missing = missing();
             if !missing.is_empty() {
@@ -1278,12 +1598,26 @@ async fn render(
             let full = &state.source.as_ref().unwrap().0;
             state.metering = Some(spektrafilm_core::stages::filming::metering_preview(full));
         }
-        let mut pipeline = state.pipeline.as_ref().unwrap().1.clone().with_params(params.clone())
+        let mut pipeline = state
+            .pipeline
+            .as_ref()
+            .unwrap()
+            .1
+            .clone()
+            .with_params(params.clone())
             .with_prepared_frame(state.prepared[interactive as usize].clone());
-        if let Some(metering) = state.metering.clone().filter(|_| params.camera.auto_exposure) {
+        if let Some(metering) = state
+            .metering
+            .clone()
+            .filter(|_| params.camera.auto_exposure)
+        {
             pipeline = pipeline.with_metering_preview(metering);
             let metered = metered_key(film, &params);
-            let previewed = state.thumbnail_autoexposure.iter().find(|(k, _)| *k == metered).map(|(_, ev)| *ev);
+            let previewed = state
+                .thumbnail_autoexposure
+                .iter()
+                .find(|(k, _)| *k == metered)
+                .map(|(_, ev)| *ev);
             let ev = match (&state.autoexposure, previewed) {
                 (Some((key, ev)), _) if *key == metered => *ev,
                 (_, Some(ev)) => ev,
@@ -1311,20 +1645,37 @@ async fn render(
     // them when there's a canvas.
     let encoded = params.io.output_cctf_encoding;
     let post = || pipeline.display_post().map(std::sync::Arc::new);
-    let output = match (!raw && pipeline.display_on_gpu(backend.as_ref()), gpu.is_some()) {
-        (true, true) => ChainOutput::Present { encoded, post: post() },
-        (true, false) => ChainOutput::Rgba8 { encoded, post: post() },
+    let output = match (
+        !raw && pipeline.display_on_gpu(backend.as_ref()),
+        gpu.is_some(),
+    ) {
+        (true, true) => ChainOutput::Present {
+            encoded,
+            post: post(),
+        },
+        (true, false) => ChainOutput::Rgba8 {
+            encoded,
+            post: post(),
+        },
         (false, _) => ChainOutput::Scan,
     };
     let submitted = if backend.is_gpu() {
-        pipeline.submit_resident(&source, Some(source_key), backend.as_ref(), output, on_mapped)
+        pipeline.submit_resident(
+            &source,
+            Some(source_key),
+            backend.as_ref(),
+            output,
+            on_mapped,
+        )
     } else {
         None
     };
     let (result, used_backend) = match submitted {
         Some(pending) => {
             stages.mark("submit");
-            mapped_rx.await.map_err(|_| JsError::new("GPU readback was cancelled"))?;
+            mapped_rx
+                .await
+                .map_err(|_| JsError::new("GPU readback was cancelled"))?;
             stages.mark("gpu");
             let result = pipeline.finish_submitted(pending, backend.as_ref());
             stages.mark("finish");
@@ -1352,7 +1703,11 @@ async fn render(
             let (width, height, rgba) = preview::display_rgba(&output, usize::MAX, encoding);
             (width as u32, height as u32, rgba, false)
         }
-        ChainResult::Rgba8 { width, height, rgba } => (width, height, rgba, false),
+        ChainResult::Rgba8 {
+            width,
+            height,
+            rgba,
+        } => (width, height, rgba, false),
         ChainResult::Presented { width, height } => (width, height, Vec::new(), true),
     };
     {
@@ -1408,12 +1763,18 @@ async fn repost(
         if let Some(colour) = &state.input_colour {
             params.io.apply_input_colour(colour);
         }
-        if *key != look_key(&state, film, paper, &params) || !(interactive || state.size_at(max_dim) == Some(*size)) {
+        if *key != look_key(&state, film, paper, &params)
+            || !(interactive || state.size_at(max_dim) == Some(*size))
+        {
             return Ok(None);
         }
         let post = (!params.post.is_identity()).then(|| {
-            spektrafilm_core::post::PostProcess::new(&params.post, params.io.output_cctf_encoding, &params.io.output_color_space)
-                .display()
+            spektrafilm_core::post::PostProcess::new(
+                &params.post,
+                params.io.output_cctf_encoding,
+                &params.io.output_color_space,
+            )
+            .display()
         });
         (gpu, post)
     };
@@ -1427,7 +1788,9 @@ async fn repost(
     };
     let mut stages = Stages::new(started);
     stages.mark("submit");
-    drawn_rx.await.map_err(|_| JsError::new("GPU drawing was cancelled"))?;
+    drawn_rx
+        .await
+        .map_err(|_| JsError::new("GPU drawing was cancelled"))?;
     stages.mark("post");
     Ok(Some(Rendered {
         width,
@@ -1458,13 +1821,19 @@ struct Stages {
 
 impl Stages {
     fn new(started: web_time::Instant) -> Self {
-        Stages { last: started, text: String::new() }
+        Stages {
+            last: started,
+            text: String::new(),
+        }
     }
 
     fn mark(&mut self, stage: &str) {
         let now = web_time::Instant::now();
         let ms = (now - self.last).as_secs_f64() * 1000.0;
-        self.text += &format!("{}{stage} {ms:.0}", if self.text.is_empty() { "" } else { " · " });
+        self.text += &format!(
+            "{}{stage} {ms:.0}",
+            if self.text.is_empty() { "" } else { " · " }
+        );
         self.last = now;
     }
 }
@@ -1472,7 +1841,17 @@ impl Stages {
 impl Rendered {
     fn missing(missing: Vec<String>) -> Self {
         let (backend, stages) = (String::new(), String::new());
-        Rendered { width: 0, height: 0, rgba: Vec::new(), scan: Vec::new(), presented: false, missing, backend, elapsed_ms: 0.0, stages }
+        Rendered {
+            width: 0,
+            height: 0,
+            rgba: Vec::new(),
+            scan: Vec::new(),
+            presented: false,
+            missing,
+            backend,
+            elapsed_ms: 0.0,
+            stages,
+        }
     }
 
     /// An original's ([`Engine::original`]).
@@ -1506,7 +1885,12 @@ fn js_error(e: anyhow::Error) -> JsError {
 fn missing() -> Vec<String> {
     data_fs::take_missing()
         .into_iter()
-        .map(|path| path.strip_prefix(DATA_DIR).unwrap_or(&path).to_string_lossy().into_owned())
+        .map(|path| {
+            path.strip_prefix(DATA_DIR)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .into_owned()
+        })
         .collect()
 }
 
@@ -1516,7 +1900,9 @@ fn missing() -> Vec<String> {
 fn parse_white_balance(json: Option<&str>) -> Result<spektrafilm_io::RawWhiteBalance, JsError> {
     match json.map(str::trim) {
         None | Some("") => Ok(Default::default()),
-        Some(json) => serde_json::from_str(json).map_err(|e| JsError::new(&format!("RAW white balance: {e}"))),
+        Some(json) => {
+            serde_json::from_str(json).map_err(|e| JsError::new(&format!("RAW white balance: {e}")))
+        }
     }
 }
 
@@ -1533,7 +1919,11 @@ fn parse_params(json: &str) -> anyhow::Result<RuntimeParams> {
 /// embedded profile kept.
 fn decode(
     bytes: &[u8],
-) -> anyhow::Result<(image::DynamicImage, spektrafilm_io::colour::FileColour, image::ImageFormat)> {
+) -> anyhow::Result<(
+    image::DynamicImage,
+    spektrafilm_io::colour::FileColour,
+    image::ImageFormat,
+)> {
     // A DNG's first TIFF image may be an RGB thumbnail. Recognize its
     // container before raster decoding so every photo entry point reaches
     // RAW development (and a damaged RAW never succeeds as a thumbnail).
@@ -1543,9 +1933,13 @@ fn decode(
     use image::ImageDecoder;
     let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?;
     reader.no_limits();
-    let format = reader.format().ok_or_else(|| anyhow::anyhow!("unknown image format"))?;
+    let format = reader
+        .format()
+        .ok_or_else(|| anyhow::anyhow!("unknown image format"))?;
     let mut decoder = reader.into_decoder()?;
-    let orientation = decoder.orientation().unwrap_or(image::metadata::Orientation::NoTransforms);
+    let orientation = decoder
+        .orientation()
+        .unwrap_or(image::metadata::Orientation::NoTransforms);
     let mut info = spektrafilm_io::colour::FileColour {
         icc: decoder.icc_profile().ok().flatten(),
         cmyk: matches!(
@@ -1556,7 +1950,10 @@ fn decode(
     };
     let mut img = image::DynamicImage::from_decoder(decoder)?;
     img.apply_orientation(orientation);
-    info.float = matches!(img, image::DynamicImage::ImageRgb32F(_) | image::DynamicImage::ImageRgba32F(_));
+    info.float = matches!(
+        img,
+        image::DynamicImage::ImageRgb32F(_) | image::DynamicImage::ImageRgba32F(_)
+    );
     info.gray = !img.color().has_color();
     Ok((img, info, format))
 }

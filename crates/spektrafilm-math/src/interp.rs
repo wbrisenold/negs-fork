@@ -388,9 +388,15 @@ pub fn fast_interp_image_perchannel(
 /// two points.
 pub fn akima_1d(x: &[f64], y: &[f64], xq: &[f64]) -> Vec<f64> {
     let n = x.len();
-    assert!(n >= 2 && y.len() == n, "akima_1d needs matching x and y with two points or more");
+    assert!(
+        n >= 2 && y.len() == n,
+        "akima_1d needs matching x and y with two points or more"
+    );
     let dx: Vec<f64> = x.windows(2).map(|w| w[1] - w[0]).collect();
-    assert!(dx.iter().all(|&d| d > 0.0), "akima_1d needs strictly increasing x");
+    assert!(
+        dx.iter().all(|&d| d > 0.0),
+        "akima_1d needs strictly increasing x"
+    );
     // Breakpoint slopes t, as scipy's Akima1DInterpolator.__init__.
     let t: Vec<f64> = if n == 2 {
         let m = (y[1] - y[0]) / dx[0];

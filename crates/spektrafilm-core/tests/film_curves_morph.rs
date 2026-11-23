@@ -45,7 +45,10 @@ fn pipeline(film: &str, morph: CurvesMorphParams, development_time: Option<f64>)
 }
 
 fn assert_close(got: f64, want: f64, what: &str) {
-    assert!((got - want).abs() <= 1e-12 + 1e-12 * want.abs(), "{what}: {got} vs {want}");
+    assert!(
+        (got - want).abs() <= 1e-12 + 1e-12 * want.abs(),
+        "{what}: {got} vs {want}"
+    );
 }
 
 /// Upstream experimental derives every profile's curves from its fitted
@@ -60,7 +63,12 @@ fn model_curves_and_film_morph_match_python_experimental() {
     for case in fixture.cases {
         let label = format!("{} {} {:?}", case.stock, case.role, case.development_time);
         let resolved = if case.role == "film" {
-            pipeline(&case.stock, case.morph.clone().unwrap(), case.development_time).film
+            pipeline(
+                &case.stock,
+                case.morph.clone().unwrap(),
+                case.development_time,
+            )
+            .film
         } else {
             let p = profile::load_profile_by_name(&data_dir(), &case.stock).unwrap();
             profile::resolve_for_render(p, case.development_time)
@@ -81,7 +89,11 @@ fn model_curves_and_film_morph_match_python_experimental() {
                 assert_eq!(g.len(), w.len(), "{label} row {i} layer count");
                 for (l, (gl, wl)) in g.iter().zip(w).enumerate() {
                     for c in 0..3 {
-                        assert_close(gl[c], lane(wl, c), &format!("{label} row {i} layer {l} ch {c}"));
+                        assert_close(
+                            gl[c],
+                            lane(wl, c),
+                            &format!("{label} row {i} layer {l} ch {c}"),
+                        );
                     }
                 }
             }
@@ -95,14 +107,33 @@ fn model_curves_and_film_morph_match_python_experimental() {
 #[test]
 fn film_morph_rebakes_from_the_model_and_with_params_switches() {
     let loaded = profile::load_profile_by_name(&data_dir(), "kodak_portra_400").unwrap();
-    let morph = CurvesMorphParams { active: true, gamma_factor: 1.3, ..Default::default() };
+    let morph = CurvesMorphParams {
+        active: true,
+        gamma_factor: 1.3,
+        ..Default::default()
+    };
 
     let inactive = pipeline("kodak_portra_400", CurvesMorphParams::default(), None);
-    assert_eq!(inactive.film.data.density_curves, loaded.data.density_curves);
-    assert_eq!(inactive.film.data.density_curves_layers, loaded.data.density_curves_layers);
-    let identity =
-        pipeline("kodak_portra_400", CurvesMorphParams { active: true, ..Default::default() }, None);
-    assert_eq!(identity.film.data.density_curves, loaded.data.density_curves);
+    assert_eq!(
+        inactive.film.data.density_curves,
+        loaded.data.density_curves
+    );
+    assert_eq!(
+        inactive.film.data.density_curves_layers,
+        loaded.data.density_curves_layers
+    );
+    let identity = pipeline(
+        "kodak_portra_400",
+        CurvesMorphParams {
+            active: true,
+            ..Default::default()
+        },
+        None,
+    );
+    assert_eq!(
+        identity.film.data.density_curves,
+        loaded.data.density_curves
+    );
 
     let active = pipeline("kodak_portra_400", morph.clone(), None);
     let morphed = active.film.data.density_curves.clone();
@@ -119,7 +150,10 @@ fn film_morph_rebakes_from_the_model_and_with_params_switches() {
     let mut params = active.params.clone();
     params.film_render.density_curves_morph.active = false;
     let switched_off = active.with_params(params.clone());
-    assert_eq!(switched_off.film.data.density_curves, loaded.data.density_curves);
+    assert_eq!(
+        switched_off.film.data.density_curves,
+        loaded.data.density_curves
+    );
     params.film_render.density_curves_morph = morph;
     let switched_on = switched_off.with_params(params);
     assert_eq!(switched_on.film.data.density_curves, morphed);

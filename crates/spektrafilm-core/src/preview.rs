@@ -302,16 +302,21 @@ pub fn display_clipped_highlights(
     let h = ((src_h * scale_num + max_src_dim / 2) / max_src_dim).max(1);
     let (_, white) = crate::pipeline::display_range(encoding.encoded);
     let mut mask = vec![0; w * h];
-    mask.par_iter_mut().enumerate().for_each(|(index, clipped)| {
-        let x = index % w;
-        let y = index / w;
-        let sx = (((x as f64 + 0.5) * src_w as f64 / w as f64).floor() as usize).min(src_w - 1);
-        let sy = (((y as f64 + 0.5) * src_h as f64 / h as f64).floor() as usize).min(src_h - 1);
-        let pixel = (sy * src_w + sx) * 3;
-        if image.data[pixel..pixel + 3].iter().any(|&value| value >= white) {
-            *clipped = 255;
-        }
-    });
+    mask.par_iter_mut()
+        .enumerate()
+        .for_each(|(index, clipped)| {
+            let x = index % w;
+            let y = index / w;
+            let sx = (((x as f64 + 0.5) * src_w as f64 / w as f64).floor() as usize).min(src_w - 1);
+            let sy = (((y as f64 + 0.5) * src_h as f64 / h as f64).floor() as usize).min(src_h - 1);
+            let pixel = (sy * src_w + sx) * 3;
+            if image.data[pixel..pixel + 3]
+                .iter()
+                .any(|&value| value >= white)
+            {
+                *clipped = 255;
+            }
+        });
     (w, h, mask)
 }
 
@@ -762,19 +767,32 @@ mod tests {
         use base64::Engine as _;
         let mut png = std::io::Cursor::new(Vec::new());
         image::DynamicImage::ImageLuma8(image::GrayImage::from_raw(2, 1, vec![255, 0]).unwrap())
-            .write_to(&mut png, image::ImageFormat::Png).unwrap();
-        let post = PostProcess::new(&PostParams {
-            background_masks: vec![BackgroundMaskLayer {
-                mask_png_base64: base64::engine::general_purpose::STANDARD.encode(png.into_inner()),
-                exposure_ev: 1.0,
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        let post = PostProcess::new(
+            &PostParams {
+                background_masks: vec![BackgroundMaskLayer {
+                    mask_png_base64: base64::engine::general_purpose::STANDARD
+                        .encode(png.into_inner()),
+                    exposure_ev: 1.0,
+                    ..Default::default()
+                }],
                 ..Default::default()
-            }],
-            ..Default::default()
-        }, false, "sRGB");
+            },
+            false,
+            "sRGB",
+        );
         let image = ImageBuf::from_data(2, 1, vec![0.1f32; 6].into_iter().map(from_f32).collect());
         let plain = display_rgba(&image, 2, false);
         let masked = display_rgba_with_post(&image, 2, false, Some(&post));
-        assert!(masked.2[0] > plain.2[0], "selected preview pixel should brighten");
-        assert_eq!(&masked.2[4..8], &plain.2[4..8], "unselected preview pixel stays unchanged");
+        assert!(
+            masked.2[0] > plain.2[0],
+            "selected preview pixel should brighten"
+        );
+        assert_eq!(
+            &masked.2[4..8],
+            &plain.2[4..8],
+            "unselected preview pixel stays unchanged"
+        );
     }
 }

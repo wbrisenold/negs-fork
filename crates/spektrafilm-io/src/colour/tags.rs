@@ -40,19 +40,32 @@ pub fn png_chunks(mut reader: impl Read) -> Option<PngChunks> {
         if small && length <= 64 {
             let mut body = vec![0u8; length + 4];
             reader.read_exact(&mut body).ok()?;
-            let u32_at = |i: usize| body.get(i..i + 4).map(|b| u32::from_be_bytes(b.try_into().unwrap()));
+            let u32_at = |i: usize| {
+                body.get(i..i + 4)
+                    .map(|b| u32::from_be_bytes(b.try_into().unwrap()))
+            };
             match kind {
                 b"cICP" if length == 4 => chunks.cicp = Some([body[0], body[1], body[2], body[3]]),
                 b"sRGB" if length == 1 => chunks.srgb = true,
-                b"gAMA" if length == 4 => chunks.gamma = u32_at(0).filter(|&g| g > 0).map(|g| g as f64 / 100_000.0),
+                b"gAMA" if length == 4 => {
+                    chunks.gamma = u32_at(0).filter(|&g| g > 0).map(|g| g as f64 / 100_000.0)
+                }
                 b"cHRM" if length == 32 => {
-                    let v: Vec<f64> = (0..8).filter_map(|i| u32_at(4 * i)).map(|v| v as f64 / 100_000.0).collect();
-                    chunks.chromaticities = Some([[v[0], v[1]], [v[2], v[3]], [v[4], v[5]], [v[6], v[7]]]);
+                    let v: Vec<f64> = (0..8)
+                        .filter_map(|i| u32_at(4 * i))
+                        .map(|v| v as f64 / 100_000.0)
+                        .collect();
+                    chunks.chromaticities =
+                        Some([[v[0], v[1]], [v[2], v[3]], [v[4], v[5]], [v[6], v[7]]]);
                 }
                 _ => {}
             }
         } else {
-            std::io::copy(&mut (&mut reader).take(length as u64 + 4), &mut std::io::sink()).ok()?;
+            std::io::copy(
+                &mut (&mut reader).take(length as u64 + 4),
+                &mut std::io::sink(),
+            )
+            .ok()?;
         }
     }
 }
@@ -79,11 +92,19 @@ pub fn exif_colour(exif: &[u8]) -> Option<ExifColour> {
     };
     let u16_at = |at: usize| -> Option<u16> {
         let b: [u8; 2] = exif.get(at..at + 2)?.try_into().ok()?;
-        Some(if little { u16::from_le_bytes(b) } else { u16::from_be_bytes(b) })
+        Some(if little {
+            u16::from_le_bytes(b)
+        } else {
+            u16::from_be_bytes(b)
+        })
     };
     let u32_at = |at: usize| -> Option<u32> {
         let b: [u8; 4] = exif.get(at..at + 4)?.try_into().ok()?;
-        Some(if little { u32::from_le_bytes(b) } else { u32::from_be_bytes(b) })
+        Some(if little {
+            u32::from_le_bytes(b)
+        } else {
+            u32::from_be_bytes(b)
+        })
     };
     // (tag, type, count, value offset field position)
     let entries = |ifd: usize| -> Option<Vec<(u16, u16, u32, usize)>> {
@@ -96,16 +117,31 @@ pub fn exif_colour(exif: &[u8]) -> Option<ExifColour> {
             .collect()
     };
     let ifd0 = entries(u32_at(4)? as usize)?;
-    let exif_ifd = ifd0.iter().find(|e| e.0 == 0x8769).and_then(|e| u32_at(e.3))? as usize;
+    let exif_ifd = ifd0
+        .iter()
+        .find(|e| e.0 == 0x8769)
+        .and_then(|e| u32_at(e.3))? as usize;
     let exif_entries = entries(exif_ifd)?;
-    let colour_space = exif_entries.iter().find(|e| e.0 == 0xA001).and_then(|e| u16_at(e.3))?;
+    let colour_space = exif_entries
+        .iter()
+        .find(|e| e.0 == 0xA001)
+        .and_then(|e| u16_at(e.3))?;
     match colour_space {
         1 => Some(ExifColour::Srgb),
         0xFFFF => {
-            let interop = exif_entries.iter().find(|e| e.0 == 0xA005).and_then(|e| u32_at(e.3))? as usize;
-            let index = entries(interop)?.into_iter().find(|e| e.0 == 0x0001 && e.1 == 2)?;
+            let interop = exif_entries
+                .iter()
+                .find(|e| e.0 == 0xA005)
+                .and_then(|e| u32_at(e.3))? as usize;
+            let index = entries(interop)?
+                .into_iter()
+                .find(|e| e.0 == 0x0001 && e.1 == 2)?;
             // Four ASCII bytes or fewer sit in the value field itself.
-            let at = if index.2 <= 4 { index.3 } else { u32_at(index.3)? as usize };
+            let at = if index.2 <= 4 {
+                index.3
+            } else {
+                u32_at(index.3)? as usize
+            };
             (exif.get(at..at + 3)? == b"R03").then_some(ExifColour::AdobeRgb)
         }
         _ => None,
@@ -124,17 +160,32 @@ pub fn tiff_icc(mut file: impl Read + std::io::Seek) -> Option<Vec<u8>> {
         b"MM" => false,
         _ => return None,
     };
-    let u16v = |b: [u8; 2]| if little { u16::from_le_bytes(b) } else { u16::from_be_bytes(b) };
-    let u32v = |b: [u8; 4]| if little { u32::from_le_bytes(b) } else { u32::from_be_bytes(b) };
+    let u16v = |b: [u8; 2]| {
+        if little {
+            u16::from_le_bytes(b)
+        } else {
+            u16::from_be_bytes(b)
+        }
+    };
+    let u32v = |b: [u8; 4]| {
+        if little {
+            u32::from_le_bytes(b)
+        } else {
+            u32::from_be_bytes(b)
+        }
+    };
     if u16v([head[2], head[3]]) != 42 {
         return None; // BigTIFF and others: let `image` speak for them
     }
-    file.seek(SeekFrom::Start(u32v(head[4..8].try_into().ok()?) as u64)).ok()?;
+    file.seek(SeekFrom::Start(u32v(head[4..8].try_into().ok()?) as u64))
+        .ok()?;
     let mut count = [0u8; 2];
     file.read_exact(&mut count).ok()?;
     let mut entries = vec![0u8; 12 * u16v(count) as usize];
     file.read_exact(&mut entries).ok()?;
-    let entry = entries.chunks_exact(12).find(|e| u16v([e[0], e[1]]) == 34675)?;
+    let entry = entries
+        .chunks_exact(12)
+        .find(|e| u16v([e[0], e[1]]) == 34675)?;
     let width = match u16v([entry[2], entry[3]]) {
         1 | 2 | 6 | 7 => 1,
         3 | 8 => 2,
@@ -145,7 +196,8 @@ pub fn tiff_icc(mut file: impl Read + std::io::Seek) -> Option<Vec<u8>> {
     if length <= 4 || length > 64 << 20 {
         return None;
     }
-    file.seek(SeekFrom::Start(u32v(entry[8..12].try_into().ok()?) as u64)).ok()?;
+    file.seek(SeekFrom::Start(u32v(entry[8..12].try_into().ok()?) as u64))
+        .ok()?;
     let mut icc = vec![0u8; length];
     file.read_exact(&mut icc).ok()?;
     Some(icc)
@@ -181,7 +233,11 @@ pub fn jpeg_components(mut reader: impl Read) -> Option<u8> {
         if kind == 0xDA || length < 2 {
             return None;
         }
-        std::io::copy(&mut (&mut reader).take(length as u64 - 2), &mut std::io::sink()).ok()?;
+        std::io::copy(
+            &mut (&mut reader).take(length as u64 - 2),
+            &mut std::io::sink(),
+        )
+        .ok()?;
     }
 }
 
@@ -191,8 +247,20 @@ pub(crate) mod tests {
 
     /// A TIFF-structured EXIF block with ColorSpace and an interoperability index.
     pub(crate) fn exif_block(colour_space: u16, index: Option<&[u8; 4]>, little: bool) -> Vec<u8> {
-        let u16b = |v: u16| if little { v.to_le_bytes() } else { v.to_be_bytes() };
-        let u32b = |v: u32| if little { v.to_le_bytes() } else { v.to_be_bytes() };
+        let u16b = |v: u16| {
+            if little {
+                v.to_le_bytes()
+            } else {
+                v.to_be_bytes()
+            }
+        };
+        let u32b = |v: u32| {
+            if little {
+                v.to_le_bytes()
+            } else {
+                v.to_be_bytes()
+            }
+        };
         let mut d = Vec::new();
         d.extend(if little { b"II" } else { b"MM" });
         d.extend(u16b(42));
@@ -229,9 +297,18 @@ pub(crate) mod tests {
     #[test]
     fn exif_colour_space_and_dcf_adobe_rgb() {
         for little in [true, false] {
-            assert_eq!(exif_colour(&exif_block(1, None, little)), Some(ExifColour::Srgb));
-            assert_eq!(exif_colour(&exif_block(0xFFFF, Some(b"R03\0"), little)), Some(ExifColour::AdobeRgb));
-            assert_eq!(exif_colour(&exif_block(0xFFFF, Some(b"R98\0"), little)), None);
+            assert_eq!(
+                exif_colour(&exif_block(1, None, little)),
+                Some(ExifColour::Srgb)
+            );
+            assert_eq!(
+                exif_colour(&exif_block(0xFFFF, Some(b"R03\0"), little)),
+                Some(ExifColour::AdobeRgb)
+            );
+            assert_eq!(
+                exif_colour(&exif_block(0xFFFF, Some(b"R98\0"), little)),
+                None
+            );
             let mut prefixed = b"Exif\0\0".to_vec();
             prefixed.extend(exif_block(1, None, little));
             assert_eq!(exif_colour(&prefixed), Some(ExifColour::Srgb));

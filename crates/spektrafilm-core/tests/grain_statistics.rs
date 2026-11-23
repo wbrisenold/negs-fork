@@ -44,15 +44,23 @@ fn root() -> PathBuf {
 fn fixture() -> &'static Value {
     static FIXTURE: OnceLock<Value> = OnceLock::new();
     FIXTURE.get_or_init(|| {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/grain_python_28bf883.json");
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/grain_python_28bf883.json");
         let value: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-        assert_eq!(value["reference_commit"], "28bf883e1672e884307edc75852549376e13644e");
+        assert_eq!(
+            value["reference_commit"],
+            "28bf883e1672e884307edc75852549376e13644e"
+        );
         value
     })
 }
 
 fn f64s(v: &Value) -> Vec<f64> {
-    v.as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect()
+    v.as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x.as_f64().unwrap())
+        .collect()
 }
 
 /// A per-channel value of a B&W (one-channel) case repeats channel 0.
@@ -61,7 +69,12 @@ fn lanes(values: &[f64]) -> [f64; 3] {
 }
 
 fn per_channel(v: &Value) -> [f64; 3] {
-    let values: Vec<f64> = v.as_array().unwrap().iter().filter_map(Value::as_f64).collect();
+    let values: Vec<f64> = v
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_f64)
+        .collect();
     lanes(&values)
 }
 
@@ -76,12 +89,23 @@ struct Case {
 fn case(stock: &str) -> Case {
     let s = &fixture()["stocks"][stock];
     let n_channels = s["n_channels"].as_u64().unwrap() as usize;
-    let total: Vec<[f64; 3]> = s["curves_total"].as_array().unwrap().iter().map(|r| lanes(&f64s(r))).collect();
+    let total: Vec<[f64; 3]> = s["curves_total"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| lanes(&f64s(r)))
+        .collect();
     let layers: Vec<Vec<[f64; 3]>> = s["curves_layers"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|row| row.as_array().unwrap().iter().map(|l| lanes(&f64s(l))).collect())
+        .map(|row| {
+            row.as_array()
+                .unwrap()
+                .iter()
+                .map(|l| lanes(&f64s(l)))
+                .collect()
+        })
         .collect();
     let g = &s["grain"];
     let settings = GrainSettings {
@@ -114,7 +138,8 @@ fn presets_match_python() {
     let presets = fixture()["presets"].as_object().unwrap();
     assert!(presets.len() >= 20, "{} stocks", presets.len());
     for (stock, expected) in presets {
-        let film = profile::resolve_for_render(profile::load_profile_by_name(&data, stock).unwrap(), None);
+        let film =
+            profile::resolve_for_render(profile::load_profile_by_name(&data, stock).unwrap(), None);
         let s = grain::grain_settings(&film, &GrainParams::default());
         let n = if film.is_bw() { 1 } else { 3 };
         for (name, got) in [
@@ -123,8 +148,17 @@ fn presets_match_python() {
             ("uniformity", s.uniformity),
             ("particle_scale_sublayers", s.particle_scale_sublayers),
         ] {
-            let want: Vec<Option<f64>> = expected[name].as_array().unwrap().iter().map(Value::as_f64).collect();
-            let n = if name == "particle_scale_sublayers" { 3 } else { n };
+            let want: Vec<Option<f64>> = expected[name]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(Value::as_f64)
+                .collect();
+            let n = if name == "particle_scale_sublayers" {
+                3
+            } else {
+                n
+            };
             for ch in 0..n {
                 assert_eq!(Some(got[ch]), want[ch], "{stock} {name}[{ch}]");
             }
@@ -142,19 +176,27 @@ fn deterministic_parts_match_python() {
                 for (l, row) in d[name].as_array().unwrap().iter().enumerate() {
                     for (ch, want) in f64s(row).into_iter().enumerate() {
                         let v = got(l, ch);
-                        assert!(close(v, want, 1e-9), "{stock} {pixel} µm {name}[{l}][{ch}]: {v} vs {want}");
+                        assert!(
+                            close(v, want, 1e-9),
+                            "{stock} {pixel} µm {name}[{l}][{ch}]: {v} vs {want}"
+                        );
                     }
                 }
             };
             check("density_min_layers", &|l, ch| lp.density_min_layers[l][ch]);
             check("density_max_layers", &|l, ch| lp.density_max_layers[l][ch]);
-            check("n_particles_per_pixel", &|l, ch| lp.n_particles_per_pixel[l][ch]);
+            check("n_particles_per_pixel", &|l, ch| {
+                lp.n_particles_per_pixel[l][ch]
+            });
             check("dye_cloud_sigma_px", &|l, ch| {
                 lp.dye_cloud_sigma(c.settings.blur_dye_clouds_um, l, ch)
             });
             for (ch, want) in f64s(&d["coarsest_area_um2"]).into_iter().enumerate() {
                 let v = lp.coarsest_area_um2[ch];
-                assert!(close(v, want, 1e-9), "{stock} {pixel} µm area[{ch}]: {v} vs {want}");
+                assert!(
+                    close(v, want, 1e-9),
+                    "{stock} {pixel} µm area[{ch}]: {v} vs {want}"
+                );
             }
         }
         // Sub-layer interpolation, `[channel][probe][layer]`.
@@ -165,7 +207,10 @@ fn deterministic_parts_match_python() {
                 let pos = interp.locate(*d);
                 for (l, want) in f64s(row).into_iter().enumerate() {
                     let v = layer_density(&c.curves, pos, l, ch);
-                    assert!((v - want).abs() <= 1e-12, "{stock} interp ch {ch} d {d} layer {l}: {v} vs {want}");
+                    assert!(
+                        (v - want).abs() <= 1e-12,
+                        "{stock} interp ch {ch} d {d} layer {l}: {v} vs {want}"
+                    );
                 }
             }
         }
@@ -175,15 +220,27 @@ fn deterministic_parts_match_python() {
 #[test]
 fn multiplicative_unsharp_mask_matches_python() {
     let usm = &fixture()["usm"];
-    let shape: Vec<usize> = usm["shape"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap() as usize).collect();
+    let shape: Vec<usize> = usm["shape"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_u64().unwrap() as usize)
+        .collect();
     let (h, w) = (shape[0], shape[1]);
     let input = f64s(&usm["input"]);
     // f32 rounds the pow() of values up to ~2.5. The f64 build differs only
     // because `gaussian_blur_channel` takes σ as f32 (0.7 becomes
     // 0.699999988), which moves the kernel weights by ~1e-8.
-    let tol = if std::mem::size_of::<Scalar>() == 8 { 1e-7 } else { 2e-5 };
+    let tol = if std::mem::size_of::<Scalar>() == 8 {
+        1e-7
+    } else {
+        2e-5
+    };
     for case in usm["cases"].as_array().unwrap() {
-        let (sigma, amount) = (case["sigma"].as_f64().unwrap(), case["amount"].as_f64().unwrap());
+        let (sigma, amount) = (
+            case["sigma"].as_f64().unwrap(),
+            case["amount"].as_f64().unwrap(),
+        );
         let output = f64s(&case["output"]);
         for ch in 0..3 {
             let mut plane: Vec<Scalar> = (0..w * h).map(|i| from_f64(input[i * 3 + ch])).collect();
@@ -202,7 +259,13 @@ fn multiplicative_unsharp_mask_matches_python() {
 
 /// The fixture's statistics of one grained flat field (see the freeze
 /// script's `field_statistics`), per channel.
-fn field_statistics(out: &ImageBuf, level: f64, pixel_size_um: f64, n_channels: usize, lags: &[usize]) -> Value {
+fn field_statistics(
+    out: &ImageBuf,
+    level: f64,
+    pixel_size_um: f64,
+    n_channels: usize,
+    lags: &[usize],
+) -> Value {
     let (w, h) = (out.width as usize, out.height as usize);
     let boxed = (48.0 / pixel_size_um).round() as usize;
     let mut stats = serde_json::Map::new();
@@ -211,7 +274,13 @@ fn field_statistics(out: &ImageBuf, level: f64, pixel_size_um: f64, n_channels: 
     let mut mean_shift = Vec::new();
     let mut acf: Vec<Vec<f64>> = vec![Vec::new(); lags.len()];
     for ch in 0..n_channels {
-        let noise: Vec<f64> = out.data.iter().skip(ch).step_by(3).map(|&v| to_f64(v) - level).collect();
+        let noise: Vec<f64> = out
+            .data
+            .iter()
+            .skip(ch)
+            .step_by(3)
+            .map(|&v| to_f64(v) - level)
+            .collect();
         let n = noise.len() as f64;
         let mean = noise.iter().sum::<f64>() / n;
         let var = noise.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n;
@@ -254,14 +323,24 @@ fn field_statistics(out: &ImageBuf, level: f64, pixel_size_um: f64, n_channels: 
     stats.insert("pixel_rms".into(), pixel_rms.into());
     stats.insert("aperture_rms".into(), aperture_rms.into());
     stats.insert("mean_shift".into(), mean_shift.into());
-    let acf_map: serde_json::Map<String, Value> =
-        lags.iter().zip(acf).map(|(lag, v)| (lag.to_string(), v.into())).collect();
+    let acf_map: serde_json::Map<String, Value> = lags
+        .iter()
+        .zip(acf)
+        .map(|(lag, v)| (lag.to_string(), v.into()))
+        .collect();
     stats.insert("acf".into(), acf_map.into());
     Value::Object(stats)
 }
 
 /// Gate one statistic; returns the worst |z| (in σ) for the report.
-fn gate(label: &str, got: &[f64], reference: &Value, floor: &dyn Fn(f64) -> f64, reps: f64, failures: &mut Vec<String>) -> f64 {
+fn gate(
+    label: &str,
+    got: &[f64],
+    reference: &Value,
+    floor: &dyn Fn(f64) -> f64,
+    reps: f64,
+    failures: &mut Vec<String>,
+) -> f64 {
     let (mean, std) = (f64s(&reference["mean"]), f64s(&reference["std"]));
     let mut worst: f64 = 0.0;
     for ch in 0..mean.len() {
@@ -286,7 +365,12 @@ fn check_statistics(stock: &str, engine: &str, run: &GrainFn<'_>) {
     let design = &fx["design"];
     let size = design["field_size_px"].as_u64().unwrap() as u32;
     let reps = design["reps"].as_f64().unwrap();
-    let lags: Vec<usize> = design["acf_lags"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap() as usize).collect();
+    let lags: Vec<usize> = design["acf_lags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_u64().unwrap() as usize)
+        .collect();
     let c = case(stock);
     let mut failures = Vec::new();
     for (pixel, by_level) in fx["stocks"][stock]["statistics"].as_object().unwrap() {
@@ -302,10 +386,24 @@ fn check_statistics(stock: &str, engine: &str, run: &GrainFn<'_>) {
             let rms_floor = |m: f64| 0.01 * m.abs();
             let mut z = Vec::new();
             for name in ["pixel_rms", "aperture_rms"] {
-                z.push(gate(&format!("{label} {name}"), &f64s(&got[name]), &reference[name], &rms_floor, reps, &mut failures));
+                z.push(gate(
+                    &format!("{label} {name}"),
+                    &f64s(&got[name]),
+                    &reference[name],
+                    &rms_floor,
+                    reps,
+                    &mut failures,
+                ));
             }
             let exact = &modes["exact"];
-            z.push(gate(&format!("{label} mean_shift"), &f64s(&got["mean_shift"]), &exact["mean_shift"], &|_| 0.05, reps, &mut failures));
+            z.push(gate(
+                &format!("{label} mean_shift"),
+                &f64s(&got["mean_shift"]),
+                &exact["mean_shift"],
+                &|_| 0.05,
+                reps,
+                &mut failures,
+            ));
             for lag in &lags {
                 let key = lag.to_string();
                 z.push(gate(
@@ -319,21 +417,48 @@ fn check_statistics(stock: &str, engine: &str, run: &GrainFn<'_>) {
             }
             eprintln!(
                 "{label}: pixel rms {:?} (Python {:?}), 48 µm rms {:?} (Python {:?}), worst |z| per stat {:?}",
-                f64s(&got["pixel_rms"]).iter().map(|v| (v * 100.0).round() / 100.0).collect::<Vec<_>>(),
-                f64s(&reference["pixel_rms"]["mean"]).iter().map(|v| (v * 100.0).round() / 100.0).collect::<Vec<_>>(),
-                f64s(&got["aperture_rms"]).iter().map(|v| (v * 100.0).round() / 100.0).collect::<Vec<_>>(),
-                f64s(&reference["aperture_rms"]["mean"]).iter().map(|v| (v * 100.0).round() / 100.0).collect::<Vec<_>>(),
-                z.iter().map(|v| (v * 10.0).round() / 10.0).collect::<Vec<_>>(),
+                f64s(&got["pixel_rms"])
+                    .iter()
+                    .map(|v| (v * 100.0).round() / 100.0)
+                    .collect::<Vec<_>>(),
+                f64s(&reference["pixel_rms"]["mean"])
+                    .iter()
+                    .map(|v| (v * 100.0).round() / 100.0)
+                    .collect::<Vec<_>>(),
+                f64s(&got["aperture_rms"])
+                    .iter()
+                    .map(|v| (v * 100.0).round() / 100.0)
+                    .collect::<Vec<_>>(),
+                f64s(&reference["aperture_rms"]["mean"])
+                    .iter()
+                    .map(|v| (v * 100.0).round() / 100.0)
+                    .collect::<Vec<_>>(),
+                z.iter()
+                    .map(|v| (v * 10.0).round() / 10.0)
+                    .collect::<Vec<_>>(),
             );
         }
     }
-    assert!(failures.is_empty(), "{} statistics outside the gates:\n{}", failures.len(), failures.join("\n"));
+    assert!(
+        failures.is_empty(),
+        "{} statistics outside the gates:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
 }
 
 fn cpu(stock: &str) {
     let c = case(stock);
     check_statistics(stock, "cpu", &|field, pixel| {
-        apply_grain(field, pixel, &c.settings, &c.curves, c.positive, c.bw, false)
+        apply_grain(
+            field,
+            pixel,
+            &c.settings,
+            &c.curves,
+            c.positive,
+            c.bw,
+            false,
+        )
     });
 }
 
@@ -344,7 +469,8 @@ fn gpu(stock: &str) {
     };
     let c = case(stock);
     check_statistics(stock, "gpu", &|field, pixel| {
-        let gp = spektrafilm_model::grain::gpu_params(&c.curves, &c.settings, pixel, c.positive, c.bw);
+        let gp =
+            spektrafilm_model::grain::gpu_params(&c.curves, &c.settings, pixel, c.positive, c.bw);
         backend.run_grain(&field, &gp)
     });
 }

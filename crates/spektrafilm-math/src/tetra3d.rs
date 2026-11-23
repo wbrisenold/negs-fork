@@ -98,10 +98,16 @@ mod tests {
             let got = tetrahedral_interp(&lut, size, r, g, b);
             let want = f(r, g, b);
             for c in 0..3 {
-                assert!((got[c] - want[c]).abs() < 1e-12, "({r}, {g}, {b}): {got:?} vs {want:?}");
+                assert!(
+                    (got[c] - want[c]).abs() < 1e-12,
+                    "({r}, {g}, {b}): {got:?} vs {want:?}"
+                );
             }
         }
         // Outside [0, size-1] the coordinates clamp to the faces.
-        assert_eq!(tetrahedral_interp(&lut, size, -1.0, 9.0, 4.0), f(0.0, 4.0, 4.0));
+        assert_eq!(
+            tetrahedral_interp(&lut, size, -1.0, 9.0, 4.0),
+            f(0.0, 4.0, 4.0)
+        );
     }
 }

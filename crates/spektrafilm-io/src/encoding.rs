@@ -18,7 +18,10 @@ pub struct Encoding {
 /// sRGB, `encoded` or linear: what finishing assumed before output spaces.
 impl From<bool> for Encoding {
     fn from(encoded: bool) -> Self {
-        Self { space: &SRGB, encoded }
+        Self {
+            space: &SRGB,
+            encoded,
+        }
     }
 }
 
@@ -26,7 +29,10 @@ impl Encoding {
     /// `space` as colour names it; unknown names are sRGB, as the scan's
     /// output and the writers treat them.
     pub fn new(space: &str, encoded: bool) -> Self {
-        Self { space: RgbColourspace::output(space), encoded }
+        Self {
+            space: RgbColourspace::output(space),
+            encoded,
+        }
     }
 
     fn is_srgb(&self) -> bool {
@@ -54,13 +60,21 @@ impl Encoding {
     /// Linear sRGB in [0, 1] → this encoding, clipped to its gamut.
     pub fn from_linear_srgb(&self, rgb: [f32; 3]) -> [f32; 3] {
         if self.is_srgb() {
-            return if self.encoded { rgb.map(linear_to_srgb) } else { rgb };
+            return if self.encoded {
+                rgb.map(linear_to_srgb)
+            } else {
+                rgb
+            };
         }
         let m = colorspace::icc_rgb_to_rgb(&SRGB, self.space);
         let lin = colorspace::mat3_vec_f64(&m, rgb.map(f64::from));
         lin.map(|v| {
             let v = v.clamp(0.0, 1.0);
-            (if self.encoded { self.space.cctf.encode(v) } else { v }) as f32
+            (if self.encoded {
+                self.space.cctf.encode(v)
+            } else {
+                v
+            }) as f32
         })
     }
 
@@ -71,7 +85,11 @@ impl Encoding {
         if self.is_srgb() {
             return rgb;
         }
-        let lin = if self.encoded { rgb.map(|v| to_f64(srgb_decode(from_f64(v as f64))) as f32) } else { rgb };
+        let lin = if self.encoded {
+            rgb.map(|v| to_f64(srgb_decode(from_f64(v as f64))) as f32)
+        } else {
+            rgb
+        };
         self.from_linear_srgb(lin)
     }
 }
@@ -108,7 +126,10 @@ mod tests {
         let p3_xyz = colorspace::mat3_vec_f64(&RgbColourspace::output("Display P3").rgb_to_xyz, p3);
         let srgb_xyz = colorspace::mat3_vec_f64(&SRGB.rgb_to_xyz, [1.0, 0.0, 0.0]);
         for c in 0..3 {
-            assert!((p3_xyz[c] - srgb_xyz[c]).abs() < 1e-5, "{p3_xyz:?} vs {srgb_xyz:?}");
+            assert!(
+                (p3_xyz[c] - srgb_xyz[c]).abs() < 1e-5,
+                "{p3_xyz:?} vs {srgb_xyz:?}"
+            );
         }
     }
 }

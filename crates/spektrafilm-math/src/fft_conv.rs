@@ -22,8 +22,12 @@ use rustfft::{FftPlanner, num_complex::Complex};
 /// Bytes in one padded complex FFT buffer, without allocating the image or
 /// kernel. Convolution keeps two of these and a transpose alive together.
 pub fn reflect_fft_buffer_bytes(h: usize, w: usize, radius: usize) -> u64 {
-    let Some(pad) = radius.checked_mul(4) else { return u64::MAX };
-    let (Some(h), Some(w)) = (h.checked_add(pad), w.checked_add(pad)) else { return u64::MAX };
+    let Some(pad) = radius.checked_mul(4) else {
+        return u64::MAX;
+    };
+    let (Some(h), Some(w)) = (h.checked_add(pad), w.checked_add(pad)) else {
+        return u64::MAX;
+    };
     (next_fast_len(h) as u64)
         .saturating_mul(next_fast_len(w) as u64)
         .saturating_mul(std::mem::size_of::<Complex<f64>>() as u64)

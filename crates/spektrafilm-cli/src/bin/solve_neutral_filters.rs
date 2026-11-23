@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 
 use spektrafilm_core::params::RuntimeParams;
-use spektrafilm_core::print_balance::{solve_neutral_filter_shifts, MIDGRAY};
+use spektrafilm_core::print_balance::{MIDGRAY, solve_neutral_filter_shifts};
 use spektrafilm_core::profile;
 
 const START: [f64; 3] = [0.0, 50.0, 50.0];
@@ -44,7 +44,9 @@ fn main() {
                 START[1] + m,
                 START[2] + y
             ),
-            Err(e) => println!("{{\"paper\":\"{paper}\",\"film\":\"{film_name}\",\"error\":{e:?}}}"),
+            Err(e) => {
+                println!("{{\"paper\":\"{paper}\",\"film\":\"{film_name}\",\"error\":{e:?}}}")
+            }
         }
     }
 }

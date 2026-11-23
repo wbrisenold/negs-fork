@@ -92,7 +92,10 @@ fn check_curve(name: &str, what: &str, xs: &[f64], want: &[Option<f64>], f: impl
     for (&x, &want) in xs.iter().zip(want) {
         let got = f(x);
         match want {
-            Some(want) => assert!(close(got, want, 1e-14), "{name} {what}({x}): {got} vs {want}"),
+            Some(want) => assert!(
+                close(got, want, 1e-14),
+                "{name} {what}({x}): {got} vs {want}"
+            ),
             None => assert!(got.is_nan(), "{name} {what}({x}): {got}, colour gives NaN"),
         }
     }
@@ -106,7 +109,13 @@ fn colourspace_table_is_colours() {
     for cs in &COLOURSPACES {
         let want = &fixture.colourspaces[cs.name];
         for (g, w) in cs.whitepoint_xyz.iter().zip(want.whitepoint_xyz) {
-            assert!(close(*g, w, 1e-15), "{}: {:?} vs {:?}", cs.name, cs.whitepoint_xyz, want.whitepoint_xyz);
+            assert!(
+                close(*g, w, 1e-15),
+                "{}: {:?} vs {:?}",
+                cs.name,
+                cs.whitepoint_xyz,
+                want.whitepoint_xyz
+            );
         }
         // colour derives some matrices at import (DCI-P3, Display P3) and the
         // self-conversion is a matrix product; numpy's vectorised arithmetic
@@ -120,8 +129,20 @@ fn colourspace_table_is_colours() {
                 assert!(close(*g, *w, 1e-15), "{}: {got:?} vs {want:?}", cs.name);
             }
         }
-        check_curve(cs.name, "encode", &fixture.cctf_x, &want.cctf_encoded, |x| cs.cctf.encode(x));
-        check_curve(cs.name, "decode", &fixture.cctf_x, &want.cctf_decoded, |x| cs.cctf.decode(x));
+        check_curve(
+            cs.name,
+            "encode",
+            &fixture.cctf_x,
+            &want.cctf_encoded,
+            |x| cs.cctf.encode(x),
+        );
+        check_curve(
+            cs.name,
+            "decode",
+            &fixture.cctf_x,
+            &want.cctf_decoded,
+            |x| cs.cctf.decode(x),
+        );
     }
     assert_eq!(CAT02_INVERSE, fixture.cat_inverse["CAT02"]);
     assert_eq!(CAT16_INVERSE, fixture.cat_inverse["CAT16"]);
@@ -155,7 +176,8 @@ fn input_projection_matches_python() {
         let cs = RgbColourspace::find(&case.color_space).unwrap();
         for (k, rgb) in fixture.tc_b_rgb.iter().enumerate() {
             let rgb = rgb.map(|v| from_f64(if case.decode { cs.cctf.decode(v) } else { v }));
-            let (tc, b) = spectral::rgb_to_tc_b(rgb, cs.name, &spectral::ILLUMINANT_D55, true, false);
+            let (tc, b) =
+                spectral::rgb_to_tc_b(rgb, cs.name, &spectral::ILLUMINANT_D55, true, false);
             #[cfg(feature = "precision-f64")]
             let tol = 1e-12;
             #[cfg(not(feature = "precision-f64"))]
@@ -185,7 +207,10 @@ fn scan_xyz_to_rgb_matches_python() {
             let mv = |m: &M3, v: [f64; 3]| m.map(|r| r[0] * v[0] + r[1] * v[1] + r[2] * v[2]);
             let got = mv(&cs.xyz_to_rgb, mv(&adapt, *xyz));
             for c in 0..3 {
-                assert!(close(got[c], want[c], 1e-12), "{name} {xyz:?}: {got:?} vs {want:?}");
+                assert!(
+                    close(got[c], want[c], 1e-12),
+                    "{name} {xyz:?}: {got:?} vs {want:?}"
+                );
             }
         }
     }
@@ -224,7 +249,11 @@ fn output_encoding_matches_python() {
     let fixture = fixture();
     for (name, want) in &fixture.encoded_output {
         let n = fixture.encode_rgb.len() as u32 / 3;
-        let mut rgb = ImageBuf::from_data(n, 1, fixture.encode_rgb.iter().map(|&v| from_f64(v)).collect());
+        let mut rgb = ImageBuf::from_data(
+            n,
+            1,
+            fixture.encode_rgb.iter().map(|&v| from_f64(v)).collect(),
+        );
         encode_output(&mut rgb, name);
         #[cfg(feature = "precision-f64")]
         let tol = 1e-14;
@@ -232,7 +261,10 @@ fn output_encoding_matches_python() {
         let tol = 1e-6;
         for (i, (&got, want)) in rgb.data.iter().zip(want).enumerate() {
             match want {
-                Some(want) => assert!(close(got as f64, *want, tol), "{name} [{i}]: {got} vs {want}"),
+                Some(want) => assert!(
+                    close(got as f64, *want, tol),
+                    "{name} [{i}]: {got} vs {want}"
+                ),
                 None => assert!(got.is_nan(), "{name} [{i}]: {got}, colour gives NaN"),
             }
         }
@@ -247,7 +279,11 @@ fn pipelines_across_colour_spaces_match_python() {
     let data_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
     for case in fixture.pipeline_cases {
         let film = profile::load_profile_by_name(&data_dir, &case.film).unwrap();
-        let paper = if case.scan_film { &case.film } else { &case.paper };
+        let paper = if case.scan_film {
+            &case.film
+        } else {
+            &case.paper
+        };
         let print = profile::load_profile_by_name(&data_dir, paper).unwrap();
         // Upstream's reference modes: it adapts straight to a non-D65 output
         // white (aces-prophoto, vlog-acescg, adobe-dcip3), and folds the

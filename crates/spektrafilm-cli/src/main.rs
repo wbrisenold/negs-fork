@@ -254,7 +254,14 @@ fn main() -> Result<()> {
             output,
             data_dir,
         } => {
-            cmd_export_lut(&film, paper.as_deref(), size, params.as_deref(), &output, &data_dir)?;
+            cmd_export_lut(
+                &film,
+                paper.as_deref(),
+                size,
+                params.as_deref(),
+                &output,
+                &data_dir,
+            )?;
         }
     }
 
@@ -264,8 +271,10 @@ fn main() -> Result<()> {
 /// A params file. One from before `io.input_interpretation` keeps the
 /// meaning of its input fields; see `infer_input_interpretation`.
 fn read_params(path: &Path) -> Result<RuntimeParams> {
-    let text = std::fs::read_to_string(path).with_context(|| format!("opening params file: {}", path.display()))?;
-    let mut value: serde_json::Value = serde_json::from_str(&text).context("parsing params file")?;
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("opening params file: {}", path.display()))?;
+    let mut value: serde_json::Value =
+        serde_json::from_str(&text).context("parsing params file")?;
     spektrafilm_core::params::infer_input_interpretation(&mut value);
     let params: RuntimeParams = serde_json::from_value(value).context("parsing params file")?;
     params.prep.validate().map_err(anyhow::Error::msg)?;
@@ -283,7 +292,10 @@ fn parse_input_colour(spec: &str, linear: bool) -> Result<spektrafilm_io::InputI
             let space = RgbColourspace::find(spec)
                 .filter(|cs| spektrafilm_io::colour::ASSUMABLE.contains(&cs.name))
                 .with_context(|| {
-                    format!("--input-colour: use auto, manual or one of {}", spektrafilm_io::colour::ASSUMABLE.join(", "))
+                    format!(
+                        "--input-colour: use auto, manual or one of {}",
+                        spektrafilm_io::colour::ASSUMABLE.join(", ")
+                    )
                 })?;
             InputInterpretation::assume(space.name, linear)
         }
@@ -354,8 +366,8 @@ fn cmd_process(
         raw_tint,
     )?;
     if let Some(name) = color_space {
-        let space = RgbColourspace::find(name)
-            .with_context(|| format!("unknown colour space: {name}"))?;
+        let space =
+            RgbColourspace::find(name).with_context(|| format!("unknown colour space: {name}"))?;
         params.io.output_color_space = space.name.into();
     }
     let rotate_cw = params.io.rotate_cw;
@@ -363,7 +375,9 @@ fn cmd_process(
     // Borders, the 35mm strip and resizing work in the output space.
     let finish = spektrafilm_io::encoding::Encoding::new(&params.io.output_color_space, encoded);
     // The pipeline falls back to sRGB for a name it doesn't know; so does the profile.
-    save_options.color_space = RgbColourspace::output(&params.io.output_color_space).name.into();
+    save_options.color_space = RgbColourspace::output(&params.io.output_color_space)
+        .name
+        .into();
     save_options.linear = !encoded;
     save_options.check(output)?;
 
@@ -497,7 +511,12 @@ fn cmd_process(
     // Save output, carrying over the input's camera metadata (EXIF).
     let t = Instant::now();
     let metadata = spektrafilm_io::read_metadata(input);
-    spektrafilm_io::save::save_image_with_options(&result, output, metadata.as_ref(), &save_options)?;
+    spektrafilm_io::save::save_image_with_options(
+        &result,
+        output,
+        metadata.as_ref(),
+        &save_options,
+    )?;
     eprintln!(
         "Saved: {} ({}x{}), {} ms",
         output.display(),
@@ -595,15 +614,18 @@ fn cmd_export_lut(
     data_dir: &Path,
 ) -> Result<()> {
     let params: RuntimeParams = match params_file {
-        Some(path) => serde_json::from_str(&std::fs::read_to_string(path)
-            .with_context(|| format!("reading params: {}", path.display()))?)?,
+        Some(path) => serde_json::from_str(
+            &std::fs::read_to_string(path)
+                .with_context(|| format!("reading params: {}", path.display()))?,
+        )?,
         None => RuntimeParams::default(),
     };
     let film = profile::load_profile_by_name(data_dir, film_name)?;
     let paper = if params.io.scan_film {
         film_name
     } else {
-        paper_name.or(film.info.target_print.as_deref())
+        paper_name
+            .or(film.info.target_print.as_deref())
             .context("no paper specified and film has no target_print")?
     };
     let cube = spektrafilm_core::lut_export::cube(data_dir, film_name, paper, params, size)

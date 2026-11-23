@@ -254,14 +254,7 @@ fn iir_blur_1d(
 }
 
 /// Apply Young-van Vliet IIR filter to a 1D signal (forward + backward pass).
-fn iir_filter_row(
-    src: &[Scalar],
-    dst: &mut [Scalar],
-    a: f64,
-    b1: f64,
-    b2: f64,
-    b3: f64,
-) {
+fn iir_filter_row(src: &[Scalar], dst: &mut [Scalar], a: f64, b1: f64, b2: f64, b3: f64) {
     let n = src.len();
     if n == 0 {
         return;
@@ -357,7 +350,10 @@ mod tests {
         for sigma in [3.0, 10.0, 30.0, 60.0] {
             let input = vec![from_f64(0.42); 97 * 61];
             let out = gaussian_blur_channel(&input, 97, 61, sigma);
-            let worst = out.iter().map(|&x| (x as f64 - input[0] as f64).abs()).fold(0.0, f64::max);
+            let worst = out
+                .iter()
+                .map(|&x| (x as f64 - input[0] as f64).abs())
+                .fold(0.0, f64::max);
             assert!(worst < 1e-7, "sigma {sigma}: DC error {worst}");
         }
     }

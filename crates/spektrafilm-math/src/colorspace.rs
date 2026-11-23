@@ -1,3 +1,4 @@
+use crate::colorspace_data as data;
 /// RGB colour spaces, chromatic adaptation and transfer functions.
 ///
 /// Everything here follows colour-science 0.4.7, which upstream uses for
@@ -7,7 +8,6 @@
 ///
 /// All matrices are row-major: output[i] = dot(matrix[i], input).
 pub use crate::colorspace_data::{CAT02, CAT02_INVERSE, CAT16, CAT16_INVERSE, COLOURSPACES};
-use crate::colorspace_data as data;
 
 /// A colourspace of `colour.RGB_COLOURSPACES`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -75,7 +75,10 @@ pub enum Cctf {
     /// `eotf_inverse_sRGB` / `eotf_sRGB`.
     Srgb,
     /// `gamma_function` with these exponents.
-    Gamma { encode: f64, decode: f64 },
+    Gamma {
+        encode: f64,
+        decode: f64,
+    },
     /// `oetf_BT2020` / `oetf_inverse_BT2020` (10-bit constants).
     Bt2020,
     /// `cctf_encoding_ROMMRGB` / `cctf_decoding_ROMMRGB` (8-bit, float out).
@@ -337,7 +340,10 @@ pub fn icc_rgb_to_rgb(from: &RgbColourspace, to: &RgbColourspace) -> [[f64; 3]; 
         return [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
     }
     let adapt = bradford_matrix(from.whitepoint_xyz, to.whitepoint_xyz);
-    mat3_mul3_f64(&mat3_inverse(&to.rgb_to_xyz), &mat3_mul3_f64(&adapt, &from.rgb_to_xyz))
+    mat3_mul3_f64(
+        &mat3_inverse(&to.rgb_to_xyz),
+        &mat3_mul3_f64(&adapt, &from.rgb_to_xyz),
+    )
 }
 
 /// `m · v`.
@@ -401,8 +407,14 @@ mod tests {
 
     #[test]
     fn names_and_aliases_resolve() {
-        assert_eq!(RgbColourspace::find("ProPhoto RGB").unwrap().name, "ProPhoto RGB");
-        assert_eq!(RgbColourspace::find("Rec. 2020").unwrap().name, "ITU-R BT.2020");
+        assert_eq!(
+            RgbColourspace::find("ProPhoto RGB").unwrap().name,
+            "ProPhoto RGB"
+        );
+        assert_eq!(
+            RgbColourspace::find("Rec. 2020").unwrap().name,
+            "ITU-R BT.2020"
+        );
         assert_eq!(RgbColourspace::find("srgb").unwrap().name, "sRGB");
         assert_eq!(RgbColourspace::find("aces").unwrap().name, "ACES2065-1");
         assert!(RgbColourspace::find("nonsense").is_none());

@@ -5,7 +5,9 @@
 //! exposure ≠ 1 or scanner white correction otherwise shifts the whole
 //! print (IMG_0316 + COOKED rendered ~6 ΔE00 brighter on the GPU).
 
-use spektrafilm_core::{color_reference::ColorReference, params::RuntimeParams, pipeline::Pipeline, profile};
+use spektrafilm_core::{
+    color_reference::ColorReference, params::RuntimeParams, pipeline::Pipeline, profile,
+};
 use spektrafilm_gpu::{cpu_backend::CpuBackend, wgpu_backend::WgpuBackend};
 use spektrafilm_math::{image::ImageBuf, precision::from_f64};
 use std::path::Path;
@@ -27,9 +29,16 @@ fn image() -> ImageBuf {
     let (w, h) = (96u32, 64u32);
     let data = (0..w * h)
         .flat_map(|i| {
-            let (x, y) = ((i % w) as f64 / (w - 1) as f64, (i / w) as f64 / (h - 1) as f64);
+            let (x, y) = (
+                (i % w) as f64 / (w - 1) as f64,
+                (i / w) as f64 / (h - 1) as f64,
+            );
             let level = 0.002 + 1.4 * x * x;
-            [level * (0.3 + 0.7 * y), level * (1.0 - 0.6 * y), level * (0.2 + 0.8 * (1.0 - x) * y)]
+            [
+                level * (0.3 + 0.7 * y),
+                level * (1.0 - 0.6 * y),
+                level * (0.2 + 0.8 * (1.0 - x) * y),
+            ]
         })
         .map(from_f64)
         .collect();
@@ -41,7 +50,10 @@ fn preflash_with_print_exposure_scale_matches_the_cpu() {
     let Some(gpu) = WgpuBackend::new() else {
         // SPEKTRAFILM_REQUIRE_GPU=1 (the platform handoffs) fails instead, so a
         // machine whose GPU isn't found can't pass without testing anything.
-        assert!(std::env::var_os("SPEKTRAFILM_REQUIRE_GPU").is_none(), "no GPU adapter, and SPEKTRAFILM_REQUIRE_GPU is set");
+        assert!(
+            std::env::var_os("SPEKTRAFILM_REQUIRE_GPU").is_none(),
+            "no GPU adapter, and SPEKTRAFILM_REQUIRE_GPU is set"
+        );
         eprintln!("no GPU adapter available; skipping");
         return;
     };
@@ -59,9 +71,14 @@ fn preflash_with_print_exposure_scale_matches_the_cpu() {
         params.enlarger.print_exposure = print_exposure;
         params.scanner.white_correction = white_correction;
         params.enlarger.diffusion_filter.active = diffusion;
-        let case = format!("print_exposure {print_exposure} white_correction {white_correction} diffusion {diffusion}");
+        let case = format!(
+            "print_exposure {print_exposure} white_correction {white_correction} diffusion {diffusion}"
+        );
         let pipe = pipeline(params);
-        assert!(pipe.preflash_raw().iter().all(|&v| v > 0.0), "{case}: preflash is off");
+        assert!(
+            pipe.preflash_raw().iter().all(|&v| v > 0.0),
+            "{case}: preflash is off"
+        );
         let correction = ColorReference::compute(
             &pipe.film,
             &pipe.print,
@@ -72,11 +89,19 @@ fn preflash_with_print_exposure_scale_matches_the_cpu() {
         )
         .printing_exposure_correction;
         let scale = print_exposure as f64 * correction;
-        assert!((scale - 1.0).abs() > 0.05, "{case}: exposure scale {scale} doesn't exercise the fold");
+        assert!(
+            (scale - 1.0).abs() > 0.05,
+            "{case}: exposure scale {scale} doesn't exercise the fold"
+        );
 
         let cpu = pipe.process(image(), &CpuBackend);
         let gpu_out = pipe.process(image(), &gpu);
-        let max = cpu.data.iter().zip(&gpu_out.data).map(|(a, b)| (*a as f64 - *b as f64).abs()).fold(0.0, f64::max);
+        let max = cpu
+            .data
+            .iter()
+            .zip(&gpu_out.data)
+            .map(|(a, b)| (*a as f64 - *b as f64).abs())
+            .fold(0.0, f64::max);
         eprintln!("{case}: exposure scale {scale:.4}, max |gpu - cpu| {max:.3e}");
         assert!(max < 1e-4, "{case}: GPU scan differs from CPU by {max}");
     }

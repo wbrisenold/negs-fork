@@ -109,7 +109,10 @@ impl SaveOptions {
             _ => bail!("unsupported output format: .{ext} (supported: tiff, png, jpg)"),
         };
         let depth = self.bit_depth.unwrap_or(default_depth);
-        ensure!(depth == 8 || depth == 16, "bit depth must be 8 or 16, not {depth}");
+        ensure!(
+            depth == 8 || depth == 16,
+            "bit depth must be 8 or 16, not {depth}"
+        );
         ensure!(
             depth == 8 || !matches!(format, Format::Jpeg(_)),
             "JPEG is 8-bit only; save 16 bits as PNG or TIFF"
@@ -162,7 +165,10 @@ fn save_png(
 ) -> Result<()> {
     // The encoder takes 16-bit samples in native byte order.
     let (data, color) = if depth == 16 {
-        let data = quantize_u16(img).iter().flat_map(|v| v.to_ne_bytes()).collect();
+        let data = quantize_u16(img)
+            .iter()
+            .flat_map(|v| v.to_ne_bytes())
+            .collect();
         (data, image::ExtendedColorType::Rgb16)
     } else {
         (quantize_u8(img), image::ExtendedColorType::Rgb8)
@@ -213,9 +219,23 @@ fn save_tiff(
     let mut file = create(path)?;
     let tiff = TiffWriter::new(&mut file).map_err(tiff_err)?;
     let written = if depth == 16 {
-        write_tiff_image(tiff, &quantize_u16(img), img.width, img.height, metadata, icc)
+        write_tiff_image(
+            tiff,
+            &quantize_u16(img),
+            img.width,
+            img.height,
+            metadata,
+            icc,
+        )
     } else {
-        write_tiff_image(tiff, &quantize_u8(img), img.width, img.height, metadata, icc)
+        write_tiff_image(
+            tiff,
+            &quantize_u8(img),
+            img.width,
+            img.height,
+            metadata,
+            icc,
+        )
     };
     written
         .and_then(|()| Ok(file.flush()?))
@@ -505,7 +525,10 @@ mod tests {
             .map(|v| spektrafilm_math::precision::srgb_decode(from_f32(v as f32 / 65535.0)))
             .collect();
         for (got, want) in back.data.iter().zip(&want) {
-            assert!((to_f32(*got) - to_f32(*want)).abs() < 5e-5, "{got:?} vs {want:?}");
+            assert!(
+                (to_f32(*got) - to_f32(*want)).abs() < 5e-5,
+                "{got:?} vs {want:?}"
+            );
         }
     }
 
@@ -585,12 +608,31 @@ mod tests {
     fn bit_depths_and_colour_profiles() {
         let dir = Scratch::new("depth-icc");
         let img = test_image();
-        let p3 = SaveOptions { color_space: "Display P3".into(), ..Default::default() };
+        let p3 = SaveOptions {
+            color_space: "Display P3".into(),
+            ..Default::default()
+        };
         let cases = [
             ("default.png", SaveOptions::default(), 8, "sRGB"),
-            ("deep.png", SaveOptions { bit_depth: Some(16), ..p3.clone() }, 16, "Display P3"),
+            (
+                "deep.png",
+                SaveOptions {
+                    bit_depth: Some(16),
+                    ..p3.clone()
+                },
+                16,
+                "Display P3",
+            ),
             ("default.tif", p3.clone(), 16, "Display P3"),
-            ("shallow.tif", SaveOptions { bit_depth: Some(8), ..Default::default() }, 8, "sRGB"),
+            (
+                "shallow.tif",
+                SaveOptions {
+                    bit_depth: Some(8),
+                    ..Default::default()
+                },
+                8,
+                "sRGB",
+            ),
             ("photo.jpg", p3.clone(), 8, "Display P3"),
         ];
         for (name, options, depth, space) in cases {
@@ -604,7 +646,12 @@ mod tests {
                 .unwrap();
             // `image` misses a small TIFF's profile; libtiff reads it, as rawler does.
             let icc = if name.ends_with(".tif") {
-                match &exif_ifd0(&out).entries().get(&TIFF_ICC_PROFILE).unwrap().value {
+                match &exif_ifd0(&out)
+                    .entries()
+                    .get(&TIFF_ICC_PROFILE)
+                    .unwrap()
+                    .value
+                {
                     Value::Undefined(icc) => Some(icc.clone()),
                     other => panic!("{name}: {other:?}"),
                 }
@@ -621,10 +668,23 @@ mod tests {
                 assert_eq!(back.to_rgb8().into_raw(), quantize_u8(&img), "{name}");
             }
         }
-        let jpeg16 = SaveOptions { bit_depth: Some(16), ..Default::default() };
+        let jpeg16 = SaveOptions {
+            bit_depth: Some(16),
+            ..Default::default()
+        };
         assert!(jpeg16.check(Path::new("x.jpg")).is_err());
-        assert!(SaveOptions { bit_depth: Some(12), ..Default::default() }.check(Path::new("x.png")).is_err());
-        let unknown = SaveOptions { color_space: "Nope".into(), ..Default::default() };
+        assert!(
+            SaveOptions {
+                bit_depth: Some(12),
+                ..Default::default()
+            }
+            .check(Path::new("x.png"))
+            .is_err()
+        );
+        let unknown = SaveOptions {
+            color_space: "Nope".into(),
+            ..Default::default()
+        };
         assert!(unknown.check(Path::new("x.png")).is_err());
     }
 

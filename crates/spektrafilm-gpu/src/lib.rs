@@ -1,12 +1,20 @@
+#[cfg(all(
+    feature = "wgpu-backend",
+    any(
+        target_os = "windows",
+        target_os = "linux",
+        target_arch = "wasm32",
+        test
+    )
+))]
+mod capacity;
 pub mod cpu_backend;
 #[cfg(feature = "cuda-backend")]
 pub mod cuda_backend;
 #[cfg(feature = "wgpu-backend")]
-pub mod wgpu_backend;
-#[cfg(feature = "wgpu-backend")]
 mod pipeline_cache;
-#[cfg(all(feature = "wgpu-backend", any(target_os = "windows", target_os = "linux", target_arch = "wasm32", test)))]
-mod capacity;
+#[cfg(feature = "wgpu-backend")]
+pub mod wgpu_backend;
 
 use spektrafilm_math::image::ImageBuf;
 use std::sync::Arc;
@@ -223,9 +231,15 @@ pub enum ChainOutput {
     /// sRGB display bytes, as `preview::display_rgba` makes them from an
     /// sRGB scan: clipped, adjusted by `post` if any, encoded unless
     /// `encoded` says the scan is, and rounded to 8 bits.
-    Rgba8 { encoded: bool, post: Option<Arc<DisplayPost>> },
+    Rgba8 {
+        encoded: bool,
+        post: Option<Arc<DisplayPost>>,
+    },
     /// Those bytes drawn on the backend's canvas, with nothing read back.
-    Present { encoded: bool, post: Option<Arc<DisplayPost>> },
+    Present {
+        encoded: bool,
+        post: Option<Arc<DisplayPost>>,
+    },
 }
 
 /// Post adjustments for the display pass, as
@@ -310,8 +324,15 @@ pub struct DisplayFilmExpand {
 /// A finished [`PendingFilmChain`], by its [`ChainOutput`].
 pub enum ChainResult {
     Scan(ImageBuf),
-    Rgba8 { width: u32, height: u32, rgba: Vec<u8> },
-    Presented { width: u32, height: u32 },
+    Rgba8 {
+        width: u32,
+        height: u32,
+        rgba: Vec<u8>,
+    },
+    Presented {
+        width: u32,
+        height: u32,
+    },
 }
 
 /// All inputs to the GPU-resident film chain. Bundled into a struct so the

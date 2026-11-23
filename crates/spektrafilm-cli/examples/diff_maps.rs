@@ -13,15 +13,29 @@ use image::{Rgb, RgbImage};
 
 fn read_f64(path: &str) -> Vec<f64> {
     let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
-    bytes.chunks_exact(8).map(|b| f64::from_le_bytes(b.try_into().unwrap())).collect()
+    bytes
+        .chunks_exact(8)
+        .map(|b| f64::from_le_bytes(b.try_into().unwrap()))
+        .collect()
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let [a, b, pa, pb, pc, w, h, out] = <[String; 8]>::try_from(args).expect("A.f64 B.f64 A.png B.png C.png WIDTH HEIGHT OUT_DIR");
+    let [a, b, pa, pb, pc, w, h, out] =
+        <[String; 8]>::try_from(args).expect("A.f64 B.f64 A.png B.png C.png WIDTH HEIGHT OUT_DIR");
     let (w, h): (usize, usize) = (w.parse().unwrap(), h.parse().unwrap());
     let (a, b) = (read_f64(&a), read_f64(&b));
-    let de: Vec<f64> = a.chunks_exact(3).zip(b.chunks_exact(3)).map(|(p, q)| if p == q { 0.0 } else { ciede2000(lab(p), lab(q)) }).collect();
+    let de: Vec<f64> = a
+        .chunks_exact(3)
+        .zip(b.chunks_exact(3))
+        .map(|(p, q)| {
+            if p == q {
+                0.0
+            } else {
+                ciede2000(lab(p), lab(q))
+            }
+        })
+        .collect();
     std::fs::create_dir_all(&out).unwrap();
 
     // The heat map at a quarter of the size, each pixel the largest ΔE of its
@@ -54,15 +68,25 @@ fn main() {
             .max_by(|&i, &j| de[i].total_cmp(&de[j]))
             .unwrap()
     };
-    let places = [("interior", worst(true)), ("edge", worst(false)), ("typical", (h / 2) * w + w / 2)];
-    let images: Vec<RgbImage> = [&pa, &pb, &pc].iter().map(|p| image::open(p.as_str()).unwrap().to_rgb8()).collect();
+    let places = [
+        ("interior", worst(true)),
+        ("edge", worst(false)),
+        ("typical", (h / 2) * w + w / 2),
+    ];
+    let images: Vec<RgbImage> = [&pa, &pb, &pc]
+        .iter()
+        .map(|p| image::open(p.as_str()).unwrap().to_rgb8())
+        .collect();
     let mut report = Vec::new();
     for (name, i) in places {
         let (cx, cy) = (i % w, i / w);
         let x0 = cx.saturating_sub(crop / 2).min(w - crop);
         let y0 = cy.saturating_sub(crop / 2).min(h - crop);
         for (tag, img) in ["a", "b", "c"].iter().zip(&images) {
-            image::imageops::crop_imm(img, x0 as u32, y0 as u32, crop as u32, crop as u32).to_image().save(format!("{out}/{name}-{tag}.png")).unwrap();
+            image::imageops::crop_imm(img, x0 as u32, y0 as u32, crop as u32, crop as u32)
+                .to_image()
+                .save(format!("{out}/{name}-{tag}.png"))
+                .unwrap();
         }
         let mut diff = RgbImage::new(crop as u32, crop as u32);
         let mut patch = Vec::new();
@@ -70,7 +94,11 @@ fn main() {
             for x in 0..crop {
                 let k = (y0 + y) * w + x0 + x;
                 patch.push(de[k]);
-                let px = std::array::from_fn(|c| (128.0 + 8.0 * 255.0 * (b[k * 3 + c] - a[k * 3 + c])).round().clamp(0.0, 255.0) as u8);
+                let px = std::array::from_fn(|c| {
+                    (128.0 + 8.0 * 255.0 * (b[k * 3 + c] - a[k * 3 + c]))
+                        .round()
+                        .clamp(0.0, 255.0) as u8
+                });
                 diff.put_pixel(x as u32, y as u32, Rgb(px));
             }
         }
@@ -89,12 +117,24 @@ fn main() {
 }
 
 fn ramp(v: f64) -> Rgb<u8> {
-    let stops: [(f64, [f64; 3]); 5] = [(0.0, [12.0, 12.0, 16.0]), (0.5, [40.0, 90.0, 200.0]), (1.0, [240.0, 200.0, 40.0]), (2.0, [230.0, 40.0, 30.0]), (4.0, [255.0, 255.0, 255.0])];
+    let stops: [(f64, [f64; 3]); 5] = [
+        (0.0, [12.0, 12.0, 16.0]),
+        (0.5, [40.0, 90.0, 200.0]),
+        (1.0, [240.0, 200.0, 40.0]),
+        (2.0, [230.0, 40.0, 30.0]),
+        (4.0, [255.0, 255.0, 255.0]),
+    ];
     let v = v.min(4.0);
-    let i = stops.iter().rposition(|s| s.0 <= v).unwrap().min(stops.len() - 2);
+    let i = stops
+        .iter()
+        .rposition(|s| s.0 <= v)
+        .unwrap()
+        .min(stops.len() - 2);
     let (p, q) = (stops[i], stops[i + 1]);
     let t = ((v - p.0) / (q.0 - p.0)).clamp(0.0, 1.0);
-    Rgb(std::array::from_fn(|c| (p.1[c] + (q.1[c] - p.1[c]) * t) as u8))
+    Rgb(std::array::from_fn(|c| {
+        (p.1[c] + (q.1[c] - p.1[c]) * t) as u8
+    }))
 }
 
 // From src/bin/golden_compare.rs.
@@ -102,20 +142,40 @@ fn ramp(v: f64) -> Rgb<u8> {
 fn lab(rgb: &[f64]) -> [f64; 3] {
     // colour-science's sRGB normalised primary matrix and D65 (x 0.3127, y 0.3290).
     const M: [[f64; 3]; 3] = [
-        [0.412_390_799_265_959_5, 0.357_584_339_383_878, 0.180_480_788_401_834_3],
-        [0.212_639_005_871_510_36, 0.715_168_678_767_756, 0.072_192_315_360_733_71],
-        [0.019_330_818_715_591_82, 0.119_194_779_794_625_98, 0.950_532_152_249_660_7],
+        [
+            0.412_390_799_265_959_5,
+            0.357_584_339_383_878,
+            0.180_480_788_401_834_3,
+        ],
+        [
+            0.212_639_005_871_510_36,
+            0.715_168_678_767_756,
+            0.072_192_315_360_733_71,
+        ],
+        [
+            0.019_330_818_715_591_82,
+            0.119_194_779_794_625_98,
+            0.950_532_152_249_660_7,
+        ],
     ];
     const WHITE: [f64; 3] = [0.3127 / 0.3290, 1.0, (1.0 - 0.3127 - 0.3290) / 0.3290];
     let lin = |c: f64| {
         let c = c.clamp(0.0, 1.0);
-        if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
     };
     let l = [lin(rgb[0]), lin(rgb[1]), lin(rgb[2])];
     let f = |t: f64| {
         const E: f64 = 216.0 / 24389.0;
         const K: f64 = 24389.0 / 27.0;
-        if t > E { t.cbrt() } else { (K * t + 16.0) / 116.0 }
+        if t > E {
+            t.cbrt()
+        } else {
+            (K * t + 16.0) / 116.0
+        }
     };
     let xyz: Vec<f64> = (0..3)
         .map(|r| (M[r][0] * l[0] + M[r][1] * l[1] + M[r][2] * l[2]) / WHITE[r])
@@ -167,7 +227,8 @@ fn ciede2000(p: [f64; 3], q: [f64; 3]) -> f64 {
     } else {
         (h1p + h2p - 360.0) / 2.0
     };
-    let t = 1.0 - 0.17 * rad(hp_bar - 30.0).cos() + 0.24 * rad(2.0 * hp_bar).cos()
+    let t = 1.0 - 0.17 * rad(hp_bar - 30.0).cos()
+        + 0.24 * rad(2.0 * hp_bar).cos()
         + 0.32 * rad(3.0 * hp_bar + 6.0).cos()
         - 0.20 * rad(4.0 * hp_bar - 63.0).cos();
     let d_theta = 30.0 * (-((hp_bar - 275.0) / 25.0).powi(2)).exp();
@@ -176,8 +237,9 @@ fn ciede2000(p: [f64; 3], q: [f64; 3]) -> f64 {
     let sc = 1.0 + 0.045 * cp_bar;
     let sh = 1.0 + 0.015 * cp_bar * t;
     let rt = -rad(2.0 * d_theta).sin() * rc;
-    ((dlp / sl).powi(2) + (dcp / sc).powi(2) + (dhp_big / sh).powi(2)
+    ((dlp / sl).powi(2)
+        + (dcp / sc).powi(2)
+        + (dhp_big / sh).powi(2)
         + rt * (dcp / sc) * (dhp_big / sh))
         .sqrt()
 }
-

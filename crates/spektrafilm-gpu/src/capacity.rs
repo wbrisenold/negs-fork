@@ -171,4 +171,3 @@ mod tests {
         assert!(limits.buffer(2_147_483_648, "FFT").is_err());
     }
 }
-

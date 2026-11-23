@@ -793,7 +793,9 @@ impl IoParams {
             Some(RenderLook::HasselbladHncsSmooth) => RenderLook::HasselbladHncsSmooth,
             Some(RenderLook::ReferentOutput) => RenderLook::ReferentOutput,
             Some(RenderLook::ReferentOutputHncsTone) => RenderLook::ReferentOutputHncsTone,
-            Some(RenderLook::ReferentOutputHncsSmoothTone) => RenderLook::ReferentOutputHncsSmoothTone,
+            Some(RenderLook::ReferentOutputHncsSmoothTone) => {
+                RenderLook::ReferentOutputHncsSmoothTone
+            }
             _ => RenderLook::ReferentOutput,
         }
     }

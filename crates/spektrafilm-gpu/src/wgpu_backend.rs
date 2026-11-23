@@ -33,7 +33,8 @@ const GRAIN_WORKGROUP_SIZE: u32 = 256;
 const MAX_WORKGROUPS_PER_DIMENSION: u32 = 65535;
 
 #[cfg(feature = "wgpu-backend")]
-const SPECTRAL_GUARD_WGSL: &str = include_str!("../../spektrafilm-shaders/wgsl/spectral_guard.wgsl");
+const SPECTRAL_GUARD_WGSL: &str =
+    include_str!("../../spektrafilm-shaders/wgsl/spectral_guard.wgsl");
 
 /// `spectral_guard.wgsl`'s uniform: the front pass's RGB → adapted XYZ matrix
 /// and its inverse, as std140 columns.
@@ -75,7 +76,11 @@ fn linear_dispatch_grid(n_threads: u32, workgroup_size: u32) -> (u32, u32) {
 /// [`linear_dispatch_grid`] with an explicit per-dimension cap, so tests can
 /// force the wrapped (y > 1) layout at small sizes.
 #[cfg(feature = "wgpu-backend")]
-fn linear_dispatch_grid_capped(n_threads: u32, workgroup_size: u32, max_per_dim: u32) -> (u32, u32) {
+fn linear_dispatch_grid_capped(
+    n_threads: u32,
+    workgroup_size: u32,
+    max_per_dim: u32,
+) -> (u32, u32) {
     let groups = n_threads.div_ceil(workgroup_size).max(1);
     let y = groups.div_ceil(max_per_dim);
     (groups.div_ceil(y), y)
@@ -108,15 +113,23 @@ fn dispatch_linear(pass: &mut wgpu::ComputePass<'_>, n_threads: u32, workgroup_s
 /// for shaders with a fixed `@workgroup_size`.
 #[cfg(feature = "wgpu-backend")]
 fn declared_workgroup_size(shader_source: &str) -> Option<u32> {
-    let rest = shader_source.split_once("override WORKGROUP_SIZE: u32 = ")?.1;
+    let rest = shader_source
+        .split_once("override WORKGROUP_SIZE: u32 = ")?
+        .1;
     rest.split_once("u;")?.0.parse().ok()
 }
 
 /// Threads per workgroup of a fixed `@workgroup_size(x[, y[, z]])`.
 #[cfg(all(feature = "wgpu-backend", target_os = "macos"))]
 fn fixed_workgroup_threads(shader_source: &str) -> Option<u32> {
-    let dims = shader_source.split_once("@workgroup_size(")?.1.split_once(')')?.0;
-    dims.split(',').map(|d| d.trim().parse::<u32>().ok()).product()
+    let dims = shader_source
+        .split_once("@workgroup_size(")?
+        .1
+        .split_once(')')?
+        .0;
+    dims.split(',')
+        .map(|d| d.trim().parse::<u32>().ok())
+        .product()
 }
 
 /// `maxTotalThreadsPerThreadgroup` of compiled Metal pipelines. It depends
@@ -129,7 +142,8 @@ mod metal_threadgroups {
     pub(super) fn raw_device(device: &wgpu::Device) -> Option<metal::Device> {
         // SAFETY: only clones the retained MTLDevice handle out of wgpu.
         unsafe {
-            device.as_hal::<wgpu::hal::api::Metal, _, _>(|d| d.map(|d| d.raw_device().lock().clone()))
+            device
+                .as_hal::<wgpu::hal::api::Metal, _, _>(|d| d.map(|d| d.raw_device().lock().clone()))
         }
     }
 
@@ -176,8 +190,18 @@ mod metal_threadgroups {
             };
             let mutable = matches!(ty, wgpu::BufferBindingType::Storage { read_only: false });
             needs_sizes |= matches!(ty, wgpu::BufferBindingType::Storage { .. });
-            let target = naga::back::msl::BindTarget { buffer: Some(slot), mutable, ..Default::default() };
-            resources.resources.insert(naga::ResourceBinding { group: 0, binding: entry.binding }, target);
+            let target = naga::back::msl::BindTarget {
+                buffer: Some(slot),
+                mutable,
+                ..Default::default()
+            };
+            resources.resources.insert(
+                naga::ResourceBinding {
+                    group: 0,
+                    binding: entry.binding,
+                },
+                target,
+            );
             slot += 1;
         }
         resources.sizes_buffer = needs_sizes.then_some(slot);
@@ -188,12 +212,19 @@ mod metal_threadgroups {
         for (handle, var) in module.global_variables.iter() {
             let stores = match var.space {
                 naga::AddressSpace::Uniform => false,
-                naga::AddressSpace::Storage { access } => access.contains(naga::StorageAccess::STORE),
+                naga::AddressSpace::Storage { access } => {
+                    access.contains(naga::StorageAccess::STORE)
+                }
                 _ => continue,
             };
-            let Some(binding) = &var.binding else { continue };
+            let Some(binding) = &var.binding else {
+                continue;
+            };
             if !ep_info[handle].is_empty() && !stores {
-                let target = resources.resources.get(binding).ok_or("binding missing from layout")?;
+                let target = resources
+                    .resources
+                    .get(binding)
+                    .ok_or("binding missing from layout")?;
                 immutable_slots.extend(target.buffer);
             }
         }
@@ -235,7 +266,9 @@ mod metal_threadgroups {
         descriptor.set_compute_function(Some(&function));
         let buffers = descriptor.buffers().ok_or("no buffer descriptors")?;
         for slot in immutable_slots {
-            let buffer = buffers.object_at(slot as u64).ok_or("no buffer descriptor")?;
+            let buffer = buffers
+                .object_at(slot as u64)
+                .ok_or("no buffer descriptor")?;
             buffer.set_mutability(metal::MTLMutability::Immutable);
         }
         let pipeline = device.new_compute_pipeline_state(&descriptor)?;
@@ -388,7 +421,8 @@ fn film_cache_budget(device: &wgpu::Device) -> u64 {
         return value.trim().parse::<u64>().map_or(0, |mib| mib << 20);
     }
     #[cfg(target_os = "macos")]
-    return metal_threadgroups::raw_device(device).map_or(0, |raw| raw.recommended_max_working_set_size() / 8);
+    return metal_threadgroups::raw_device(device)
+        .map_or(0, |raw| raw.recommended_max_working_set_size() / 8);
     #[cfg(not(target_os = "macos"))]
     {
         let _ = device;
@@ -401,7 +435,11 @@ fn film_cache_budget(device: &wgpu::Device) -> u64 {
 /// so a new field must be sorted into the film side or after it. Floats by
 /// their bits (so -0.0 and 0.0 differ, which only costs a miss).
 #[cfg(feature = "wgpu-backend")]
-fn film_side_signature(p: &crate::FilmChainParams<'_>, image_name: &[u8], diffusion_grid_budget: u64) -> Vec<u8> {
+fn film_side_signature(
+    p: &crate::FilmChainParams<'_>,
+    image_name: &[u8],
+    diffusion_grid_budget: u64,
+) -> Vec<u8> {
     let crate::FilmChainParams {
         image,
         // How the input is uploaded, not what it is.
@@ -448,8 +486,16 @@ fn film_side_signature(p: &crate::FilmChainParams<'_>, image_name: &[u8], diffus
     s.u64(image.height as u64);
     s.u64(image.data.len() as u64);
     match front {
-        crate::FrontPass::Hanatos2025 { tc_lut, rgb_to_adapted_xyz, guard } => {
-            let spektrafilm_math::spectral::TcLut { size, channels, data } = tc_lut;
+        crate::FrontPass::Hanatos2025 {
+            tc_lut,
+            rgb_to_adapted_xyz,
+            guard,
+        } => {
+            let spektrafilm_math::spectral::TcLut {
+                size,
+                channels,
+                data,
+            } = tc_lut;
             s.u64(*size as u64);
             s.u64(*channels as u64);
             s.f64s(data);
@@ -460,11 +506,25 @@ fn film_side_signature(p: &crate::FilmChainParams<'_>, image_name: &[u8], diffus
     s.f64s(film_log_exposure);
     s.f64s(film_density_curves_normalized.as_flattened());
     s.bool(highlight_boost.is_some());
-    if let Some(crate::HighlightBoostGpuParams { boost_ev, boost_range, protect_ev }) = highlight_boost {
+    if let Some(crate::HighlightBoostGpuParams {
+        boost_ev,
+        boost_range,
+        protect_ev,
+    }) = highlight_boost
+    {
         s.f32s(&[*boost_ev, *boost_range, *protect_ev]);
     }
     s.bool(diffusion.is_some());
-    if let Some(crate::DiffusionGpuPlan { d, small_w, small_h, p_s, sigmas, coeffs, psf }) = diffusion {
+    if let Some(crate::DiffusionGpuPlan {
+        d,
+        small_w,
+        small_h,
+        p_s,
+        sigmas,
+        coeffs,
+        psf,
+    }) = diffusion
+    {
         s.u64(*d as u64);
         s.u64(*small_w as u64);
         s.u64(*small_h as u64);
@@ -528,13 +588,22 @@ fn film_side_signature(p: &crate::FilmChainParams<'_>, image_name: &[u8], diffus
         s.bool(*is_positive);
         for langmuir in [donor, receiver] {
             s.bool(langmuir.is_some());
-            if let Some(crate::LangmuirGpuParams { k, x_ref, saturating }) = langmuir {
+            if let Some(crate::LangmuirGpuParams {
+                k,
+                x_ref,
+                saturating,
+            }) = langmuir
+            {
                 s.f32s(k);
                 s.f32s(x_ref);
                 saturating.iter().for_each(|&b| s.bool(b));
             }
         }
-        s.f32s(&[*diffusion_size_px, *diffusion_tail_px, *diffusion_tail_weight]);
+        s.f32s(&[
+            *diffusion_size_px,
+            *diffusion_tail_px,
+            *diffusion_tail_weight,
+        ]);
         s.f64s(density_curves_0.as_flattened());
         s.f64s(log_exposure);
     }
@@ -557,7 +626,15 @@ fn film_side_signature(p: &crate::FilmChainParams<'_>, image_name: &[u8], diffus
         monochrome,
     }) = grain
     {
-        for rows in [interp_x, interp_inv_dx, curves_layers, density_min_layers, density_max_layers, n_particles_per_pixel, dye_cloud_sigma_px] {
+        for rows in [
+            interp_x,
+            interp_inv_dx,
+            curves_layers,
+            density_min_layers,
+            density_max_layers,
+            n_particles_per_pixel,
+            dye_cloud_sigma_px,
+        ] {
             s.f32s(rows.as_flattened());
         }
         s.bool(*positive);
@@ -595,11 +672,13 @@ impl Signature {
     }
     fn f32s(&mut self, v: &[f32]) {
         self.u64(v.len() as u64);
-        v.iter().for_each(|x| self.0.extend_from_slice(&x.to_bits().to_le_bytes()));
+        v.iter()
+            .for_each(|x| self.0.extend_from_slice(&x.to_bits().to_le_bytes()));
     }
     fn f64s(&mut self, v: &[f64]) {
         self.u64(v.len() as u64);
-        v.iter().for_each(|x| self.0.extend_from_slice(&x.to_bits().to_le_bytes()));
+        v.iter()
+            .for_each(|x| self.0.extend_from_slice(&x.to_bits().to_le_bytes()));
     }
 }
 
@@ -655,7 +734,10 @@ impl WgpuBackend {
         let adapter_info = adapter.get_info();
         #[cfg(target_os = "linux")]
         if adapter_info.device_type == wgpu::DeviceType::Cpu {
-            tracing::warn!(adapter = adapter_info.name, "software Vulkan adapter; using the CPU engine");
+            tracing::warn!(
+                adapter = adapter_info.name,
+                "software Vulkan adapter; using the CPU engine"
+            );
             return None;
         }
         #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -718,8 +800,8 @@ impl WgpuBackend {
             .await
             .ok()?;
 
-        let disk_pipeline_cache = cache_path
-            .map(|path| crate::pipeline_cache::DiskPipelineCache::new(&device, path));
+        let disk_pipeline_cache =
+            cache_path.map(|path| crate::pipeline_cache::DiskPipelineCache::new(&device, path));
 
         let limits = device.limits();
         let mut max_workgroup_size = limits
@@ -763,7 +845,10 @@ impl WgpuBackend {
             transient: std::sync::Mutex::new(Vec::new()),
             // SPEKTRAFILM_DIFFUSION_GRID_BUDGET (bytes) tries a limit natively.
             diffusion_grid_budget: std::sync::atomic::AtomicU64::new(
-                std::env::var("SPEKTRAFILM_DIFFUSION_GRID_BUDGET").ok().and_then(|v| v.parse().ok()).unwrap_or(0),
+                std::env::var("SPEKTRAFILM_DIFFUSION_GRID_BUDGET")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0),
             ),
             film_cache: std::sync::Mutex::new(Vec::new()),
             film_cache_budget,
@@ -953,12 +1038,11 @@ impl WgpuBackend {
         let gpu_buffers: Vec<wgpu::Buffer> = bindings
             .iter()
             .map(|b| {
-                self
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("buffer"),
-                        contents: &b.data,
-                        usage: b.usage,
-                    })
+                self.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("buffer"),
+                    contents: &b.data,
+                    usage: b.usage,
+                })
             })
             .collect();
 
@@ -1031,14 +1115,17 @@ impl WgpuBackend {
             self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(label),
                 size: img_bytes,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
             })
         };
         let buf_in = make_buf("blur_multi_in");
         let buf_mid = make_buf("blur_multi_mid");
         let buf_out = make_buf("blur_multi_out");
-        self.queue.write_buffer(&buf_in, 0, bytemuck::cast_slice(&scalars_to_f32(&img.data)));
+        self.queue
+            .write_buffer(&buf_in, 0, bytemuck::cast_slice(&scalars_to_f32(&img.data)));
         // One readback per sigma: a single combined buffer could exceed the
         // per-buffer limit at large sizes.
         let readbacks: Vec<_> = (0..sigmas.len())
@@ -1055,7 +1142,19 @@ impl WgpuBackend {
         let mut blurs = Vec::with_capacity(sigmas.len());
         for (i, &sigma) in sigmas.iter().enumerate() {
             if sigma > 0.0 {
-                let blur = build_ref_blur(&self.device, self, w, h, &buf_in, &buf_mid, &buf_out, [sigma; 3], [1.0; 3], false, "blur_multi");
+                let blur = build_ref_blur(
+                    &self.device,
+                    self,
+                    w,
+                    h,
+                    &buf_in,
+                    &buf_mid,
+                    &buf_out,
+                    [sigma; 3],
+                    [1.0; 3],
+                    false,
+                    "blur_multi",
+                );
                 blur.encode(&mut encoder);
                 blurs.push(blur);
                 encoder.copy_buffer_to_buffer(&buf_out, 0, &readbacks[i], 0, img_bytes);
@@ -1083,7 +1182,9 @@ impl WgpuBackend {
     pub fn run_grain(&self, density: &ImageBuf, gp: &crate::GrainGpuParams) -> ImageBuf {
         let (w, h) = (density.width, density.height);
         let bytes = density.pixel_count() as u64 * 12;
-        let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST;
+        let usage = wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST;
         let den = self.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("grain_density"),
             contents: bytemuck::cast_slice(&scalars_to_f32(&density.data)),
@@ -1105,7 +1206,17 @@ impl WgpuBackend {
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let state = build_grain_state(&self.device, gp, w, h, &den, &scratch[0], &scratch[1], &scratch[2], self);
+        let state = build_grain_state(
+            &self.device,
+            gp,
+            w,
+            h,
+            &den,
+            &scratch[0],
+            &scratch[1],
+            &scratch[2],
+            self,
+        );
         let mut encoder = self.device.create_command_encoder(&Default::default());
         state.encode_passes(&mut encoder);
         encoder.copy_buffer_to_buffer(&den, 0, &readback, 0, bytes);
@@ -1124,7 +1235,10 @@ impl WgpuBackend {
     /// and unsharp as a single command buffer with ping-pong image storage.
     /// Only one upload at the start and one readback at the end.
     pub fn run_film_chain(&self, p: &crate::FilmChainParams<'_>) -> ImageBuf {
-        match self.start_film_chain(p, crate::ChainOutput::Scan, Box::new(|| {})).finish() {
+        match self
+            .start_film_chain(p, crate::ChainOutput::Scan, Box::new(|| {}))
+            .finish()
+        {
             crate::ChainResult::Scan(image) => image,
             _ => unreachable!("a scan was asked for"),
         }
@@ -1188,13 +1302,17 @@ impl WgpuBackend {
         // Ping-pong image buffers (each holds H*W*3 f32 values), the last
         // render's in browsers (see `ImagePool`).
         let minimum_bytes = img_bytes as u64 * (2 + scratch_count as u64);
-        let mut images = self.image_pool.take((image.width, image.height), minimum_bytes);
+        let mut images = self
+            .image_pool
+            .take((image.width, image.height), minimum_bytes);
         let mut make_img_buf = |label: &str| {
             images.buffer(
                 &self.device,
                 label,
                 img_bytes as u64,
-                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
             )
         };
         let mappable = self
@@ -1258,20 +1376,18 @@ impl WgpuBackend {
 
         // Static (LUT) buffers — uploaded once.
         let mk_storage = |label: &str, bytes: &[u8]| {
-            self
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(label),
-                    contents: bytes,
-                    usage: wgpu::BufferUsages::STORAGE,
-                })
+            self.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: bytes,
+                usage: wgpu::BufferUsages::STORAGE,
+            })
         };
         let mk_uniform = |label: &str, bytes: &[u8]| {
-            self
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(label),
-                    contents: bytes,
-                    usage: wgpu::BufferUsages::UNIFORM,
-                })
+            self.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: bytes,
+                usage: wgpu::BufferUsages::UNIFORM,
+            })
         };
 
         // ── Pre-compute every static GPU-side buffer ─────────────────────
@@ -1376,7 +1492,10 @@ impl WgpuBackend {
         // in place on buf_a before the front pass, which stays upstream's
         // arithmetic.
         let guard_params_buf = guard.then(|| {
-            mk_uniform("guard_params", bytemuck::bytes_of(&SpectralGuardParams::new(n_pixels, m)))
+            mk_uniform(
+                "guard_params",
+                bytemuck::bytes_of(&SpectralGuardParams::new(n_pixels, m)),
+            )
         });
 
         #[repr(C)]
@@ -1418,7 +1537,10 @@ impl WgpuBackend {
         // normalization, so the preflash must carry it too.
         let (print_norm_for_shader, preflash_scale) =
             if has_enlarger_diffusion && print_exposure_scale != 0.0 {
-                ((print_normalization_factor / p.print_exposure_scale) as f32, 1.0)
+                (
+                    (print_normalization_factor / p.print_exposure_scale) as f32,
+                    1.0,
+                )
             } else {
                 (print_normalization_factor as f32, p.print_exposure_scale)
             };
@@ -1561,14 +1683,23 @@ impl WgpuBackend {
         let guard_pass = guard_params_buf.as_ref().map(|params| {
             let pipe = self.cached_pipeline(
                 SPECTRAL_GUARD_WGSL,
-                &[wgpu::BufferBindingType::Uniform, wgpu::BufferBindingType::Storage { read_only: false }],
+                &[
+                    wgpu::BufferBindingType::Uniform,
+                    wgpu::BufferBindingType::Storage { read_only: false },
+                ],
             );
             let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("bg_spectral_guard"),
                 layout: &pipe.layout,
                 entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: buf_a.as_entire_binding() },
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: params.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: buf_a.as_entire_binding(),
+                    },
                 ],
             });
             (pipe, bg)
@@ -1750,7 +1881,6 @@ impl WgpuBackend {
             ],
         });
 
-
         // Effects execute sequentially in separate compute passes. Share their
         // full-image storage, but keep every input/output of a dispatch distinct.
         // See docs/memory-scratch-reuse.md for the pass/lifetime table.
@@ -1807,25 +1937,35 @@ impl WgpuBackend {
                 image.height,
                 &buf_b,
                 &scratch,
-                &mut |label, bytes| images.buffer(&self.device, &format!("camera_{label}"), bytes, wgpu::BufferUsages::STORAGE),
+                &mut |label, bytes| {
+                    images.buffer(
+                        &self.device,
+                        &format!("camera_{label}"),
+                        bytes,
+                        wgpu::BufferUsages::STORAGE,
+                    )
+                },
                 self,
             )
         });
 
-        let camera_lens_blur_state = p.camera_lens_blur_px.filter(|_| film_side).and_then(|sigma| {
-            (sigma > 0.0).then(|| {
-                build_simple_blur_state(
-                    &self.device,
-                    sigma,
-                    image.width,
-                    image.height,
-                    &buf_b,
-                    &buf_a,
-                    "camera_lens",
-                    self,
-                )
-            })
-        });
+        let camera_lens_blur_state =
+            p.camera_lens_blur_px
+                .filter(|_| film_side)
+                .and_then(|sigma| {
+                    (sigma > 0.0).then(|| {
+                        build_simple_blur_state(
+                            &self.device,
+                            sigma,
+                            image.width,
+                            image.height,
+                            &buf_b,
+                            &buf_a,
+                            "camera_lens",
+                            self,
+                        )
+                    })
+                });
 
         // ── Unsharp mask state ───────────────────────────────────────────
         // Last pass before readback. Blurs buf_b → buf_c (via buf_a mid),
@@ -1942,7 +2082,14 @@ impl WgpuBackend {
                         image.height,
                         &buf_b,
                         &scratch,
-                        &mut |label, bytes| images.buffer(&self.device, &format!("enlarger_{label}"), bytes, wgpu::BufferUsages::STORAGE),
+                        &mut |label, bytes| {
+                            images.buffer(
+                                &self.device,
+                                &format!("enlarger_{label}"),
+                                bytes,
+                                wgpu::BufferUsages::STORAGE,
+                            )
+                        },
                         self,
                     )
                 });
@@ -2016,12 +2163,7 @@ impl WgpuBackend {
             let (log10_pipe, log10_bg, _keepalive) = &bg_log10;
             dispatch(&mut encoder, &log10_pipe, log10_bg, n_pixels);
             // 3. Density curve (film, normalized): buf_b (log_raw) → buf_a (density_cmy)
-            dispatch(
-                &mut encoder,
-                &density_pipe,
-                &bg_density_film,
-                n_pixels,
-            );
+            dispatch(&mut encoder, &density_pipe, &bg_density_film, n_pixels);
             profiler.mark("log10_density", &mut encoder);
             // 3b. DIR couplers (operates on buf_a, mutates buf_b → log_raw_corrected,
             //     re-interps density curve back into buf_a).
@@ -2058,12 +2200,7 @@ impl WgpuBackend {
                 profiler.mark("enlarger_diffusion", &mut encoder);
             }
             // 5. Density curve (print, raw curves): buf_b → buf_a (density_print)
-            dispatch(
-                &mut encoder,
-                &density_pipe,
-                &bg_density_print,
-                n_pixels,
-            );
+            dispatch(&mut encoder, &density_pipe, &bg_density_print, n_pixels);
             profiler.mark("print_density", &mut encoder);
         }
         // 6. Scan spectral: buf_a → buf_b (linear rgb, unclamped)
@@ -2109,8 +2246,18 @@ impl WgpuBackend {
         let mut output = output;
         let mut frame = None;
         if let crate::ChainOutput::Present { encoded, post } = output.clone() {
-            let scan = ShownScan { generation: images.generation, encoded };
-            frame = self.encode_present(&mut encoder, &buf_b, image.width, image.height, scan, post.as_deref());
+            let scan = ShownScan {
+                generation: images.generation,
+                encoded,
+            };
+            frame = self.encode_present(
+                &mut encoder,
+                &buf_b,
+                image.width,
+                image.height,
+                scan,
+                post.as_deref(),
+            );
             if frame.is_none() {
                 output = crate::ChainOutput::Rgba8 { encoded, post };
             }
@@ -2120,17 +2267,39 @@ impl WgpuBackend {
             // read back say when (wgpu's `on_submitted_work_done` isn't
             // there in browsers).
             crate::ChainOutput::Present { .. } => {
-                let fence = images.buffer(&self.device, "fence", 4, wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST);
+                let fence = images.buffer(
+                    &self.device,
+                    "fence",
+                    4,
+                    wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                );
                 encoder.copy_buffer_to_buffer(&buf_b, 0, &fence, 0, 4);
                 Some(fence)
             }
             crate::ChainOutput::Rgba8 { encoded, ref post } => {
                 let bytes = n_pixels as u64 * 4;
-                let rgba = images.buffer(&self.device, "rgba", bytes, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC);
-                let rgba_readback =
-                    images.buffer(&self.device, "rgba_readback", bytes, wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST);
-                self.encode_display_rgba8(&mut encoder, &buf_b, &rgba, n_pixels,
-                    image.width, image.height, encoded, post.as_deref());
+                let rgba = images.buffer(
+                    &self.device,
+                    "rgba",
+                    bytes,
+                    wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                );
+                let rgba_readback = images.buffer(
+                    &self.device,
+                    "rgba_readback",
+                    bytes,
+                    wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                );
+                self.encode_display_rgba8(
+                    &mut encoder,
+                    &buf_b,
+                    &rgba,
+                    n_pixels,
+                    image.width,
+                    image.height,
+                    encoded,
+                    post.as_deref(),
+                );
                 encoder.copy_buffer_to_buffer(&rgba, 0, &rgba_readback, 0, bytes);
                 Some(rgba_readback)
             }
@@ -2217,21 +2386,44 @@ impl WgpuBackend {
         let (post, tables) = self.post_buffers(post);
         let params = self.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("display_rgba8_params"),
-            contents: bytemuck::bytes_of(&Params { n_pixels, encoded: encoded as u32, width, height }),
+            contents: bytemuck::bytes_of(&Params {
+                n_pixels,
+                encoded: encoded as u32,
+                width,
+                height,
+            }),
             usage: wgpu::BufferUsages::UNIFORM,
         });
         let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bg_display_rgba8"),
             layout: &pipe.layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: rgb.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: rgba.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: post.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: tables.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: rgb.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: rgba.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: post.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: tables.as_entire_binding(),
+                },
             ],
         });
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("display_rgba8"), timestamp_writes: None });
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("display_rgba8"),
+            timestamp_writes: None,
+        });
         pass.set_pipeline(&pipe.pipeline);
         pass.set_bind_group(0, &bg, &[]);
         dispatch_linear(&mut pass, n_pixels, pipe.workgroup_size);
@@ -2265,33 +2457,83 @@ impl WgpuBackend {
                 saturation: p.saturation,
                 color_strength: p.color_separation.strength / 100.0,
                 luma: [p.luma[0], p.luma[1], p.luma[2], 0.0],
-                color: [p.color_separation.target_hue, p.color_separation.complementary_hue,
+                color: [
+                    p.color_separation.target_hue,
+                    p.color_separation.complementary_hue,
                     p.color_separation.target_saturation / 100.0,
-                    p.color_separation.luminance_mask / 100.0],
-                color_flags: [p.color_separation.neutral_protection / 100.0,
-                    p.color_separation.method / 100.0, p.color_separation.color_wash as u8 as f32, 0.0],
-                film_compression: [p.film_compression.impact, p.film_compression.white_point,
-                    p.film_compression.range, p.film_compression.color_density],
-                film_expand: [p.film_expand.blacks, p.film_expand.whites,
-                    p.film_expand.rgb_mode as u8 as f32, p.film_expand.impact],
-                skin: [p.skin_shaper.global_sat, p.skin_shaper.global_dens,
-                    p.skin_shaper.hue_rotate, p.skin_shaper.hue_center],
-                skin_flags: [p.skin_shaper.hue_range, p.skin_shaper.sigmoid_shift,
-                    p.skin_shaper.bellcurve_width, p.skin_shaper.phighlighter as u8 as f32],
+                    p.color_separation.luminance_mask / 100.0,
+                ],
+                color_flags: [
+                    p.color_separation.neutral_protection / 100.0,
+                    p.color_separation.method / 100.0,
+                    p.color_separation.color_wash as u8 as f32,
+                    0.0,
+                ],
+                film_compression: [
+                    p.film_compression.impact,
+                    p.film_compression.white_point,
+                    p.film_compression.range,
+                    p.film_compression.color_density,
+                ],
+                film_expand: [
+                    p.film_expand.blacks,
+                    p.film_expand.whites,
+                    p.film_expand.rgb_mode as u8 as f32,
+                    p.film_expand.impact,
+                ],
+                skin: [
+                    p.skin_shaper.global_sat,
+                    p.skin_shaper.global_dens,
+                    p.skin_shaper.hue_rotate,
+                    p.skin_shaper.hue_center,
+                ],
+                skin_flags: [
+                    p.skin_shaper.hue_range,
+                    p.skin_shaper.sigmoid_shift,
+                    p.skin_shaper.bellcurve_width,
+                    p.skin_shaper.phighlighter as u8 as f32,
+                ],
                 relight_flags: [p.relight_enabled as u8 as f32, p.relight_strength, 0.0, 0.0],
-                relight_positions: p.relight_lights.map(|light| [light.x, light.y, light.radius,
-                    if light.enabled { light.intensity } else { 0.0 }]),
-                relight_colors: p.relight_lights.map(|light| [light.color[0], light.color[1], light.color[2],
-                    light.enabled as u8 as f32]),
+                relight_positions: p.relight_lights.map(|light| {
+                    [
+                        light.x,
+                        light.y,
+                        light.radius,
+                        if light.enabled { light.intensity } else { 0.0 },
+                    ]
+                }),
+                relight_colors: p.relight_lights.map(|light| {
+                    [
+                        light.color[0],
+                        light.color[1],
+                        light.color[2],
+                        light.enabled as u8 as f32,
+                    ]
+                }),
             },
-            None => Post { on: 0, encoded: 0, saturation: 0.0, color_strength: 0.0,
-                luma: [0.0; 4], color: [0.0; 4], color_flags: [0.0; 4],
-                film_compression: [0.0; 4], film_expand: [0.0; 4],
-                skin: [0.0; 4], skin_flags: [0.0; 4], relight_flags: [0.0; 4],
-                relight_positions: [[0.0; 4]; 3], relight_colors: [[0.0; 4]; 3] },
+            None => Post {
+                on: 0,
+                encoded: 0,
+                saturation: 0.0,
+                color_strength: 0.0,
+                luma: [0.0; 4],
+                color: [0.0; 4],
+                color_flags: [0.0; 4],
+                film_compression: [0.0; 4],
+                film_expand: [0.0; 4],
+                skin: [0.0; 4],
+                skin_flags: [0.0; 4],
+                relight_flags: [0.0; 4],
+                relight_positions: [[0.0; 4]; 3],
+                relight_colors: [[0.0; 4]; 3],
+            },
         };
         let tables: Vec<f32> = match post {
-            Some(p) => [&p.decode, &p.encode, &p.tone].into_iter().flatten().copied().collect(),
+            Some(p) => [&p.decode, &p.encode, &p.tone]
+                .into_iter()
+                .flatten()
+                .copied()
+                .collect(),
             None => vec![0.0; 4],
         };
         let uniform = self.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -2325,21 +2567,31 @@ impl WgpuBackend {
     /// from; otherwise where to keep `p`'s, when it fits the budget. The
     /// slot's old film side is let go either way (its buffer reused when it
     /// is the same size), so a failed chain leaves nothing stale behind.
-    fn film_cache_lookup(&self, p: &crate::FilmChainParams<'_>, bytes: u64) -> (Option<wgpu::Buffer>, Option<FilmCacheEntry>) {
+    fn film_cache_lookup(
+        &self,
+        p: &crate::FilmChainParams<'_>,
+        bytes: u64,
+    ) -> (Option<wgpu::Buffer>, Option<FilmCacheEntry>) {
         let Some(request) = p.film_cache.as_ref().filter(|_| self.film_cache_budget > 0) else {
             return (None, None);
         };
-        let grid_budget = self.diffusion_grid_budget.load(std::sync::atomic::Ordering::Relaxed);
+        let grid_budget = self
+            .diffusion_grid_budget
+            .load(std::sync::atomic::Ordering::Relaxed);
         let signature = film_side_signature(p, &request.image, grid_budget);
         let mut kept = self.film_cache.lock().unwrap();
-        let old = kept.iter().position(|e| e.slot == request.slot).map(|i| kept.remove(i));
+        let old = kept
+            .iter()
+            .position(|e| e.slot == request.slot)
+            .map(|i| kept.remove(i));
         if let Some(entry) = old.as_ref()
             && entry.signature == signature
             && entry.buffer.size() == bytes
         {
             let buffer = entry.buffer.clone();
             kept.extend(old);
-            self.film_cache_hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.film_cache_hits
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             tracing::debug!(slot = request.slot, "film cache hit");
             return (Some(buffer), None);
         }
@@ -2348,7 +2600,11 @@ impl WgpuBackend {
             if let Some(old) = old {
                 release(&old.buffer);
             }
-            tracing::debug!(slot = request.slot, bytes, "film cache: over budget, not kept");
+            tracing::debug!(
+                slot = request.slot,
+                bytes,
+                "film cache: over budget, not kept"
+            );
             return (None, None);
         }
         let buffer = match old {
@@ -2367,25 +2623,46 @@ impl WgpuBackend {
             }
         };
         tracing::debug!(slot = request.slot, "film cache miss");
-        (None, Some(FilmCacheEntry { slot: request.slot, signature, buffer }))
+        (
+            None,
+            Some(FilmCacheEntry {
+                slot: request.slot,
+                signature,
+                buffer,
+            }),
+        )
     }
 
     /// How many chains reused a kept film side (ticket 41).
     pub fn film_cache_hits(&self) -> u64 {
-        self.film_cache_hits.load(std::sync::atomic::Ordering::Relaxed)
+        self.film_cache_hits
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// The bytes the kept film sides hold now, against `film_cache_budget`.
     pub fn film_cache_bytes(&self) -> u64 {
-        self.film_cache.lock().unwrap().iter().map(|e| e.buffer.size()).sum()
+        self.film_cache
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|e| e.buffer.size())
+            .sum()
     }
 
     /// The input with `key` on the GPU, uploaded from `data` if it isn't
     /// there. The last two keys stay: a slider's interactive frames and the
     /// settled frame after it.
-    fn resident_input<'a>(&self, key: u64, bytes: u64, data: impl FnOnce() -> Cow<'a, [f32]>) -> wgpu::Buffer {
+    fn resident_input<'a>(
+        &self,
+        key: u64,
+        bytes: u64,
+        data: impl FnOnce() -> Cow<'a, [f32]>,
+    ) -> wgpu::Buffer {
         let mut inputs = self.resident_inputs.lock().unwrap();
-        if let Some(i) = inputs.iter().position(|(k, b)| *k == key && b.size() == bytes) {
+        if let Some(i) = inputs
+            .iter()
+            .position(|(k, b)| *k == key && b.size() == bytes)
+        {
             let entry = inputs.remove(i);
             inputs.insert(0, entry);
         } else {
@@ -2393,10 +2670,13 @@ impl WgpuBackend {
             let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("resident_input"),
                 size: bytes,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
-            self.queue.write_buffer(&buffer, 0, bytemuck::cast_slice(&data()));
+            self.queue
+                .write_buffer(&buffer, 0, bytemuck::cast_slice(&data()));
             inputs.insert(0, (key, buffer));
             let kept = inputs.len().min(2);
             for (_, old) in inputs.drain(kept..) {
@@ -2632,14 +2912,27 @@ impl View {
     /// size, and a full-size frame at 100%. Any other is sampled.
     fn place(&self, width: u32, height: u32) -> Placement {
         let [x, y, w, h] = self.rect;
-        let (iw, ih) = (width as f32 * self.transform[8], height as f32 * self.transform[9]);
+        let (iw, ih) = (
+            width as f32 * self.transform[8],
+            height as f32 * self.transform[9],
+        );
         if self.transform[11] == 0.0 && (w - iw).abs() <= 1.0 && (h - ih).abs() <= 1.0 {
             let origin = [(x + (w - iw) / 2.0).round(), (y + (h - ih) / 2.0).round()];
-            return Placement { origin, scale: [1.0; 2], lod: 0.0, exact: true };
+            return Placement {
+                origin,
+                scale: [1.0; 2],
+                lod: 0.0,
+                exact: true,
+            };
         }
         let scale = [w / iw, h / ih];
         let lod = (-scale[0].min(scale[1]).log2()).max(0.0);
-        Placement { origin: [x, y], scale, lod, exact: false }
+        Placement {
+            origin: [x, y],
+            scale,
+            lod,
+            exact: false,
+        }
     }
 }
 
@@ -2659,51 +2952,63 @@ const MAX_SHOWN_BYTES: u64 = 256 << 20;
 impl WgpuBackend {
     /// Present display output on `target` from now on (`ChainOutput::Present`).
     pub fn set_canvas(&self, target: wgpu::SurfaceTarget<'static>) -> Result<(), String> {
-        let surface = self.instance.create_surface(target).map_err(|e| e.to_string())?;
-        if !surface.get_capabilities(&self.adapter).formats.contains(&CANVAS_FORMAT) {
+        let surface = self
+            .instance
+            .create_surface(target)
+            .map_err(|e| e.to_string())?;
+        if !surface
+            .get_capabilities(&self.adapter)
+            .formats
+            .contains(&CANVAS_FORMAT)
+        {
             return Err("the canvas has no RGBA8 format".into());
         }
-        let module = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("display_present"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(concat!(
-                include_str!("../../spektrafilm-shaders/wgsl/display_present.wgsl"),
-                include_str!("../../spektrafilm-shaders/wgsl/display_post.wgsl"),
-            ))),
-        });
-        let make_shown = self.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("make_shown"),
-            layout: None,
-            module: &module,
-            entry_point: Some("make_shown"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-        let render = |entry_point: &str| {
-            self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(entry_point),
+        let module = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("display_present"),
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(concat!(
+                    include_str!("../../spektrafilm-shaders/wgsl/display_present.wgsl"),
+                    include_str!("../../spektrafilm-shaders/wgsl/display_post.wgsl"),
+                ))),
+            });
+        let make_shown = self
+            .device
+            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("make_shown"),
                 layout: None,
-                vertex: wgpu::VertexState {
-                    module: &module,
-                    entry_point: Some("vs_main"),
-                    compilation_options: Default::default(),
-                    buffers: &[],
-                },
-                primitive: Default::default(),
-                depth_stencil: None,
-                multisample: Default::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &module,
-                    entry_point: Some(entry_point),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: CANVAS_FORMAT,
-                        blend: None,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                multiview: None,
+                module: &module,
+                entry_point: Some("make_shown"),
+                compilation_options: Default::default(),
                 cache: None,
-            })
+            });
+        let render = |entry_point: &str| {
+            self.device
+                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some(entry_point),
+                    layout: None,
+                    vertex: wgpu::VertexState {
+                        module: &module,
+                        entry_point: Some("vs_main"),
+                        compilation_options: Default::default(),
+                        buffers: &[],
+                    },
+                    primitive: Default::default(),
+                    depth_stencil: None,
+                    multisample: Default::default(),
+                    fragment: Some(wgpu::FragmentState {
+                        module: &module,
+                        entry_point: Some(entry_point),
+                        compilation_options: Default::default(),
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format: CANVAS_FORMAT,
+                            blend: None,
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                    }),
+                    multiview: None,
+                    cache: None,
+                })
         };
         let (mip, draw) = (render("fs_mip"), render("fs_view"));
         let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
@@ -2715,7 +3020,11 @@ impl WgpuBackend {
         });
         let blank = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("no_border"),
-            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -2731,8 +3040,16 @@ impl WgpuBackend {
                 aspect: wgpu::TextureAspect::All,
             },
             &[0; 4],
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4), rows_per_image: Some(1) },
-            wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
         );
         let canvas = Canvas {
             surface,
@@ -2785,8 +3102,16 @@ impl WgpuBackend {
                 aspect: wgpu::TextureAspect::All,
             },
             rgba,
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(width * 4), rows_per_image: Some(height) },
-            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
         );
         let mut encoder = self.device.create_command_encoder(&Default::default());
         self.encode_mips(&mut encoder, canvas, &texture);
@@ -2815,10 +3140,22 @@ impl WgpuBackend {
                 aspect: wgpu::TextureAspect::All,
             },
             rgba,
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(width * 4), rows_per_image: Some(height) },
-            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
         );
-        canvas.original = Some(Shown { texture, mipped: false, scan: None });
+        canvas.original = Some(Shown {
+            texture,
+            mipped: false,
+            scan: None,
+        });
         Self::trim_shown(canvas);
         true
     }
@@ -2837,24 +3174,37 @@ impl WgpuBackend {
         let Some(texture) = self.original_texture(canvas, width, height) else {
             return false;
         };
-        let input = self.resident_input(key, u64::from(width) * u64::from(height) * 12, || scalars_to_f32(&image.data));
+        let input = self.resident_input(key, u64::from(width) * u64::from(height) * 12, || {
+            scalars_to_f32(&image.data)
+        });
         let mut encoder = self.device.create_command_encoder(&Default::default());
         self.encode_make_shown(&mut encoder, canvas, &input, &texture, encoded, None);
         self.queue.submit(Some(encoder.finish()));
         self.release_transient();
-        canvas.original = Some(Shown { texture, mipped: false, scan: None });
+        canvas.original = Some(Shown {
+            texture,
+            mipped: false,
+            scan: None,
+        });
         Self::trim_shown(canvas);
         true
     }
 
     /// The texture for a `width` × `height` original: the last one if it's
     /// that size. None when a texture can't be that large.
-    fn original_texture(&self, canvas: &mut Canvas, width: u32, height: u32) -> Option<wgpu::Texture> {
+    fn original_texture(
+        &self,
+        canvas: &mut Canvas,
+        width: u32,
+        height: u32,
+    ) -> Option<wgpu::Texture> {
         if width.max(height) > self.device.limits().max_texture_dimension_2d {
             return None;
         }
         Some(match canvas.original.take() {
-            Some(old) if (old.texture.width(), old.texture.height()) == (width, height) => old.texture,
+            Some(old) if (old.texture.width(), old.texture.height()) == (width, height) => {
+                old.texture
+            }
             old => {
                 if let Some(old) = old {
                     old.texture.destroy();
@@ -2882,8 +3232,16 @@ impl WgpuBackend {
                 aspect: wgpu::TextureAspect::All,
             },
             rgba,
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(width * 4), rows_per_image: Some(height) },
-            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
         );
         canvas.shown[0].scan = None;
         let mut encoder = self.device.create_command_encoder(&Default::default());
@@ -2904,7 +3262,9 @@ impl WgpuBackend {
         };
         canvas.view = Some(view);
         let mut encoder = self.device.create_command_encoder(&Default::default());
-        let (Some(frame), Some(drawn)) = (self.encode_view(&mut encoder, canvas), Self::drawn(canvas)) else {
+        let (Some(frame), Some(drawn)) =
+            (self.encode_view(&mut encoder, canvas), Self::drawn(canvas))
+        else {
             return false;
         };
         let texture = drawn.texture.clone();
@@ -2917,7 +3277,11 @@ impl WgpuBackend {
     /// chain. `on_drawn` runs once the GPU has drawn it. The image's size, or
     /// None when that scan is gone (a render has taken its buffers, or the
     /// pool let them go) or there's no canvas: then render instead.
-    pub fn repost(&self, post: Option<&crate::DisplayPost>, on_drawn: Box<dyn FnOnce()>) -> Option<(u32, u32)> {
+    pub fn repost(
+        &self,
+        post: Option<&crate::DisplayPost>,
+        on_drawn: Box<dyn FnOnce()>,
+    ) -> Option<(u32, u32)> {
         let mut canvas = self.canvas.lock().unwrap();
         let canvas = canvas.as_mut()?;
         let shown = canvas.shown.first()?;
@@ -2964,9 +3328,17 @@ impl WgpuBackend {
             },
             wgpu::TexelCopyBufferInfo {
                 buffer: &fence,
-                layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: None, rows_per_image: None },
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: None,
+                    rows_per_image: None,
+                },
             },
-            wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
         );
         self.queue.submit(Some(encoder.finish()));
         self.release_transient();
@@ -2987,7 +3359,10 @@ impl WgpuBackend {
         let (width, height) = (texture.width(), texture.height());
         let view = self.view_of(canvas, width, height);
         let place = view.place(width, height);
-        let (iw, ih) = (width as f32 * view.transform[8], height as f32 * view.transform[9]);
+        let (iw, ih) = (
+            width as f32 * view.transform[8],
+            height as f32 * view.transform[9],
+        );
         let (w, h) = (iw * place.scale[0], ih * place.scale[1]);
         Some([iw, ih, place.origin[0], place.origin[1], w, h])
     }
@@ -2998,7 +3373,8 @@ impl WgpuBackend {
     /// of memory, where the exact grid, several times the image, doesn't fit.
     /// The narrowest parts of the glow soften a little.
     pub fn set_diffusion_grid_budget(&self, bytes: u64) {
-        self.diffusion_grid_budget.store(bytes, std::sync::atomic::Ordering::Relaxed);
+        self.diffusion_grid_budget
+            .store(bytes, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Release render scratch and uploaded inputs before a separate decoder
@@ -3057,13 +3433,27 @@ impl WgpuBackend {
         if width.max(height) > self.device.limits().max_texture_dimension_2d {
             return None;
         }
-        let same = canvas.shown.iter().position(|s| (s.texture.width(), s.texture.height()) == (width, height));
+        let same = canvas
+            .shown
+            .iter()
+            .position(|s| (s.texture.width(), s.texture.height()) == (width, height));
         let shown = match same {
             Some(i) => canvas.shown.remove(i),
-            None => Shown { texture: self.shown_image(width, height), mipped: false, scan: None },
+            None => Shown {
+                texture: self.shown_image(width, height),
+                mipped: false,
+                scan: None,
+            },
         };
         let texture = shown.texture.clone();
-        canvas.shown.insert(0, Shown { mipped: false, scan: None, ..shown });
+        canvas.shown.insert(
+            0,
+            Shown {
+                mipped: false,
+                scan: None,
+                ..shown
+            },
+        );
         Self::trim_shown(canvas);
         Some(texture)
     }
@@ -3072,7 +3462,11 @@ impl WgpuBackend {
     fn shown_image(&self, width: u32, height: u32) -> wgpu::Texture {
         self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("shown"),
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: width.max(height).ilog2() + 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -3090,8 +3484,15 @@ impl WgpuBackend {
     /// the original fit `MAX_SHOWN_BYTES`.
     fn trim_shown(canvas: &mut Canvas) {
         // With its mip levels, a third more than its bytes.
-        let bytes = |s: &Shown| u64::from(s.texture.width()) * u64::from(s.texture.height()) * 16 / 3;
-        let total = canvas.shown.iter().take(2).chain(&canvas.original).map(bytes).sum::<u64>();
+        let bytes =
+            |s: &Shown| u64::from(s.texture.width()) * u64::from(s.texture.height()) * 16 / 3;
+        let total = canvas
+            .shown
+            .iter()
+            .take(2)
+            .chain(&canvas.original)
+            .map(bytes)
+            .sum::<u64>();
         let kept = if total <= MAX_SHOWN_BYTES { 2 } else { 1 };
         for old in canvas.shown.drain(kept.min(canvas.shown.len())..) {
             old.texture.destroy();
@@ -3141,23 +3542,49 @@ impl WgpuBackend {
         let (width, height) = (texture.width(), texture.height());
         let params = self.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("make_shown_params"),
-            contents: bytemuck::bytes_of(&Params { width, height, encoded: encoded as u32, _pad: 0 }),
+            contents: bytemuck::bytes_of(&Params {
+                width,
+                height,
+                encoded: encoded as u32,
+                _pad: 0,
+            }),
             usage: wgpu::BufferUsages::UNIFORM,
         });
-        let target = texture.create_view(&wgpu::TextureViewDescriptor { mip_level_count: Some(1), ..Default::default() });
+        let target = texture.create_view(&wgpu::TextureViewDescriptor {
+            mip_level_count: Some(1),
+            ..Default::default()
+        });
         let (post, tables) = self.post_buffers(post);
         let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bg_make_shown"),
             layout: &canvas.make_shown.get_bind_group_layout(0),
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: rgb.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&target) },
-                wgpu::BindGroupEntry { binding: 7, resource: post.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 8, resource: tables.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: rgb.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&target),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: post.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: tables.as_entire_binding(),
+                },
             ],
         });
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("make_shown"), timestamp_writes: None });
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("make_shown"),
+            timestamp_writes: None,
+        });
         pass.set_pipeline(&canvas.make_shown);
         pass.set_bind_group(0, &bg, &[]);
         pass.dispatch_workgroups(width.div_ceil(16), height.div_ceil(16), 1);
@@ -3166,7 +3593,11 @@ impl WgpuBackend {
     /// Encode drawing the shown image where the view says, its mip levels
     /// first if the view shrinks it and they don't hold it yet; the frame to
     /// present once submitted. `None` with nothing shown.
-    fn encode_view(&self, encoder: &mut wgpu::CommandEncoder, canvas: &mut Canvas) -> Option<wgpu::SurfaceTexture> {
+    fn encode_view(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        canvas: &mut Canvas,
+    ) -> Option<wgpu::SurfaceTexture> {
         #[repr(C)]
         #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
         struct Params {
@@ -3196,7 +3627,10 @@ impl WgpuBackend {
             contents: bytemuck::bytes_of(&Params {
                 origin: place.origin,
                 scale: place.scale,
-                size: [width as f32 * view.transform[8], height as f32 * view.transform[9]],
+                size: [
+                    width as f32 * view.transform[8],
+                    height as f32 * view.transform[9],
+                ],
                 lod: place.lod,
                 exact: place.exact as u32,
                 background: [r, g, b, 1.0],
@@ -3208,25 +3642,49 @@ impl WgpuBackend {
             usage: wgpu::BufferUsages::UNIFORM,
         });
         let shown = texture.create_view(&Default::default());
-        let border = canvas.border_texture.as_ref().unwrap_or(&canvas.blank).create_view(&Default::default());
+        let border = canvas
+            .border_texture
+            .as_ref()
+            .unwrap_or(&canvas.blank)
+            .create_view(&Default::default());
         let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bg_view"),
             layout: &canvas.draw.get_bind_group_layout(0),
             entries: &[
-                wgpu::BindGroupEntry { binding: 3, resource: params.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&shown) },
-                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::Sampler(&canvas.sampler) },
-                wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&border) },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&shown),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::Sampler(&canvas.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: wgpu::BindingResource::TextureView(&border),
+                },
             ],
         });
         let target = frame.texture.create_view(&Default::default());
-        let background = wgpu::Color { r: r as f64, g: g as f64, b: b as f64, a: 1.0 };
+        let background = wgpu::Color {
+            r: r as f64,
+            g: g as f64,
+            b: b as f64,
+            a: 1.0,
+        };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("view"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: &target,
                 resolve_target: None,
-                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(background), store: wgpu::StoreOp::Store },
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(background),
+                    store: wgpu::StoreOp::Store,
+                },
             })],
             depth_stencil_attachment: None,
             timestamp_writes: None,
@@ -3240,7 +3698,12 @@ impl WgpuBackend {
     }
 
     /// Encode filling `texture`'s mip levels, each from the one above.
-    fn encode_mips(&self, encoder: &mut wgpu::CommandEncoder, canvas: &Canvas, texture: &wgpu::Texture) {
+    fn encode_mips(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        canvas: &Canvas,
+        texture: &wgpu::Texture,
+    ) {
         let layout = canvas.mip.get_bind_group_layout(0);
         let level = |base_mip_level| {
             texture.create_view(&wgpu::TextureViewDescriptor {
@@ -3255,8 +3718,14 @@ impl WgpuBackend {
                 label: Some("bg_mip"),
                 layout: &layout,
                 entries: &[
-                    wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::Sampler(&canvas.sampler) },
-                    wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&finer) },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::Sampler(&canvas.sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::TextureView(&finer),
+                    },
                 ],
             });
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -3264,7 +3733,10 @@ impl WgpuBackend {
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &target,
                     resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
@@ -3277,7 +3749,12 @@ impl WgpuBackend {
     }
 
     /// The canvas's next frame, sized `width` × `height`.
-    fn canvas_frame(&self, canvas: &mut Canvas, width: u32, height: u32) -> Option<wgpu::SurfaceTexture> {
+    fn canvas_frame(
+        &self,
+        canvas: &mut Canvas,
+        width: u32,
+        height: u32,
+    ) -> Option<wgpu::SurfaceTexture> {
         if canvas.size != (width, height) {
             canvas.surface.configure(
                 &self.device,
@@ -3327,9 +3804,17 @@ impl FilmChainReadback {
         let out = match self.output {
             crate::ChainOutput::Scan => {
                 let out_f32: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
-                crate::ChainResult::Scan(ImageBuf::from_data(width, height, f32_to_scalars(out_f32)))
+                crate::ChainResult::Scan(ImageBuf::from_data(
+                    width,
+                    height,
+                    f32_to_scalars(out_f32),
+                ))
             }
-            crate::ChainOutput::Rgba8 { .. } => crate::ChainResult::Rgba8 { width, height, rgba: data.to_vec() },
+            crate::ChainOutput::Rgba8 { .. } => crate::ChainResult::Rgba8 {
+                width,
+                height,
+                rgba: data.to_vec(),
+            },
             crate::ChainOutput::Present { .. } => crate::ChainResult::Presented { width, height },
         };
         drop(data);
@@ -3390,7 +3875,12 @@ impl ImagePool {
             }
         }
         let generation = GENERATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-        ImageSet { size, generation, free, used: Vec::new() }
+        ImageSet {
+            size,
+            generation,
+            free,
+            used: Vec::new(),
+        }
     }
 
     /// Explicitly destroy buffers rather than waiting for worker-side JS GC.
@@ -3410,8 +3900,13 @@ impl ImagePool {
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     fn scan(&self, generation: u64, size: (u32, u32)) -> Option<wgpu::Buffer> {
         let sets = self.0.lock().unwrap();
-        let set = sets.iter().find(|set| set.generation == generation && set.size == size)?;
-        set.used.iter().find(|(label, _)| label == "img_b").map(|(_, buffer)| buffer.clone())
+        let set = sets
+            .iter()
+            .find(|set| set.generation == generation && set.size == size)?;
+        set.used
+            .iter()
+            .find(|(label, _)| label == "img_b")
+            .map(|(_, buffer)| buffer.clone())
     }
 
     fn put(&self, mut set: ImageSet) {
@@ -3427,18 +3922,23 @@ impl ImagePool {
         // the side, the last few small ones: the stock previews' and the
         // brightness match's renders then don't push out a frame's.
         let (mut frames, mut small) = (0, 0);
-        let (kept, evicted): (Vec<_>, Vec<_>) = std::mem::take(&mut *sets).into_iter().partition(|set| {
-            let (count, most) = if u64::from(set.size.0) * u64::from(set.size.1) <= SMALL_POOLED_PIXELS {
-                (&mut small, 3)
-            } else {
-                (&mut frames, 2)
-            };
-            *count += 1;
-            *count <= most
-        });
+        let (kept, evicted): (Vec<_>, Vec<_>) =
+            std::mem::take(&mut *sets).into_iter().partition(|set| {
+                let (count, most) =
+                    if u64::from(set.size.0) * u64::from(set.size.1) <= SMALL_POOLED_PIXELS {
+                        (&mut small, 3)
+                    } else {
+                        (&mut frames, 2)
+                    };
+                *count += 1;
+                *count <= most
+            });
         *sets = kept;
         Self::trim(&mut sets, MAX_POOLED_BYTES);
-        for (_, buffer) in unused.iter().chain(evicted.iter().flat_map(|set| &set.used)) {
+        for (_, buffer) in unused
+            .iter()
+            .chain(evicted.iter().flat_map(|set| &set.used))
+        {
             release(buffer);
         }
     }
@@ -3476,15 +3976,32 @@ struct ImageSet {
 #[cfg(feature = "wgpu-backend")]
 impl ImageSet {
     /// The last render's buffer `label`, or a new one.
-    fn buffer(&mut self, device: &wgpu::Device, label: &str, size: u64, usage: wgpu::BufferUsages) -> wgpu::Buffer {
-        let pooled = self.free.iter().position(|(l, _)| l == label).map(|i| self.free.swap_remove(i).1);
+    fn buffer(
+        &mut self,
+        device: &wgpu::Device,
+        label: &str,
+        size: u64,
+        usage: wgpu::BufferUsages,
+    ) -> wgpu::Buffer {
+        let pooled = self
+            .free
+            .iter()
+            .position(|(l, _)| l == label)
+            .map(|i| self.free.swap_remove(i).1);
         let buffer = match pooled {
             Some(buffer) if buffer.size() == size && buffer.usage() == usage => buffer,
             old => {
                 // E.g. an FFT grid whose radius changed: free the old grid
                 // before allocating its replacement, not at render completion.
-                if let Some(old) = old { release(&old); }
-                device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: false })
+                if let Some(old) = old {
+                    release(&old);
+                }
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(label),
+                    size,
+                    usage,
+                    mapped_at_creation: false,
+                })
             }
         };
         self.used.push((label.to_owned(), buffer.clone()));
@@ -3516,18 +4033,28 @@ struct GpuStageProfiler<'a> {
 impl<'a> GpuStageProfiler<'a> {
     fn new(device: &'a wgpu::Device, queue: &'a wgpu::Queue) -> Self {
         let enabled = std::env::var_os("SPEKTRAFILM_GPU_PROFILE").is_some();
-        Self { device, queue, enabled, last: web_time::Instant::now(), rows: Vec::new() }
+        Self {
+            device,
+            queue,
+            enabled,
+            last: web_time::Instant::now(),
+            rows: Vec::new(),
+        }
     }
 
     fn mark(&mut self, name: &'static str, encoder: &mut wgpu::CommandEncoder) {
         if !self.enabled {
             return;
         }
-        let done = std::mem::replace(encoder, self.device.create_command_encoder(&Default::default()));
+        let done = std::mem::replace(
+            encoder,
+            self.device.create_command_encoder(&Default::default()),
+        );
         self.queue.submit(Some(done.finish()));
         self.device.poll(wgpu::Maintain::Wait);
         let now = web_time::Instant::now();
-        self.rows.push((name, (now - self.last).as_secs_f64() * 1e3));
+        self.rows
+            .push((name, (now - self.last).as_secs_f64() * 1e3));
         self.last = now;
     }
 
@@ -3953,24 +4480,41 @@ impl ComputeBackend for WgpuBackend {
 
     #[cfg(any(target_os = "windows", target_os = "linux", target_arch = "wasm32"))]
     fn film_chain_capacity(&self, params: &crate::FilmChainParams<'_>) -> Result<(), String> {
-        let mut bytes = self.capacity.image(params.image.width, params.image.height)?;
+        let mut bytes = self
+            .capacity
+            .image(params.image.width, params.image.height)?;
         // Camera and enlarger FFT states are prepared together and remain
         // alive through readback, even though their passes run sequentially.
         for plan in params.diffusion.iter().chain(
-            params.enlarger_diffusion.iter().filter(|_| !params.scan_film),
+            params
+                .enlarger_diffusion
+                .iter()
+                .filter(|_| !params.scan_film),
         ) {
-            let radius2 = plan.psf.radius.checked_mul(2).ok_or("FFT radius overflow")?;
+            let radius2 = plan
+                .psf
+                .radius
+                .checked_mul(2)
+                .ok_or("FFT radius overflow")?;
             let padded = |dimension: u32| -> Result<u32, String> {
-                let target = dimension.checked_add(radius2).ok_or("FFT dimension overflow")?;
+                let target = dimension
+                    .checked_add(radius2)
+                    .ok_or("FFT dimension overflow")?;
                 // Check before searching for a smooth length; this also keeps
                 // fft_size's u32 increments far away from overflow.
-                self.capacity.buffer(u64::from(target) * 8, "FFT dimension")?;
+                self.capacity
+                    .buffer(u64::from(target) * 8, "FFT dimension")?;
                 Ok(fft_size(target))
             };
-            let grid = u64::from(padded(params.image.width)?)
-                * u64::from(padded(params.image.height)?);
-            self.capacity.buffer(grid.checked_mul(8).ok_or("FFT buffer overflow")?, "FFT grid")?;
-            bytes = grid.checked_mul(20).and_then(|n| bytes.checked_add(n))
+            let grid =
+                u64::from(padded(params.image.width)?) * u64::from(padded(params.image.height)?);
+            self.capacity.buffer(
+                grid.checked_mul(8).ok_or("FFT buffer overflow")?,
+                "FFT grid",
+            )?;
+            bytes = grid
+                .checked_mul(20)
+                .and_then(|n| bytes.checked_add(n))
                 .ok_or("FFT working-set overflow")?;
         }
         self.capacity.working_set(bytes)
@@ -4052,7 +4596,8 @@ struct RefBlur {
 /// `_EXPONENTIAL_GAUSSIAN_FITS[3]`).
 #[cfg(feature = "wgpu-backend")]
 #[cfg(feature = "wgpu-backend")]
-const EXPONENTIAL_GAUSSIAN_FIT: [(f64, f64); 3] = [(0.1633, 0.5360), (0.6496, 1.5236), (0.1870, 2.7684)];
+const EXPONENTIAL_GAUSSIAN_FIT: [(f64, f64); 3] =
+    [(0.1633, 0.5360), (0.6496, 1.5236), (0.1870, 2.7684)];
 
 #[cfg(feature = "wgpu-backend")]
 #[allow(clippy::too_many_arguments)]
@@ -4069,7 +4614,9 @@ fn build_ref_blur(
     accumulate: bool,
     label: &str,
 ) -> RefBlur {
-    build_ref_blur_channels(device, backend, width, height, src, mid, out, sigma, scale, accumulate, [true; 3], label)
+    build_ref_blur_channels(
+        device, backend, width, height, src, mid, out, sigma, scale, accumulate, [true; 3], label,
+    )
 }
 
 /// [`build_ref_blur`] for the channels set in `active` only; the others are
@@ -4098,8 +4645,14 @@ fn build_ref_blur_channels(
     ];
     // Separate shaders per direction, so the row pass reserves only the
     // workgroup memory it needs.
-    let fir_rows_pipe = backend.cached_pipeline(include_str!("../../spektrafilm-shaders/wgsl/ref_blur_fir_rows.wgsl"), &fir_layout);
-    let fir_cols_pipe = backend.cached_pipeline(include_str!("../../spektrafilm-shaders/wgsl/ref_blur_fir_cols.wgsl"), &fir_layout);
+    let fir_rows_pipe = backend.cached_pipeline(
+        include_str!("../../spektrafilm-shaders/wgsl/ref_blur_fir_rows.wgsl"),
+        &fir_layout,
+    );
+    let fir_cols_pipe = backend.cached_pipeline(
+        include_str!("../../spektrafilm-shaders/wgsl/ref_blur_fir_cols.wgsl"),
+        &fir_layout,
+    );
     let iir_layout = [
         wgpu::BufferBindingType::Uniform,
         wgpu::BufferBindingType::Storage { read_only: true },
@@ -4108,8 +4661,14 @@ fn build_ref_blur_channels(
     ];
     // Rows: segmented (ref_blur_iir_rows.wgsl). Columns: one invocation per
     // channel of a column.
-    let iir_rows_pipe = backend.cached_pipeline(include_str!("../../spektrafilm-shaders/wgsl/ref_blur_iir_rows.wgsl"), &iir_layout);
-    let iir_cols_pipe = backend.cached_pipeline(include_str!("../../spektrafilm-shaders/wgsl/ref_blur_iir_cols.wgsl"), &iir_layout);
+    let iir_rows_pipe = backend.cached_pipeline(
+        include_str!("../../spektrafilm-shaders/wgsl/ref_blur_iir_rows.wgsl"),
+        &iir_layout,
+    );
+    let iir_cols_pipe = backend.cached_pipeline(
+        include_str!("../../spektrafilm-shaders/wgsl/ref_blur_iir_cols.wgsl"),
+        &iir_layout,
+    );
     #[repr(C)]
     #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
     struct FirParams {
@@ -4206,7 +4765,11 @@ fn build_ref_blur_channels(
             usage: wgpu::BufferUsages::STORAGE,
         });
         for vertical in [0u32, 1] {
-            let (input, output) = if vertical == 0 { (src, mid) } else { (mid, out) };
+            let (input, output) = if vertical == 0 {
+                (src, mid)
+            } else {
+                (mid, out)
+            };
             let params = FirParams {
                 accumulate: if vertical == 0 { 0 } else { accumulate as u32 },
                 scale: if vertical == 0 { [1.0; 4] } else { fir.scale },
@@ -4217,15 +4780,31 @@ fn build_ref_blur_channels(
                 contents: bytemuck::bytes_of(&params),
                 usage: wgpu::BufferUsages::UNIFORM,
             });
-            let pipeline = if vertical == 0 { &fir_rows_pipe } else { &fir_cols_pipe };
+            let pipeline = if vertical == 0 {
+                &fir_rows_pipe
+            } else {
+                &fir_cols_pipe
+            };
             let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some(&format!("{label}_fir_bg_{vertical}")),
                 layout: &pipeline.layout,
                 entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: input.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: kernel_buf.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 3, resource: output.as_entire_binding() },
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: params_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: input.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: kernel_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: output.as_entire_binding(),
+                    },
                 ],
             });
             // 256-pixel row segments (numbered row by row, wrapped into
@@ -4313,10 +4892,22 @@ fn build_ref_blur_channels(
                 label: Some(&format!("{label}_iir_row_bg_{mode}")),
                 layout: &iir_rows_pipe.layout,
                 entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: src.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: mid.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 3, resource: state_buf.as_entire_binding() },
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: params_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: src.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: mid.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: state_buf.as_entire_binding(),
+                    },
                 ],
             });
             // Phase 1: one invocation per row and channel; phases 0 and 2:
@@ -4345,10 +4936,22 @@ fn build_ref_blur_channels(
             label: Some(&format!("{label}_iir_bg_1")),
             layout: &iir_cols_pipe.layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: placeholder.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: mid.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: out.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: params_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: placeholder.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: mid.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: out.as_entire_binding(),
+                },
             ],
         });
         passes.push(RefBlurPass {
@@ -4408,8 +5011,17 @@ impl IirCascade {
         // (z − p)(z² − c1·z − c2) = z³ − b1·z² − b2·z − b3
         let c1 = b1 - p;
         let c2 = -b3 / p;
-        assert!(c1 * c1 + 4.0 * c2 < 0.0, "σ = {sigma}: expected one real pole and a complex pair");
-        Self { g1: 1.0 - p, g2: 1.0 - c1 - c2, c2, c1, p }
+        assert!(
+            c1 * c1 + 4.0 * c2 < 0.0,
+            "σ = {sigma}: expected one real pole and a complex pair"
+        );
+        Self {
+            g1: 1.0 - p,
+            g2: 1.0 - c1 - c2,
+            c2,
+            c1,
+            p,
+        }
     }
 }
 
@@ -4636,7 +5248,9 @@ fn build_halation_state(
     // channel has any strength.
     let n = hp.halation_n_bounces as usize;
     let active = n >= 1 && hp.halation_a_tot.iter().any(|&a| a > 0.0);
-    let mut decay: Vec<f64> = (0..n).map(|k| (hp.halation_bounce_decay as f64).powi(k as i32)).collect();
+    let mut decay: Vec<f64> = (0..n)
+        .map(|k| (hp.halation_bounce_decay as f64).powi(k as i32))
+        .collect();
     let decay_sum: f64 = decay.iter().sum();
     for d in &mut decay {
         *d /= decay_sum;
@@ -4802,11 +5416,7 @@ fn build_halation_state(
 
 #[cfg(feature = "wgpu-backend")]
 impl HalationState {
-    fn encode_passes(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        n_pixels: u32,
-    ) {
+    fn encode_passes(&self, encoder: &mut wgpu::CommandEncoder, n_pixels: u32) {
         let _ = (&self.buf_c, &self.buf_d); // owned, just keepalive
         let dispatch_linear = |enc: &mut wgpu::CommandEncoder, job: &DispatchJob| {
             let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -4929,7 +5539,16 @@ impl Fft2d {
         {
             let mut ns = 1;
             for radix in fft_radices(n) {
-                let params = Params { n, radix, ns, lines, elem_stride, line_stride, inverse: inverse as u32, line_fastest };
+                let params = Params {
+                    n,
+                    radix,
+                    ns,
+                    lines,
+                    elem_stride,
+                    line_stride,
+                    inverse: inverse as u32,
+                    line_fastest,
+                };
                 let params_buf = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("fft_stage_params"),
                     contents: bytemuck::bytes_of(&params),
@@ -4940,25 +5559,48 @@ impl Fft2d {
                     label: Some("fft_stage_bg"),
                     layout: &pipeline.layout,
                     entries: &[
-                        wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 1, resource: src.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 2, resource: dst.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 3, resource: tw.as_entire_binding() },
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: params_buf.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: src.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: dst.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: tw.as_entire_binding(),
+                        },
                     ],
                 });
-                stages.push((bg, linear_dispatch_grid((n / radix) * lines, pipeline.workgroup_size), in_a));
+                stages.push((
+                    bg,
+                    linear_dispatch_grid((n / radix) * lines, pipeline.workgroup_size),
+                    in_a,
+                ));
                 owned.push(params_buf);
                 in_a = !in_a;
                 ns *= radix;
             }
         }
-        Self { stages, pipeline, _owned: owned }
+        Self {
+            stages,
+            pipeline,
+            _owned: owned,
+        }
     }
 
     /// Encodes the stages; true if the result is in A.
     fn encode(&self, encoder: &mut wgpu::CommandEncoder) -> bool {
         for (bg, (x, y), _) in &self.stages {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("fft_stage"), timestamp_writes: None });
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("fft_stage"),
+                timestamp_writes: None,
+            });
             pass.set_pipeline(&self.pipeline.pipeline);
             pass.set_bind_group(0, bg, &[]);
             pass.dispatch_workgroups(*x, *y, 1);
@@ -5019,7 +5661,10 @@ fn exponential_sampling_moments(lambda: f64) -> (f64, f64) {
             nyquist += if x % 2 == 0 { v } else { -v };
         }
     }
-    (sum / (2.0 * std::f64::consts::PI * lambda * lambda), nyquist)
+    (
+        sum / (2.0 * std::f64::consts::PI * lambda * lambda),
+        nyquist,
+    )
 }
 
 #[cfg(feature = "wgpu-backend")]
@@ -5044,7 +5689,9 @@ fn build_diffusion_state(
         let r = psf.radius.div_ceil(k).min(w.min(h).saturating_sub(1));
         (w, h, r, fft_size(h + 2 * r), fft_size(w + 2 * r))
     };
-    let budget = backend.diffusion_grid_budget.load(std::sync::atomic::Ordering::Relaxed);
+    let budget = backend
+        .diffusion_grid_budget
+        .load(std::sync::atomic::Ordering::Relaxed);
     let fits = |k: u32| {
         let (.., n1, n2) = size_at(k);
         budget == 0 || n1 as u64 * n2 as u64 * 20 <= budget
@@ -5082,10 +5729,17 @@ fn build_diffusion_state(
     // mass when reducing, rather than overweighting the subpixel cores.
     let mut comps = vec![0.0f32; 3 * 16 * 2];
     let mut masses = std::collections::HashMap::new();
-    let mut moments = |lambda: f64| *masses.entry(lambda.to_bits()).or_insert_with(|| exponential_sampling_moments(lambda));
+    let mut moments = |lambda: f64| {
+        *masses
+            .entry(lambda.to_bits())
+            .or_insert_with(|| exponential_sampling_moments(lambda))
+    };
     let mut detail = [0.0f32; 3];
     for c in 0..3 {
-        assert!(psf.components[c].len() <= 16, "diffusion PSF has more than 16 exponentials");
+        assert!(
+            psf.components[c].len() <= 16,
+            "diffusion PSF has more than 16 exponentials"
+        );
         let (mut total_mass, mut nyquist_mass) = (0.0, 0.0);
         for (i, &(lambda, amp)) in psf.components[c].iter().enumerate() {
             let reduced = lambda / k as f64;
@@ -5094,7 +5748,9 @@ fn build_diffusion_state(
                 total_mass += amp * mass * 2.0 * std::f64::consts::PI * lambda * lambda;
                 nyquist_mass += amp * nyquist;
                 mass / moments(reduced).0
-            } else { 1.0 };
+            } else {
+                1.0
+            };
             comps[(c * 16 + i) * 2] = reduced as f32;
             comps[(c * 16 + i) * 2 + 1] = (amp * correction) as f32;
         }
@@ -5133,7 +5789,14 @@ fn build_diffusion_state(
         detail: f32,
         _pad: [f32; 3],
     }
-    let mut owned = vec![grid_a.clone(), grid_b.clone(), kspec.clone(), tw1.clone(), tw2.clone(), comps_buf.clone()];
+    let mut owned = vec![
+        grid_a.clone(),
+        grid_b.clone(),
+        kspec.clone(),
+        tw1.clone(),
+        tw2.clone(),
+        comps_buf.clone(),
+    ];
     let mut job = |mode: u32, channel: u32, grid: &wgpu::Buffer| {
         let params = Params {
             mode,
@@ -5160,12 +5823,30 @@ fn build_diffusion_state(
             label: Some("diffusion_fft_conv_bg"),
             layout: &pipeline.layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: grid.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: kspec.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: buf_b.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: buf_mix.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 5, resource: comps_buf.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: params_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: grid.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: kspec.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: buf_b.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: buf_mix.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: comps_buf.as_entire_binding(),
+                },
             ],
         });
         owned.push(params_buf);
@@ -5181,11 +5862,17 @@ fn build_diffusion_state(
     for c in 0..3u32 {
         // Each FFT starts in A; where its result lands is fixed by the
         // number of stages.
-        let kernel_fft = Fft2d::new(device, backend, n1, n2, &grid_a, &grid_b, &tw1, &tw2, false, true);
+        let kernel_fft = Fft2d::new(
+            device, backend, n1, n2, &grid_a, &grid_b, &tw1, &tw2, false, true,
+        );
         let k_in_a = kernel_fft.stages.len() % 2 == 0;
-        let image_fft = Fft2d::new(device, backend, n1, n2, &grid_a, &grid_b, &tw1, &tw2, false, true);
+        let image_fft = Fft2d::new(
+            device, backend, n1, n2, &grid_a, &grid_b, &tw1, &tw2, false, true,
+        );
         let x_in_a = image_fft.stages.len() % 2 == 0;
-        let inverse_fft = Fft2d::new(device, backend, n1, n2, &grid_a, &grid_b, &tw1, &tw2, true, x_in_a);
+        let inverse_fft = Fft2d::new(
+            device, backend, n1, n2, &grid_a, &grid_b, &tw1, &tw2, true, x_in_a,
+        );
         let y_in_a = x_in_a == (inverse_fft.stages.len() % 2 == 0);
         channels.push(DiffusionChannel {
             psf: job(0, c, &grid_a),
@@ -5212,10 +5899,13 @@ impl DiffusionState {
     /// Encode the diffusion onto `buf_b` (in place: result copied back).
     fn encode_passes(&self, encoder: &mut wgpu::CommandEncoder, buf_b: &wgpu::Buffer) {
         let run = |encoder: &mut wgpu::CommandEncoder, job: &(wgpu::BindGroup, (u32, u32))| {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("diffusion_fft_conv"), timestamp_writes: None });
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("diffusion_fft_conv"),
+                timestamp_writes: None,
+            });
             pass.set_pipeline(&self.pipeline.pipeline);
             pass.set_bind_group(0, &job.0, &[]);
-            pass.dispatch_workgroups(job.1 .0, job.1 .1, 1);
+            pass.dispatch_workgroups(job.1.0, job.1.1, 1);
         };
         for ch in &self.channels {
             run(encoder, &ch.psf);
@@ -5251,7 +5941,9 @@ fn build_simple_blur_state(
     backend: &WgpuBackend,
 ) -> SimpleBlurState {
     SimpleBlurState {
-        blur: build_ref_blur(device, backend, width, height, img, mid, img, [sigma; 3], [1.0; 3], false, label),
+        blur: build_ref_blur(
+            device, backend, width, height, img, mid, img, [sigma; 3], [1.0; 3], false, label,
+        ),
     }
 }
 
@@ -5759,7 +6451,11 @@ fn build_dir_state(
     } else {
         Vec::new()
     };
-    let correction = if diffuse { &buf_diffused } else { &buf_correction };
+    let correction = if diffuse {
+        &buf_diffused
+    } else {
+        &buf_correction
+    };
 
     let add_scaled_pipe = backend.cached_pipeline(
         include_str!("../../spektrafilm-shaders/wgsl/add_scaled.wgsl"),
@@ -5958,7 +6654,11 @@ struct LangmuirUniform {
 #[cfg(feature = "wgpu-backend")]
 impl LangmuirUniform {
     fn new(langmuir: Option<&crate::LangmuirGpuParams>) -> Self {
-        let mut u = Self { k: [1.0; 4], x_ref: [0.0; 4], saturating: [0; 4] };
+        let mut u = Self {
+            k: [1.0; 4],
+            x_ref: [0.0; 4],
+            saturating: [0; 4],
+        };
         if let Some(l) = langmuir {
             for c in 0..3 {
                 if l.saturating[c] {
@@ -6026,7 +6726,19 @@ fn build_unsharp_state(
 
     // Blur B → S1 (A as intermediate), then combine B + S1 → S0 and copy
     // S0 → B. CPU: `backend.gaussian_blur` = `gaussian_blur_channel`.
-    let blur = build_ref_blur(device, backend, width, height, buf_b, buf_a, blur_dst, [up.sigma_px; 3], [1.0; 3], false, "unsharp");
+    let blur = build_ref_blur(
+        device,
+        backend,
+        width,
+        height,
+        buf_b,
+        buf_a,
+        blur_dst,
+        [up.sigma_px; 3],
+        [1.0; 3],
+        false,
+        "unsharp",
+    );
 
     // ── Combine: out = (1+amount)*orig - amount*blurred
     let combine_pipe = backend.cached_pipeline(
@@ -6286,7 +6998,11 @@ impl GlareState {
             });
             pass.set_pipeline(&self.gen_dispatch.pipeline.pipeline);
             pass.set_bind_group(0, &self.gen_dispatch.bg, &[]);
-            dispatch_linear(&mut pass, n_pixels, self.gen_dispatch.pipeline.workgroup_size);
+            dispatch_linear(
+                &mut pass,
+                n_pixels,
+                self.gen_dispatch.pipeline.workgroup_size,
+            );
         }
         // 2. Optional blur.
         if let Some(b) = &self.blur {
@@ -6300,7 +7016,11 @@ impl GlareState {
             });
             pass.set_pipeline(&self.apply_dispatch.pipeline.pipeline);
             pass.set_bind_group(0, &self.apply_dispatch.bg, &[]);
-            dispatch_linear(&mut pass, n_pixels, self.apply_dispatch.pipeline.workgroup_size);
+            dispatch_linear(
+                &mut pass,
+                n_pixels,
+                self.apply_dispatch.pipeline.workgroup_size,
+            );
         }
     }
 }
@@ -6364,7 +7084,12 @@ fn build_gamut_state(
             lspace: [gp.l_white, gp.l_min, gp.l_max, 0.0],
             rgb_to_xyz: rows(gp.rgb_to_xyz),
             xyz_to_rgb: rows(gp.xyz_to_rgb),
-            cam16_white: [gp.cam16_d_rgb[0], gp.cam16_d_rgb[1], gp.cam16_d_rgb[2], gp.cam16_a_w],
+            cam16_white: [
+                gp.cam16_d_rgb[0],
+                gp.cam16_d_rgb[1],
+                gp.cam16_d_rgb[2],
+                gp.cam16_a_w,
+            ],
         }),
         usage: wgpu::BufferUsages::UNIFORM,
     });
@@ -6410,11 +7135,7 @@ fn build_gamut_state(
 
 #[cfg(feature = "wgpu-backend")]
 impl GamutState {
-    fn encode_passes(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        n_pixels: u32,
-    ) {
+    fn encode_passes(&self, encoder: &mut wgpu::CommandEncoder, n_pixels: u32) {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("gamut_compress"),
             timestamp_writes: None,
@@ -6480,16 +7201,26 @@ fn build_grain_state(
             contents: params,
             usage: wgpu::BufferUsages::UNIFORM,
         });
-        let mut entries = vec![wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() }];
+        let mut entries = vec![wgpu::BindGroupEntry {
+            binding: 0,
+            resource: params_buf.as_entire_binding(),
+        }];
         for (i, b) in buffers.iter().enumerate() {
-            entries.push(wgpu::BindGroupEntry { binding: i as u32 + 1, resource: b.as_entire_binding() });
+            entries.push(wgpu::BindGroupEntry {
+                binding: i as u32 + 1,
+                resource: b.as_entire_binding(),
+            });
         }
         let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some(label),
             layout: &pipe.layout,
             entries: &entries,
         });
-        DispatchJob { _params_buf: params_buf, pipeline: pipe.clone(), bg }
+        DispatchJob {
+            _params_buf: params_buf,
+            pipeline: pipe.clone(),
+            bg,
+        }
     };
     let vec4 = |v: [f32; 3]| [v[0], v[1], v[2], 0.0];
     let mut buffers = Vec::new();
@@ -6544,12 +7275,27 @@ fn build_grain_state(
         };
         let out = if blurred { layer_buf } else { acc };
         passes.push(GrainPass::Linear(
-            job(&draw_pipe, "grain_draw", bytemuck::bytes_of(&params), &[den, &curves_buf, out]),
+            job(
+                &draw_pipe,
+                "grain_draw",
+                bytemuck::bytes_of(&params),
+                &[den, &curves_buf, out],
+            ),
             n_pixels,
         ));
         if blurred {
             passes.push(GrainPass::Blur(build_ref_blur(
-                device, backend, width, height, layer_buf, mid, acc, sigma, [1.0; 3], l > 0, "grain_dye",
+                device,
+                backend,
+                width,
+                height,
+                layer_buf,
+                mid,
+                acc,
+                sigma,
+                [1.0; 3],
+                l > 0,
+                "grain_dye",
             )));
         }
     }
@@ -6580,20 +7326,64 @@ fn build_grain_state(
             _pad: [0.0; 3],
         };
         if blur_px > 0.0 {
-            passes.push(GrainPass::Linear(job(&pipe, "grain_micro", bytemuck::bytes_of(&params(0)), &[acc, layer_buf]), n_pixels));
+            passes.push(GrainPass::Linear(
+                job(
+                    &pipe,
+                    "grain_micro",
+                    bytemuck::bytes_of(&params(0)),
+                    &[acc, layer_buf],
+                ),
+                n_pixels,
+            ));
             passes.push(GrainPass::Blur(build_ref_blur(
-                device, backend, width, height, layer_buf, mid, layer_buf, [blur_px; 3], [1.0; 3], false, "grain_micro",
+                device,
+                backend,
+                width,
+                height,
+                layer_buf,
+                mid,
+                layer_buf,
+                [blur_px; 3],
+                [1.0; 3],
+                false,
+                "grain_micro",
             )));
-            passes.push(GrainPass::Linear(job(&pipe, "grain_micro", bytemuck::bytes_of(&params(1)), &[acc, layer_buf]), n_pixels));
+            passes.push(GrainPass::Linear(
+                job(
+                    &pipe,
+                    "grain_micro",
+                    bytemuck::bytes_of(&params(1)),
+                    &[acc, layer_buf],
+                ),
+                n_pixels,
+            ));
         } else {
-            passes.push(GrainPass::Linear(job(&pipe, "grain_micro", bytemuck::bytes_of(&params(2)), &[acc, layer_buf]), n_pixels));
+            passes.push(GrainPass::Linear(
+                job(
+                    &pipe,
+                    "grain_micro",
+                    bytemuck::bytes_of(&params(2)),
+                    &[acc, layer_buf],
+                ),
+                n_pixels,
+            ));
         }
     }
 
     // 3. Pixel blur.
     let (cur, other) = if gp.blur_px > 0.0 {
         passes.push(GrainPass::Blur(build_ref_blur(
-            device, backend, width, height, acc, mid, layer_buf, [gp.blur_px; 3], [1.0; 3], false, "grain",
+            device,
+            backend,
+            width,
+            height,
+            acc,
+            mid,
+            layer_buf,
+            [gp.blur_px; 3],
+            [1.0; 3],
+            false,
+            "grain",
         )));
         (layer_buf, acc)
     } else {
@@ -6620,7 +7410,15 @@ fn build_grain_state(
             _pad: [0; 2],
             density_min: vec4(gp.density_min),
         };
-        GrainPass::Linear(job(&finalize_pipe, "grain_finalize", bytemuck::bytes_of(&params), &[src, sums, den]), n_pixels)
+        GrainPass::Linear(
+            job(
+                &finalize_pipe,
+                "grain_finalize",
+                bytemuck::bytes_of(&params),
+                &[src, sums, den],
+            ),
+            n_pixels,
+        )
     };
     if let Some([sigma, amount]) = gp.mult_usm {
         let usm_pipe = backend.cached_pipeline(
@@ -6635,12 +7433,43 @@ fn build_grain_state(
             amount: f32,
             _pad: u32,
         }
-        let usm = |mode| UsmParams { n_pixels, mode, amount, _pad: 0 };
-        passes.push(GrainPass::Linear(job(&usm_pipe, "grain_usm_clamp", bytemuck::bytes_of(&usm(0)), &[cur, other]), n_pixels));
+        let usm = |mode| UsmParams {
+            n_pixels,
+            mode,
+            amount,
+            _pad: 0,
+        };
+        passes.push(GrainPass::Linear(
+            job(
+                &usm_pipe,
+                "grain_usm_clamp",
+                bytemuck::bytes_of(&usm(0)),
+                &[cur, other],
+            ),
+            n_pixels,
+        ));
         passes.push(GrainPass::Blur(build_ref_blur(
-            device, backend, width, height, cur, mid, other, [sigma; 3], [1.0; 3], false, "grain_usm",
+            device,
+            backend,
+            width,
+            height,
+            cur,
+            mid,
+            other,
+            [sigma; 3],
+            [1.0; 3],
+            false,
+            "grain_usm",
         )));
-        passes.push(GrainPass::Linear(job(&usm_pipe, "grain_usm_combine", bytemuck::bytes_of(&usm(1)), &[cur, other]), n_pixels));
+        passes.push(GrainPass::Linear(
+            job(
+                &usm_pipe,
+                "grain_usm_combine",
+                bytemuck::bytes_of(&usm(1)),
+                &[cur, other],
+            ),
+            n_pixels,
+        ));
 
         // Sums of `cur` (before) and `other` (after), level by level.
         let reduce_pipe = backend.cached_pipeline(
@@ -6664,12 +7493,26 @@ fn build_grain_state(
                 usage: wgpu::BufferUsages::STORAGE,
                 mapped_at_creation: false,
             }));
-            let params = ReduceParams { n_values: values, mode: (level > 0) as u32, _pad: [0; 2] };
+            let params = ReduceParams {
+                n_values: values,
+                mode: (level > 0) as u32,
+                _pad: [0; 2],
+            };
             let reduce = if level == 0 {
-                job(&reduce_pipe, "grain_sum_reduce", bytemuck::bytes_of(&params), &[cur, other, &out])
+                job(
+                    &reduce_pipe,
+                    "grain_sum_reduce",
+                    bytemuck::bytes_of(&params),
+                    &[cur, other, &out],
+                )
             } else {
                 let prev = buffers.last().expect("previous level");
-                job(&reduce_pipe, "grain_sum_reduce", bytemuck::bytes_of(&params), &[prev, prev, &out])
+                job(
+                    &reduce_pipe,
+                    "grain_sum_reduce",
+                    bytemuck::bytes_of(&params),
+                    &[prev, prev, &out],
+                )
             };
             passes.push(GrainPass::Blocks(reduce, blocks));
             buffers.push(out);
@@ -6692,7 +7535,10 @@ fn build_grain_state(
         buffers.push(unused);
     }
 
-    GrainState { _buffers: buffers, passes }
+    GrainState {
+        _buffers: buffers,
+        passes,
+    }
 }
 
 #[cfg(feature = "wgpu-backend")]
@@ -6708,7 +7554,11 @@ impl GrainState {
                     });
                     pass.set_pipeline(&job.pipeline.pipeline);
                     pass.set_bind_group(0, &job.bg, &[]);
-                    let wg = if matches!(p, GrainPass::Blocks(..)) { 1 } else { job.pipeline.workgroup_size };
+                    let wg = if matches!(p, GrainPass::Blocks(..)) {
+                        1
+                    } else {
+                        job.pipeline.workgroup_size
+                    };
                     let (x, y) = linear_dispatch_grid(*n, wg);
                     pass.dispatch_workgroups(x, y, 1);
                 }
@@ -6742,36 +7592,90 @@ mod grain_tests {
     #[test]
     fn image_pool_preserves_small_reuse_but_evicts_before_oversized_renders() {
         let pool = ImagePool::default();
-        let set = |size, generation| ImageSet { size, generation, free: Vec::new(), used: Vec::new() };
-        pool.0.lock().unwrap().extend([set((100, 100), 1), set((200, 200), 2)]);
+        let set = |size, generation| ImageSet {
+            size,
+            generation,
+            free: Vec::new(),
+            used: Vec::new(),
+        };
+        pool.0
+            .lock()
+            .unwrap()
+            .extend([set((100, 100), 1), set((200, 200), 2)]);
         let small = pool.take((100, 100), 100 * 100 * 48);
         assert_eq!(small.size, (100, 100));
-        assert_eq!(pool.0.lock().unwrap().len(), 1, "other small size remains reusable");
+        assert_eq!(
+            pool.0.lock().unwrap().len(),
+            1,
+            "other small size remains reusable"
+        );
         let large = pool.take((4242, 2828), 4242 * 2828 * 48);
         assert_eq!(large.size, (4242, 2828));
-        assert!(pool.0.lock().unwrap().is_empty(), "old sizes gone before large buffers allocate");
+        assert!(
+            pool.0.lock().unwrap().is_empty(),
+            "old sizes gone before large buffers allocate"
+        );
         pool.0.lock().unwrap().push(set((200, 200), 3));
         pool.clear();
-        assert!(pool.0.lock().unwrap().is_empty(), "forget clears the pool too");
+        assert!(
+            pool.0.lock().unwrap().is_empty(),
+            "forget clears the pool too"
+        );
     }
 
     #[test]
     fn image_pool_keeps_partial_oversized_sets_within_budget() {
-        let Some(backend) = WgpuBackend::new() else { return };
-        let buffer = |label: &str, size| (label.to_owned(), backend.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(label), size, usage: wgpu::BufferUsages::STORAGE, mapped_at_creation: false,
-        }));
-        let large = ImageSet { size: (4242, 2828), generation: 9, free: Vec::new(),
-            used: ["img_a", "img_b", "effect_scratch_0", "effect_scratch_1"].map(|l| buffer(l, 144)).into() };
-        let small = ImageSet { size: (100, 100), generation: 10, free: Vec::new(), used: vec![buffer("img_b", 64)] };
+        let Some(backend) = WgpuBackend::new() else {
+            return;
+        };
+        let buffer = |label: &str, size| {
+            (
+                label.to_owned(),
+                backend.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(label),
+                    size,
+                    usage: wgpu::BufferUsages::STORAGE,
+                    mapped_at_creation: false,
+                }),
+            )
+        };
+        let large = ImageSet {
+            size: (4242, 2828),
+            generation: 9,
+            free: Vec::new(),
+            used: ["img_a", "img_b", "effect_scratch_0", "effect_scratch_1"]
+                .map(|l| buffer(l, 144))
+                .into(),
+        };
+        let small = ImageSet {
+            size: (100, 100),
+            generation: 10,
+            free: Vec::new(),
+            used: vec![buffer("img_b", 64)],
+        };
         let pool = ImagePool::default();
         pool.0.lock().unwrap().extend([large, small]);
         ImagePool::trim(&mut pool.0.lock().unwrap(), 512);
-        assert_eq!(pool.0.lock().unwrap().iter().flat_map(|s| &s.used).map(|(_, b)| b.size()).sum::<u64>(), 496);
-        assert!(pool.scan(9, (4242, 2828)).is_some(), "retained scan still supports Post");
+        assert_eq!(
+            pool.0
+                .lock()
+                .unwrap()
+                .iter()
+                .flat_map(|s| &s.used)
+                .map(|(_, b)| b.size())
+                .sum::<u64>(),
+            496
+        );
+        assert!(
+            pool.scan(9, (4242, 2828)).is_some(),
+            "retained scan still supports Post"
+        );
         let next = pool.take((4242, 2828), MAX_POOLED_BYTES + 1);
         assert_eq!(next.free.len(), 3, "large render reuses its partial set");
-        assert!(pool.0.lock().unwrap().is_empty(), "other size evicted before allocating");
+        assert!(
+            pool.0.lock().unwrap().is_empty(),
+            "other size evicted before allocating"
+        );
     }
 
     #[test]
@@ -6779,12 +7683,31 @@ mod grain_tests {
         // Up to 150 MP, and the 3-values-per-pixel highlight-boost pass at
         // 100 MP. The overshoot is less than one row of workgroups.
         for wg in [1, GRAIN_WORKGROUP_SIZE, LINEAR_WORKGROUP_SIZE] {
-            for n in [0, 1, 255, 256, 257, 24_337_152, 60_318_720, 67_107_840, 67_108_865, 100_663_296, 150_000_000, 301_989_888] {
+            for n in [
+                0,
+                1,
+                255,
+                256,
+                257,
+                24_337_152,
+                60_318_720,
+                67_107_840,
+                67_108_865,
+                100_663_296,
+                150_000_000,
+                301_989_888,
+            ] {
                 let (x, y) = linear_dispatch_grid(n, wg);
-                assert!((1..=65535).contains(&x) && (1..=65535).contains(&y), "{n}/{wg}: {x} × {y}");
+                assert!(
+                    (1..=65535).contains(&x) && (1..=65535).contains(&y),
+                    "{n}/{wg}: {x} × {y}"
+                );
                 let threads = x as u64 * y as u64 * wg as u64;
                 assert!(threads >= n as u64, "{n}/{wg}: {x} × {y}");
-                assert!(threads < n as u64 + x as u64 * wg as u64 + wg as u64, "{n}/{wg}: {x} × {y}");
+                assert!(
+                    threads < n as u64 + x as u64 * wg as u64 + wg as u64,
+                    "{n}/{wg}: {x} × {y}"
+                );
             }
         }
     }
@@ -6800,13 +7723,19 @@ mod grain_tests {
             eprintln!("no GPU adapter; skipping");
             return;
         };
-        let Some(device) = metal_threadgroups::raw_device(&backend.device) else { return };
+        let Some(device) = metal_threadgroups::raw_device(&backend.device) else {
+            return;
+        };
         if !metal_threadgroups::is_apple_gpu(&device) {
             eprintln!("not an Apple GPU; skipping");
             return;
         }
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../spektrafilm-shaders/wgsl");
-        let mut paths: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../spektrafilm-shaders/wgsl");
+        let mut paths: Vec<_> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
         paths.sort();
         for path in paths {
             let mut source = std::fs::read_to_string(&path).unwrap();
@@ -6817,22 +7746,30 @@ mod grain_tests {
                 continue;
             }
             if matches!(name.as_str(), "display_rgba8.wgsl" | "display_present.wgsl") {
-                source.push_str(include_str!("../../spektrafilm-shaders/wgsl/display_post.wgsl"));
+                source.push_str(include_str!(
+                    "../../spektrafilm-shaders/wgsl/display_post.wgsl"
+                ));
             }
             // This query mirrors the single `main` compute pipeline helper.
             // Display shaders also contain render/multiple named entries,
             // which use their own pipeline layouts and are not this helper.
             let module = wgpu::naga::front::wgsl::parse_str(&source).unwrap();
-            if !matches!(module.entry_points.as_slice(), [entry] if entry.stage == wgpu::naga::ShaderStage::Compute && entry.name == "main") {
+            if !matches!(module.entry_points.as_slice(), [entry] if entry.stage == wgpu::naga::ShaderStage::Compute && entry.name == "main")
+            {
                 continue;
             }
             let entries = layout_from_wgsl(&source);
             let declared = declared_workgroup_size(&source);
             let limit = metal_threadgroups::max_threads(&device, &source, &entries, declared)
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
-            let threads = declared.or_else(|| fixed_workgroup_threads(&source)).unwrap();
+            let threads = declared
+                .or_else(|| fixed_workgroup_threads(&source))
+                .unwrap();
             eprintln!("{name:32} {threads:5} threads, pipeline limit {limit}");
-            assert!(threads <= limit, "{name}: {threads} threads > limit {limit}");
+            assert!(
+                threads <= limit,
+                "{name}: {threads} threads > limit {limit}"
+            );
         }
     }
 
@@ -6861,7 +7798,11 @@ mod grain_tests {
             .map(|(binding, ty)| wgpu::BindGroupLayoutEntry {
                 binding,
                 visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer { ty, has_dynamic_offset: false, min_binding_size: None },
+                ty: wgpu::BindingType::Buffer {
+                    ty,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
                 count: None,
             })
             .collect()
@@ -6886,7 +7827,11 @@ mod grain_tests {
                 data.extend([0.2 + 0.5 * u, 0.3 + 0.4 * v * u, 0.6 - 0.3 * v]);
             }
         }
-        let lut = spektrafilm_math::spectral::TcLut { size, channels: 3, data };
+        let lut = spektrafilm_math::spectral::TcLut {
+            size,
+            channels: 3,
+            data,
+        };
         let pixels: [[f64; 3]; 9] = [
             [0.18, 0.18, 0.18],
             [4.0, 3.5, 2.0],
@@ -6898,16 +7843,32 @@ mod grain_tests {
             [0.9, 0.0, -0.5],
             [0.02, -0.01, 0.0],
         ];
-        let image = ImageBuf::from_data(pixels.len() as u32, 1, pixels.iter().flatten().map(|&v| from_f64(v)).collect());
+        let image = ImageBuf::from_data(
+            pixels.len() as u32,
+            1,
+            pixels.iter().flatten().map(|&v| from_f64(v)).collect(),
+        );
         let illuminant = spektrafilm_math::spectral::ILLUMINANT_D55.to_vec();
         for guard in [true, false] {
-            let cpu = spektrafilm_math::spectral::hanatos2025_rgb_to_raw(&image, &lut, "sRGB", &illuminant, false, guard);
-            let gpu = backend.hanatos2025_rgb_to_raw(&image, &lut, "sRGB", &illuminant, false, guard);
+            let cpu = spektrafilm_math::spectral::hanatos2025_rgb_to_raw(
+                &image,
+                &lut,
+                "sRGB",
+                &illuminant,
+                false,
+                guard,
+            );
+            let gpu =
+                backend.hanatos2025_rgb_to_raw(&image, &lut, "sRGB", &illuminant, false, guard);
             for (i, (c, g)) in cpu.data.iter().zip(&gpu.data).enumerate() {
                 let (c, g) = (to_f64(*c), to_f64(*g));
                 assert!(g.is_finite(), "guard {guard}, pixel {}: {g}", i / 3);
                 // f32 maths and the GPU's fused matrix against the CPU's f64.
-                assert!((c - g).abs() <= 2e-4 * c.abs().max(1.0), "guard {guard}, pixel {}: cpu {c} gpu {g}", i / 3);
+                assert!(
+                    (c - g).abs() <= 2e-4 * c.abs().max(1.0),
+                    "guard {guard}, pixel {}: cpu {c} gpu {g}",
+                    i / 3
+                );
             }
         }
     }
@@ -6936,31 +7897,48 @@ mod grain_tests {
         let n_values = n_pixels as usize * 3;
         // One spare pixel past the end must stay untouched too.
         let ones = vec![1.0f32; n_values + 3];
-        let src = backend.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("wrap_src"),
-            contents: bytemuck::cast_slice(&ones),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-        let dst = backend.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("wrap_dst"),
-            contents: bytemuck::cast_slice(&vec![0.0f32; n_values + 3]),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        });
+        let src = backend
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("wrap_src"),
+                contents: bytemuck::cast_slice(&ones),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+        let dst = backend
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("wrap_dst"),
+                contents: bytemuck::cast_slice(&vec![0.0f32; n_values + 3]),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            });
         let params: [u32; 4] = [n_pixels, 1.0f32.to_bits(), 0, 0];
-        let params = backend.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("wrap_params"),
-            contents: bytemuck::cast_slice(&params),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-        let bg = backend.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("wrap_bg"),
-            layout: &pipe.layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: src.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: dst.as_entire_binding() },
-            ],
-        });
+        let params = backend
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("wrap_params"),
+                contents: bytemuck::cast_slice(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+        let bg = backend
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("wrap_bg"),
+                layout: &pipe.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: params.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: src.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: dst.as_entire_binding(),
+                    },
+                ],
+            });
         let out = run_and_read(&backend, &dst, (n_values + 3) * 4, |encoder| {
             let mut pass = encoder.begin_compute_pass(&Default::default());
             pass.set_pipeline(&pipe.pipeline);
@@ -6968,7 +7946,12 @@ mod grain_tests {
             pass.dispatch_workgroups(x, y, 1);
         });
         let wrong: Vec<usize> = (0..n_values).filter(|&i| out[i] != 1.0).collect();
-        assert!(wrong.is_empty(), "{} values not written exactly once, first at {:?}", wrong.len(), wrong.first());
+        assert!(
+            wrong.is_empty(),
+            "{} values not written exactly once, first at {:?}",
+            wrong.len(),
+            wrong.first()
+        );
         assert_eq!(&out[n_values..], &[0.0; 3], "wrote past n_pixels");
     }
 
@@ -6994,33 +7977,58 @@ mod grain_tests {
             ],
         );
         for peak_at in [0, 2048 * 5 + 3, n_values - 1] {
-            let data: Vec<f32> = (0..n_values).map(|i| if i == peak_at { 7.5 } else { (i % 97) as f32 * 0.01 }).collect();
-            let input = backend.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("reduce_in"),
-                contents: bytemuck::cast_slice(&data),
-                usage: wgpu::BufferUsages::STORAGE,
-            });
+            let data: Vec<f32> = (0..n_values)
+                .map(|i| {
+                    if i == peak_at {
+                        7.5
+                    } else {
+                        (i % 97) as f32 * 0.01
+                    }
+                })
+                .collect();
+            let input = backend
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("reduce_in"),
+                    contents: bytemuck::cast_slice(&data),
+                    usage: wgpu::BufferUsages::STORAGE,
+                });
             // One sentinel slot past the last block must survive.
-            let output = backend.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("reduce_out"),
-                contents: bytemuck::cast_slice(&vec![-1.0f32; blocks as usize + 1]),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            });
+            let output = backend
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("reduce_out"),
+                    contents: bytemuck::cast_slice(&vec![-1.0f32; blocks as usize + 1]),
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                });
             let params: [u32; 8] = [n_values, 0, 0, 0, 0, 0, 0, 0];
-            let params = backend.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("reduce_params"),
-                contents: bytemuck::cast_slice(&params),
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
-            let bg = backend.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("reduce_bg"),
-                layout: &pipe.layout,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: input.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: output.as_entire_binding() },
-                ],
-            });
+            let params = backend
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("reduce_params"),
+                    contents: bytemuck::cast_slice(&params),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+            let bg = backend
+                .device
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("reduce_bg"),
+                    layout: &pipe.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: params.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: input.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: output.as_entire_binding(),
+                        },
+                    ],
+                });
             let out = run_and_read(&backend, &output, (blocks as usize + 1) * 4, |encoder| {
                 let mut pass = encoder.begin_compute_pass(&Default::default());
                 pass.set_pipeline(&pipe.pipeline);
@@ -7049,8 +8057,14 @@ mod grain_tests {
             assert!((k.p + k.c1 - b1).abs() < 1e-12, "σ {sigma}");
             assert!((-(k.p * k.c1 - k.c2) - b2).abs() < 1e-12, "σ {sigma}");
             assert!((-k.p * k.c2 - b3).abs() < 1e-12, "σ {sigma}");
-            assert!((k.g1 * k.g2 - (1.0 - b1 - b2 - b3)).abs() < 1e-12, "σ {sigma}: gain");
-            assert!(k.p > 0.0 && k.p < 1.0 && k.c2 < 0.0 && k.c2 > -1.0, "σ {sigma}: stable");
+            assert!(
+                (k.g1 * k.g2 - (1.0 - b1 - b2 - b3)).abs() < 1e-12,
+                "σ {sigma}: gain"
+            );
+            assert!(
+                k.p > 0.0 && k.p < 1.0 && k.c2 < 0.0 && k.c2 > -1.0,
+                "σ {sigma}: stable"
+            );
             sigma *= 1.07;
         }
     }
@@ -7082,7 +8096,11 @@ mod grain_tests {
                 let mut v = 0.5 + 0.3 * rnd();
                 for x in 0..w {
                     v = (v + 0.02 * (rnd() - 0.5)).clamp(0.05, 1.5);
-                    let edge = if (x / 300 + y / 200) % 2 == 0 { 0.4 } else { 0.0 };
+                    let edge = if (x / 300 + y / 200) % 2 == 0 {
+                        0.4
+                    } else {
+                        0.0
+                    };
                     src[(y * w + x) * 3 + c] = v + edge;
                 }
             }
@@ -7125,12 +8143,16 @@ mod grain_tests {
             }
         }
         let src_f32: Vec<f32> = src.iter().map(|&v| v as f32).collect();
-        let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST;
-        let src_buf = backend.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("iir_test_src"),
-            contents: bytemuck::cast_slice(&src_f32),
-            usage,
-        });
+        let usage = wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST;
+        let src_buf = backend
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("iir_test_src"),
+                contents: bytemuck::cast_slice(&src_f32),
+                usage,
+            });
         let mk = |label| {
             backend.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(label),
@@ -7140,10 +8162,26 @@ mod grain_tests {
             })
         };
         let (mid, out) = (mk("iir_test_mid"), mk("iir_test_out"));
-        let blur = build_ref_blur(&backend.device, &backend, w as u32, h as u32, &src_buf, &mid, &out, sigma, [1.0; 3], false, "iir_test");
-        let got = run_and_read(&backend, &out, w * h * 3 * 4, |encoder| blur.encode(encoder));
+        let blur = build_ref_blur(
+            &backend.device,
+            &backend,
+            w as u32,
+            h as u32,
+            &src_buf,
+            &mid,
+            &out,
+            sigma,
+            [1.0; 3],
+            false,
+            "iir_test",
+        );
+        let got = run_and_read(&backend, &out, w * h * 3 * 4, |encoder| {
+            blur.encode(encoder)
+        });
         for c in 0..3 {
-            let err = (0..w * h).map(|i| (got[i * 3 + c] as f64 - expected[i * 3 + c]).abs()).fold(0.0, f64::max);
+            let err = (0..w * h)
+                .map(|i| (got[i * 3 + c] as f64 - expected[i * 3 + c]).abs())
+                .fold(0.0, f64::max);
             eprintln!("σ {}: max |GPU − f64| = {err:.2e}", sigma[c]);
             assert!(err < 2e-5, "σ {}: max error {err}", sigma[c]);
         }
@@ -7159,22 +8197,69 @@ mod grain_tests {
             return;
         };
         let (w, h) = (300usize, 200usize);
-        let data: Vec<f32> = (0..w * h * 3).map(|i| ((i * 7919) % 1000) as f32 / 1000.0).collect();
-        let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST;
+        let data: Vec<f32> = (0..w * h * 3)
+            .map(|i| ((i * 7919) % 1000) as f32 / 1000.0)
+            .collect();
+        let usage = wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST;
         let mk = |label: &str, init: &[f32]| {
-            backend.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents: bytemuck::cast_slice(init), usage })
+            backend
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(label),
+                    contents: bytemuck::cast_slice(init),
+                    usage,
+                })
         };
         let bytes = w * h * 3 * 4;
         let sigma = [1.3f32, 4.0, 0.7];
         let (src, mid, out) = (mk("src", &data), mk("mid", &data), mk("out", &data));
-        let separate = build_ref_blur(&backend.device, &backend, w as u32, h as u32, &src, &mid, &out, sigma, [1.0; 3], false, "sep");
+        let separate = build_ref_blur(
+            &backend.device,
+            &backend,
+            w as u32,
+            h as u32,
+            &src,
+            &mid,
+            &out,
+            sigma,
+            [1.0; 3],
+            false,
+            "sep",
+        );
         let expected = run_and_read(&backend, &out, bytes, |e| separate.encode(e));
         let inplace_buf = mk("inplace", &data);
-        let inplace = build_ref_blur(&backend.device, &backend, w as u32, h as u32, &inplace_buf, &mid, &inplace_buf, sigma, [1.0; 3], false, "inplace");
+        let inplace = build_ref_blur(
+            &backend.device,
+            &backend,
+            w as u32,
+            h as u32,
+            &inplace_buf,
+            &mid,
+            &inplace_buf,
+            sigma,
+            [1.0; 3],
+            false,
+            "inplace",
+        );
         let got = run_and_read(&backend, &inplace_buf, bytes, |e| inplace.encode(e));
         assert_eq!(got, expected);
         let masked_buf = mk("masked", &data);
-        let masked = build_ref_blur_channels(&backend.device, &backend, w as u32, h as u32, &masked_buf, &mid, &masked_buf, sigma, [1.0; 3], false, [true, false, true], "masked");
+        let masked = build_ref_blur_channels(
+            &backend.device,
+            &backend,
+            w as u32,
+            h as u32,
+            &masked_buf,
+            &mid,
+            &masked_buf,
+            sigma,
+            [1.0; 3],
+            false,
+            [true, false, true],
+            "masked",
+        );
         let got = run_and_read(&backend, &masked_buf, bytes, |e| masked.encode(e));
         for i in 0..w * h {
             assert_eq!(got[i * 3], expected[i * 3]);
@@ -7205,11 +8290,16 @@ mod grain_tests {
         };
         let fir = |line: &mut Vec<f64>, s: f64| {
             let r = (3.0 * s + 0.5) as isize;
-            let k: Vec<f64> = (-r..=r).map(|x| (-(x * x) as f64 / (2.0 * s * s)).exp()).collect();
+            let k: Vec<f64> = (-r..=r)
+                .map(|x| (-(x * x) as f64 / (2.0 * s * s)).exp())
+                .collect();
             let sum: f64 = k.iter().sum();
             let src = line.clone();
             for (j, out) in line.iter_mut().enumerate() {
-                *out = (-r..=r).map(|d| src[reflect(j as isize + d, src.len())] * k[(d + r) as usize]).sum::<f64>() / sum;
+                *out = (-r..=r)
+                    .map(|d| src[reflect(j as isize + d, src.len())] * k[(d + r) as usize])
+                    .sum::<f64>()
+                    / sum;
             }
         };
         let iir = |line: &mut Vec<f64>, s: f64| {
@@ -7230,7 +8320,9 @@ mod grain_tests {
                 (w3, w2, w1) = (w2, w1, v);
             }
         };
-        let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST;
+        let usage = wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST;
         // FIR and IIR channels mixed in one blur, as halation and DIR do.
         let sigmas = [[0.75f32, 1.7, 2.99], [0.3, 2.5, 3.0], [4.5, 9.0, 1.0]];
         for (w, h) in [(300usize, 37usize), (23, 17), (5, 3), (1, 9), (9, 1)] {
@@ -7241,29 +8333,44 @@ mod grain_tests {
                         let v = 0.2 + 0.1 * (0.7 * x as f64 + 0.3 * y as f64 + c as f64).sin();
                         let edge = x == 0 || y == 0 || x == w - 1 || y == h - 1;
                         let corner = (x == 0 || x == w - 1) && (y == 0 || y == h - 1);
-                        let bright = if corner { 6.0 } else if edge && (x + y) % 3 == 0 { 3.0 } else { 0.0 };
+                        let bright = if corner {
+                            6.0
+                        } else if edge && (x + y) % 3 == 0 {
+                            3.0
+                        } else {
+                            0.0
+                        };
                         src[(y * w + x) * 3 + c] = v + bright;
                     }
                 }
             }
             let src_f32: Vec<f32> = src.iter().map(|&v| v as f32).collect();
             let mk = |label: &str| {
-                backend.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents: bytemuck::cast_slice(&src_f32), usage })
+                backend
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(label),
+                        contents: bytemuck::cast_slice(&src_f32),
+                        usage,
+                    })
             };
             for sigma in sigmas {
                 let mut expected = src.clone();
                 for c in 0..3 {
                     let s = sigma[c] as f64;
-                    let blur = |line: &mut Vec<f64>| if s < 3.0 { fir(line, s) } else { iir(line, s) };
+                    let blur =
+                        |line: &mut Vec<f64>| if s < 3.0 { fir(line, s) } else { iir(line, s) };
                     for y in 0..h {
-                        let mut line: Vec<f64> = (0..w).map(|x| expected[(y * w + x) * 3 + c]).collect();
+                        let mut line: Vec<f64> =
+                            (0..w).map(|x| expected[(y * w + x) * 3 + c]).collect();
                         blur(&mut line);
                         for x in 0..w {
                             expected[(y * w + x) * 3 + c] = line[x];
                         }
                     }
                     for x in 0..w {
-                        let mut line: Vec<f64> = (0..h).map(|y| expected[(y * w + x) * 3 + c]).collect();
+                        let mut line: Vec<f64> =
+                            (0..h).map(|y| expected[(y * w + x) * 3 + c]).collect();
                         blur(&mut line);
                         for y in 0..h {
                             expected[(y * w + x) * 3 + c] = line[y];
@@ -7271,10 +8378,26 @@ mod grain_tests {
                     }
                 }
                 let (src_buf, mid, out) = (mk("border_src"), mk("border_mid"), mk("border_out"));
-                let blur = build_ref_blur(&backend.device, &backend, w as u32, h as u32, &src_buf, &mid, &out, sigma, [1.0; 3], false, "border_test");
-                let got = run_and_read(&backend, &out, w * h * 3 * 4, |encoder| blur.encode(encoder));
+                let blur = build_ref_blur(
+                    &backend.device,
+                    &backend,
+                    w as u32,
+                    h as u32,
+                    &src_buf,
+                    &mid,
+                    &out,
+                    sigma,
+                    [1.0; 3],
+                    false,
+                    "border_test",
+                );
+                let got = run_and_read(&backend, &out, w * h * 3 * 4, |encoder| {
+                    blur.encode(encoder)
+                });
                 for c in 0..3 {
-                    let err = (0..w * h).map(|i| (got[i * 3 + c] as f64 - expected[i * 3 + c]).abs()).fold(0.0, f64::max);
+                    let err = (0..w * h)
+                        .map(|i| (got[i * 3 + c] as f64 - expected[i * 3 + c]).abs())
+                        .fold(0.0, f64::max);
                     eprintln!("{w}×{h} σ {}: max |GPU − f64| = {err:.1e}", sigma[c]);
                     assert!(err < 5e-6, "{w}×{h} σ {}: max error {err}", sigma[c]);
                 }
@@ -7298,10 +8421,20 @@ mod grain_tests {
         };
         let (w, h) = (6048u32, 4024u32);
         let n = (w * h * 3) as usize;
-        let data: Vec<f32> = (0..n).map(|i| ((i as u64 * 7919) % 1000) as f32 / 1000.0).collect();
-        let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST;
+        let data: Vec<f32> = (0..n)
+            .map(|i| ((i as u64 * 7919) % 1000) as f32 / 1000.0)
+            .collect();
+        let usage = wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST;
         let mk = |label: &str| {
-            backend.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents: bytemuck::cast_slice(&data), usage })
+            backend
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(label),
+                    contents: bytemuck::cast_slice(&data),
+                    usage,
+                })
         };
         let (src, mid, out) = (mk("src"), mk("mid"), mk("out"));
         let time = |encode: &dyn Fn(&mut wgpu::CommandEncoder)| {
@@ -7332,21 +8465,39 @@ mod grain_tests {
                 let i = g.y * n.x * 256u + g.x;
                 if i < arrayLength(&a) { b[i] = a[i]; }
             }";
-        let copy = backend.cached_pipeline(COPY, &[wgpu::BufferBindingType::Storage { read_only: true }, wgpu::BufferBindingType::Storage { read_only: false }]);
-        let copy_bg = backend.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &copy.layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: src.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: out.as_entire_binding() },
+        let copy = backend.cached_pipeline(
+            COPY,
+            &[
+                wgpu::BufferBindingType::Storage { read_only: true },
+                wgpu::BufferBindingType::Storage { read_only: false },
             ],
-        });
-        let ms = if only.is_some() { 0.0 } else { time(&|e| {
-            let mut pass = e.begin_compute_pass(&Default::default());
-            pass.set_pipeline(&copy.pipeline);
-            pass.set_bind_group(0, &copy_bg, &[]);
-            dispatch_linear(&mut pass, (n / 4) as u32, 256);
-        }) };
+        );
+        let copy_bg = backend
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &copy.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: src.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: out.as_entire_binding(),
+                    },
+                ],
+            });
+        let ms = if only.is_some() {
+            0.0
+        } else {
+            time(&|e| {
+                let mut pass = e.begin_compute_pass(&Default::default());
+                pass.set_pipeline(&copy.pipeline);
+                pass.set_bind_group(0, &copy_bg, &[]);
+                dispatch_linear(&mut pass, (n / 4) as u32, 256);
+            })
+        };
         eprintln!("copy {:.0} MB: {ms:.1} ms", (n * 4) as f64 / 1e6);
         let configs: [(&str, [f32; 3], bool); 7] = [
             ("scatter core", [0.37, 0.34, 0.27], false),
@@ -7358,7 +8509,19 @@ mod grain_tests {
             ("dir tail 2", [93.0; 3], true),
         ];
         for (name, sigma, accumulate) in configs {
-            let blur = build_ref_blur(&backend.device, &backend, w, h, &src, &mid, &out, sigma, [0.5; 3], accumulate, name);
+            let blur = build_ref_blur(
+                &backend.device,
+                &backend,
+                w,
+                h,
+                &src,
+                &mid,
+                &out,
+                sigma,
+                [0.5; 3],
+                accumulate,
+                name,
+            );
             if let Some((only_name, i)) = only.as_deref().and_then(|o| o.split_once(':')) {
                 if only_name != name {
                     continue;
@@ -7390,11 +8553,17 @@ mod grain_tests {
                     format!("{ms:.1}")
                 })
                 .collect();
-            eprintln!("{name:<16} σ {:>5.2}: {total:6.1} ms, passes {} (wg {:?})", sigma[0], passes.join(" "), blur.passes.iter().map(|p| p.pipeline.workgroup_size).collect::<Vec<_>>());
+            eprintln!(
+                "{name:<16} σ {:>5.2}: {total:6.1} ms, passes {} (wg {:?})",
+                sigma[0],
+                passes.join(" "),
+                blur.passes
+                    .iter()
+                    .map(|p| p.pipeline.workgroup_size)
+                    .collect::<Vec<_>>()
+            );
         }
     }
-
-
 
     #[test]
     fn fft_sizes_are_smooth() {
@@ -7422,8 +8591,9 @@ mod grain_tests {
         for lambda in [0.2, 0.7, 3.0, 8.0, 16.0] {
             for k in [2.0, 3.0, 4.0] {
                 let reduced = lambda / k;
-                let corrected_mass = discrete_sum(reduced) * k * k
-                    * exponential_sampling_moments(lambda).0 / exponential_sampling_moments(reduced).0;
+                let corrected_mass =
+                    discrete_sum(reduced) * k * k * exponential_sampling_moments(lambda).0
+                        / exponential_sampling_moments(reduced).0;
                 let exact_mass = discrete_sum(lambda);
                 let error = (corrected_mass / exact_mass - 1.0).abs();
                 assert!(error < 2e-7, "lambda {lambda}, k {k}: mass error {error}");
@@ -7443,7 +8613,11 @@ mod grain_tests {
         for (w, h, r) in [(97usize, 61usize, 12usize), (230, 150, 70)] {
             let p_s = 0.37f32;
             let comps: [Vec<(f64, f64)>; 3] = std::array::from_fn(|c| {
-                vec![(1.7, 0.05), (9.0 + c as f64, 0.002), (40.0, 0.0001 * (c + 1) as f64)]
+                vec![
+                    (1.7, 0.05),
+                    (9.0 + c as f64, 0.002),
+                    (40.0, 0.0001 * (c + 1) as f64),
+                ]
             });
             let plan = crate::DiffusionGpuPlan {
                 d: 1,
@@ -7452,16 +8626,48 @@ mod grain_tests {
                 p_s,
                 sigmas: vec![],
                 coeffs: vec![],
-                psf: crate::DiffusionPsf { radius: r as u32, components: comps.clone() },
+                psf: crate::DiffusionPsf {
+                    radius: r as u32,
+                    components: comps.clone(),
+                },
             };
-            let data: Vec<f32> = (0..w * h * 3).map(|i| 0.05 + ((i * 7919 + i / 3 * 31) % 997) as f32 / 500.0).collect();
-            let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST;
-            let img = backend.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("img"), contents: bytemuck::cast_slice(&data), usage });
-            let scratch = vec![backend.device.create_buffer(&wgpu::BufferDescriptor { label: Some("s"), size: (w * h * 12) as u64, usage, mapped_at_creation: false })];
+            let data: Vec<f32> = (0..w * h * 3)
+                .map(|i| 0.05 + ((i * 7919 + i / 3 * 31) % 997) as f32 / 500.0)
+                .collect();
+            let usage = wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST;
+            let img = backend
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("img"),
+                    contents: bytemuck::cast_slice(&data),
+                    usage,
+                });
+            let scratch = vec![backend.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("s"),
+                size: (w * h * 12) as u64,
+                usage,
+                mapped_at_creation: false,
+            })];
             let mut grid = |label: &str, size| {
-                backend.device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage: wgpu::BufferUsages::STORAGE, mapped_at_creation: false })
+                backend.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(label),
+                    size,
+                    usage: wgpu::BufferUsages::STORAGE,
+                    mapped_at_creation: false,
+                })
             };
-            let state = build_diffusion_state(&backend.device, &plan, w as u32, h as u32, &img, &scratch, &mut grid, &backend);
+            let state = build_diffusion_state(
+                &backend.device,
+                &plan,
+                w as u32,
+                h as u32,
+                &img,
+                &scratch,
+                &mut grid,
+                &backend,
+            );
             let got = run_and_read(&backend, &img, w * h * 12, |e| state.encode_passes(e, &img));
             let k = 2 * r + 1;
             let mut worst = 0.0f64;
@@ -7470,7 +8676,10 @@ mod grain_tests {
                     .map(|p| {
                         let (dx, dy) = ((p % k) as f64 - r as f64, (p / k) as f64 - r as f64);
                         let rr = (dx * dx + dy * dy).sqrt();
-                        comps[c].iter().map(|&(l, a)| a * (-rr / l).exp()).sum::<f64>()
+                        comps[c]
+                            .iter()
+                            .map(|&(l, a)| a * (-rr / l).exp())
+                            .sum::<f64>()
                     })
                     .collect();
                 let sum: f64 = psf.iter().sum();
@@ -7566,7 +8775,10 @@ mod grain_tests {
             monochrome: false,
         };
         let data: Vec<f32> = (0..n).flat_map(|_| density).collect();
-        let out = backend.run_grain(&ImageBuf::from_data(width, height, f32_to_scalars(data)), &gp);
+        let out = backend.run_grain(
+            &ImageBuf::from_data(width, height, f32_to_scalars(data)),
+            &gp,
+        );
         let out: Vec<f32> = out.data.iter().map(|&v| v as f32).collect();
 
         for c in 0..3 {
@@ -7605,15 +8817,27 @@ mod film_cache_tests {
 
     /// Every optional stage on, so each input has something to change.
     fn params() -> crate::FilmChainParams<'static> {
-        let rows = |n: usize, x: f64| -> &'static [[f64; 3]] { leak(vec![[x, x + 0.1, x + 0.2]; n]).as_slice() };
-        let values = |n: usize, x: f64| -> &'static [f64] { leak((0..n).map(|i| x + i as f64).collect::<Vec<_>>()).as_slice() };
-        let langmuir = crate::LangmuirGpuParams { k: [1.0, 2.0, 3.0], x_ref: [0.5; 3], saturating: [true, true, false] };
+        let rows = |n: usize, x: f64| -> &'static [[f64; 3]] {
+            leak(vec![[x, x + 0.1, x + 0.2]; n]).as_slice()
+        };
+        let values = |n: usize, x: f64| -> &'static [f64] {
+            leak((0..n).map(|i| x + i as f64).collect::<Vec<_>>()).as_slice()
+        };
+        let langmuir = crate::LangmuirGpuParams {
+            k: [1.0, 2.0, 3.0],
+            x_ref: [0.5; 3],
+            saturating: [true, true, false],
+        };
         crate::FilmChainParams {
             image: leak(ImageBuf::new(4, 2)),
             image_key: None,
             film_cache: None,
             front: crate::FrontPass::Hanatos2025 {
-                tc_lut: leak(TcLut { size: 2, channels: 3, data: vec![0.25; 12] }),
+                tc_lut: leak(TcLut {
+                    size: 2,
+                    channels: 3,
+                    data: vec![0.25; 12],
+                }),
                 rgb_to_adapted_xyz: [[1.0, 0.1, 0.2], [0.3, 1.0, 0.4], [0.5, 0.6, 1.0]],
                 guard: false,
             },
@@ -7675,12 +8899,26 @@ mod film_cache_tests {
                 base_seed: 7,
                 monochrome: false,
             }),
-            glare: Some(crate::GlareGpuParams { mu: -3.0, sigma: 0.5, blur_px: 0.5, base_seed: 42, rgb_offset: [0.01; 3] }),
+            glare: Some(crate::GlareGpuParams {
+                mu: -3.0,
+                sigma: 0.5,
+                blur_px: 0.5,
+                base_seed: 42,
+                rgb_offset: [0.01; 3],
+            }),
             gamut: None,
-            unsharp: Some(crate::UnsharpGpuParams { sigma_px: 0.7, amount: 0.7, threshold: 0.0 }),
+            unsharp: Some(crate::UnsharpGpuParams {
+                sigma_px: 0.7,
+                amount: 0.7,
+                threshold: 0.0,
+            }),
             camera_lens_blur_px: Some(1.5),
             scanner_lens_blur_px: None,
-            highlight_boost: Some(crate::HighlightBoostGpuParams { boost_ev: 0.5, boost_range: 0.3, protect_ev: 1.0 }),
+            highlight_boost: Some(crate::HighlightBoostGpuParams {
+                boost_ev: 0.5,
+                boost_range: 0.3,
+                protect_ev: 1.0,
+            }),
             diffusion: Some(crate::DiffusionGpuPlan {
                 d: 2,
                 small_w: 2,
@@ -7688,7 +8926,10 @@ mod film_cache_tests {
                 p_s: 0.1,
                 sigmas: vec![1.0, 2.0],
                 coeffs: vec![[0.1; 3], [0.2; 3]],
-                psf: crate::DiffusionPsf { radius: 4, components: [vec![(1.0, 0.5)], vec![(1.1, 0.5)], vec![(1.2, 0.5)]] },
+                psf: crate::DiffusionPsf {
+                    radius: 4,
+                    components: [vec![(1.0, 0.5)], vec![(1.1, 0.5)], vec![(1.2, 0.5)]],
+                },
             }),
             enlarger_diffusion: None,
             print_exposure_scale: 1.0,
@@ -7704,97 +8945,201 @@ mod film_cache_tests {
         let signature = |p: &crate::FilmChainParams<'_>| film_side_signature(p, b"frame 1", 0);
         let base = signature(&params());
         assert_eq!(base, signature(&params()), "the signature is deterministic");
-        assert_ne!(base, film_side_signature(&params(), b"frame 2", 0), "the image's name");
+        assert_ne!(
+            base,
+            film_side_signature(&params(), b"frame 2", 0),
+            "the image's name"
+        );
 
         let film: &[(&str, Edit)] = &[
             ("image size", |p| p.image = leak(ImageBuf::new(2, 4))),
-            ("tc LUT", |p| p.front = crate::FrontPass::Hanatos2025 {
-                tc_lut: leak(TcLut { size: 2, channels: 3, data: vec![0.25000001; 12] }),
-                rgb_to_adapted_xyz: [[1.0, 0.1, 0.2], [0.3, 1.0, 0.4], [0.5, 0.6, 1.0]],
-                guard: false,
+            ("tc LUT", |p| {
+                p.front = crate::FrontPass::Hanatos2025 {
+                    tc_lut: leak(TcLut {
+                        size: 2,
+                        channels: 3,
+                        data: vec![0.25000001; 12],
+                    }),
+                    rgb_to_adapted_xyz: [[1.0, 0.1, 0.2], [0.3, 1.0, 0.4], [0.5, 0.6, 1.0]],
+                    guard: false,
+                }
             }),
-            ("exposure (front matrix)", |p| p.front = crate::FrontPass::Hanatos2025 {
-                tc_lut: leak(TcLut { size: 2, channels: 3, data: vec![0.25; 12] }),
-                rgb_to_adapted_xyz: [[1.0, 0.1, 0.2], [0.3, 1.0, 0.4], [0.5, 0.6, 1.0000001]],
-                guard: false,
+            ("exposure (front matrix)", |p| {
+                p.front = crate::FrontPass::Hanatos2025 {
+                    tc_lut: leak(TcLut {
+                        size: 2,
+                        channels: 3,
+                        data: vec![0.25; 12],
+                    }),
+                    rgb_to_adapted_xyz: [[1.0, 0.1, 0.2], [0.3, 1.0, 0.4], [0.5, 0.6, 1.0000001]],
+                    guard: false,
+                }
             }),
-            ("spectral guard", |p| p.front = crate::FrontPass::Hanatos2025 {
-                tc_lut: leak(TcLut { size: 2, channels: 3, data: vec![0.25; 12] }),
-                rgb_to_adapted_xyz: [[1.0, 0.1, 0.2], [0.3, 1.0, 0.4], [0.5, 0.6, 1.0]],
-                guard: true,
+            ("spectral guard", |p| {
+                p.front = crate::FrontPass::Hanatos2025 {
+                    tc_lut: leak(TcLut {
+                        size: 2,
+                        channels: 3,
+                        data: vec![0.25; 12],
+                    }),
+                    rgb_to_adapted_xyz: [[1.0, 0.1, 0.2], [0.3, 1.0, 0.4], [0.5, 0.6, 1.0]],
+                    guard: true,
+                }
             }),
-            ("film log exposure", |p| p.film_log_exposure = leak(vec![-2.0, -1.0, 0.0, 1.0, 2.5]).as_slice()),
-            ("film curves", |p| p.film_density_curves_normalized = leak(vec![[0.1, 0.2, 0.3]; 6]).as_slice()),
+            ("film log exposure", |p| {
+                p.film_log_exposure = leak(vec![-2.0, -1.0, 0.0, 1.0, 2.5]).as_slice()
+            }),
+            ("film curves", |p| {
+                p.film_density_curves_normalized = leak(vec![[0.1, 0.2, 0.3]; 6]).as_slice()
+            }),
             ("highlight boost off", |p| p.highlight_boost = None),
-            ("highlight boost", |p| p.highlight_boost.as_mut().unwrap().protect_ev = 1.5),
+            ("highlight boost", |p| {
+                p.highlight_boost.as_mut().unwrap().protect_ev = 1.5
+            }),
             ("camera diffusion off", |p| p.diffusion = None),
-            ("camera diffusion", |p| p.diffusion.as_mut().unwrap().psf.components[2][0].1 = 0.6),
-            ("camera diffusion factor", |p| p.diffusion.as_mut().unwrap().d = 3),
+            ("camera diffusion", |p| {
+                p.diffusion.as_mut().unwrap().psf.components[2][0].1 = 0.6
+            }),
+            ("camera diffusion factor", |p| {
+                p.diffusion.as_mut().unwrap().d = 3
+            }),
             ("camera lens blur off", |p| p.camera_lens_blur_px = None),
             ("camera lens blur", |p| p.camera_lens_blur_px = Some(1.6)),
             ("halation off", |p| p.halation = None),
-            ("scatter", |p| p.halation.as_mut().unwrap().scatter_amount = 0.9),
-            ("scatter tail", |p| p.halation.as_mut().unwrap().scatter_tail_px[2] = 2.3),
-            ("halation strength", |p| p.halation.as_mut().unwrap().halation_a_tot[0] = 0.04),
-            ("halation sigma", |p| p.halation.as_mut().unwrap().halation_first_sigma_px[1] = 11.5),
-            ("halation bounces", |p| p.halation.as_mut().unwrap().halation_n_bounces = 4),
-            ("halation renormalize", |p| p.halation.as_mut().unwrap().halation_renormalize = false),
+            ("scatter", |p| {
+                p.halation.as_mut().unwrap().scatter_amount = 0.9
+            }),
+            ("scatter tail", |p| {
+                p.halation.as_mut().unwrap().scatter_tail_px[2] = 2.3
+            }),
+            ("halation strength", |p| {
+                p.halation.as_mut().unwrap().halation_a_tot[0] = 0.04
+            }),
+            ("halation sigma", |p| {
+                p.halation.as_mut().unwrap().halation_first_sigma_px[1] = 11.5
+            }),
+            ("halation bounces", |p| {
+                p.halation.as_mut().unwrap().halation_n_bounces = 4
+            }),
+            ("halation renormalize", |p| {
+                p.halation.as_mut().unwrap().halation_renormalize = false
+            }),
             ("DIR off", |p| p.dir_couplers = None),
-            ("DIR matrix", |p| p.dir_couplers.as_mut().unwrap().couplers_matrix_scaled[1][0] = 0.2),
-            ("DIR donor", |p| p.dir_couplers.as_mut().unwrap().donor = None),
-            ("DIR receiver", |p| p.dir_couplers.as_mut().unwrap().receiver = Some(crate::LangmuirGpuParams { k: [1.0; 3], x_ref: [1.0; 3], saturating: [true; 3] })),
-            ("DIR diffusion", |p| p.dir_couplers.as_mut().unwrap().diffusion_size_px = 6.0),
-            ("DIR curves", |p| p.dir_couplers.as_mut().unwrap().density_curves_0 = leak(vec![[0.15, 0.25, 0.36]; 5]).as_slice()),
+            ("DIR matrix", |p| {
+                p.dir_couplers.as_mut().unwrap().couplers_matrix_scaled[1][0] = 0.2
+            }),
+            ("DIR donor", |p| {
+                p.dir_couplers.as_mut().unwrap().donor = None
+            }),
+            ("DIR receiver", |p| {
+                p.dir_couplers.as_mut().unwrap().receiver = Some(crate::LangmuirGpuParams {
+                    k: [1.0; 3],
+                    x_ref: [1.0; 3],
+                    saturating: [true; 3],
+                })
+            }),
+            ("DIR diffusion", |p| {
+                p.dir_couplers.as_mut().unwrap().diffusion_size_px = 6.0
+            }),
+            ("DIR curves", |p| {
+                p.dir_couplers.as_mut().unwrap().density_curves_0 =
+                    leak(vec![[0.15, 0.25, 0.36]; 5]).as_slice()
+            }),
             ("grain off", |p| p.grain = None),
             ("grain seed", |p| p.grain.as_mut().unwrap().base_seed = 8),
-            ("grain particles", |p| p.grain.as_mut().unwrap().n_particles_per_pixel[1][2] = 101.0),
+            ("grain particles", |p| {
+                p.grain.as_mut().unwrap().n_particles_per_pixel[1][2] = 101.0
+            }),
             ("grain blur", |p| p.grain.as_mut().unwrap().blur_px = 0.7),
-            ("grain micro-structure", |p| p.grain.as_mut().unwrap().micro_structure = None),
-            ("grain unsharp", |p| p.grain.as_mut().unwrap().mult_usm = Some([1.0, 0.2])),
-            ("grain monochrome", |p| p.grain.as_mut().unwrap().monochrome = true),
-            ("grain uniformity", |p| p.grain.as_mut().unwrap().grain_uniformity[0] = 0.97),
-            ("grain layers", |p| p.grain.as_mut().unwrap().curves_layers.push([0.5; 3])),
+            ("grain micro-structure", |p| {
+                p.grain.as_mut().unwrap().micro_structure = None
+            }),
+            ("grain unsharp", |p| {
+                p.grain.as_mut().unwrap().mult_usm = Some([1.0, 0.2])
+            }),
+            ("grain monochrome", |p| {
+                p.grain.as_mut().unwrap().monochrome = true
+            }),
+            ("grain uniformity", |p| {
+                p.grain.as_mut().unwrap().grain_uniformity[0] = 0.97
+            }),
+            ("grain layers", |p| {
+                p.grain.as_mut().unwrap().curves_layers.push([0.5; 3])
+            }),
         ];
         for (what, edit) in film {
             let mut p = params();
             edit(&mut p);
-            assert_ne!(signature(&p), base, "{what} must change the film side's signature");
+            assert_ne!(
+                signature(&p),
+                base,
+                "{what} must change the film side's signature"
+            );
         }
 
         let after: &[(&str, Edit)] = &[
             ("upload key", |p| p.image_key = Some(3)),
-            ("film spectral densities (print input)", |p| p.film_channel_density = leak(vec![[0.4; 3]; 81]).as_slice()),
-            ("film base (print input)", |p| p.film_base_density = leak(vec![0.06; 81]).as_slice()),
-            ("enlarger filters", |p| p.print_illuminant = leak(vec![1.5; 81]).as_slice()),
-            ("paper", |p| p.print_sensitivity = leak(vec![[0.3; 3]; 81]).as_slice()),
+            ("film spectral densities (print input)", |p| {
+                p.film_channel_density = leak(vec![[0.4; 3]; 81]).as_slice()
+            }),
+            ("film base (print input)", |p| {
+                p.film_base_density = leak(vec![0.06; 81]).as_slice()
+            }),
+            ("enlarger filters", |p| {
+                p.print_illuminant = leak(vec![1.5; 81]).as_slice()
+            }),
+            ("paper", |p| {
+                p.print_sensitivity = leak(vec![[0.3; 3]; 81]).as_slice()
+            }),
             ("print exposure", |p| p.print_normalization_factor = 1.6),
             ("print exposure scale", |p| p.print_exposure_scale = 1.2),
-            ("print curves", |p| p.print_density_curves = leak(vec![[0.5; 3]; 5]).as_slice()),
-            ("paper densities", |p| p.print_channel_density = leak(vec![[0.7; 3]; 81]).as_slice()),
+            ("print curves", |p| {
+                p.print_density_curves = leak(vec![[0.5; 3]; 5]).as_slice()
+            }),
+            ("paper densities", |p| {
+                p.print_channel_density = leak(vec![[0.7; 3]; 81]).as_slice()
+            }),
             ("preflash", |p| p.preflash = [0.01; 3]),
-            ("viewing light", |p| p.viewing_illuminant = leak(vec![3.0; 81]).as_slice()),
+            ("viewing light", |p| {
+                p.viewing_illuminant = leak(vec![3.0; 81]).as_slice()
+            }),
             ("scan normalization", |p| p.scan_normalization = 101.0),
-            ("output space", |p| p.scan_xyz_to_rgb = leak([[3.0, -1.5, -0.5], [-1.0, 1.9, 0.0], [0.05, -0.2, 1.05]])),
+            ("output space", |p| {
+                p.scan_xyz_to_rgb = leak([[3.0, -1.5, -0.5], [-1.0, 1.9, 0.0], [0.05, -0.2, 1.05]])
+            }),
             ("B&W remap", |p| p.bw_xyz_remap = Some((1.1, 0.0))),
             ("scan the film", |p| p.scan_film = true),
             ("glare off", |p| p.glare = None),
             ("glare seed", |p| p.glare.as_mut().unwrap().base_seed = 43),
             ("unsharp", |p| p.unsharp = None),
             ("scanner lens blur", |p| p.scanner_lens_blur_px = Some(0.5)),
-            ("enlarger diffusion", |p| p.enlarger_diffusion = p.diffusion.clone()),
+            ("enlarger diffusion", |p| {
+                p.enlarger_diffusion = p.diffusion.clone()
+            }),
             ("output encoding", |p| p.output_cctf_encoding = false),
             ("output matrix", |p| p.output_encode_matrix[0][0] = 1.00001),
         ];
         for (what, edit) in after {
             let mut p = params();
             edit(&mut p);
-            assert_eq!(signature(&p), base, "{what} must not change the film side's signature");
+            assert_eq!(
+                signature(&p),
+                base,
+                "{what} must not change the film side's signature"
+            );
         }
 
         // The diffusion grid budget matters only with camera diffusion on.
-        assert_ne!(film_side_signature(&params(), b"frame 1", 1 << 20), base, "diffusion grid budget");
+        assert_ne!(
+            film_side_signature(&params(), b"frame 1", 1 << 20),
+            base,
+            "diffusion grid budget"
+        );
         let mut p = params();
         p.diffusion = None;
-        assert_eq!(film_side_signature(&p, b"frame 1", 1 << 20), film_side_signature(&p, b"frame 1", 0));
+        assert_eq!(
+            film_side_signature(&p, b"frame 1", 1 << 20),
+            film_side_signature(&p, b"frame 1", 0)
+        );
     }
 }

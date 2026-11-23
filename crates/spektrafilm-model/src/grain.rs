@@ -81,14 +81,22 @@ impl GrainCurves {
         assert_eq!(layers.len(), total.len(), "one layer row per curve sample");
         let n_layers = layers.first().map_or(0, Vec::len);
         assert!(n_layers > 0 && layers.iter().all(|row| row.len() == n_layers));
-        Self { total, n_layers, layers: layers.concat() }
+        Self {
+            total,
+            n_layers,
+            layers: layers.concat(),
+        }
     }
 
     /// A single-layer density model: the total curve is the only sub-layer
     /// (upstream `density_curves[:, None, :]`).
     pub fn single_layer(total: Vec<[f64; 3]>) -> Self {
         let layers = total.clone();
-        Self { total, n_layers: 1, layers }
+        Self {
+            total,
+            n_layers: 1,
+            layers,
+        }
     }
 
     pub fn layer(&self, sample: usize, layer: usize) -> [f64; 3] {
@@ -411,7 +419,10 @@ fn add_micro_structure(
 /// splitting: fixed chunks, then their sums in order. (A plain `par_iter().sum()`
 /// regroups the additions from run to run.)
 fn deterministic_sum(values: &[Scalar]) -> f64 {
-    let chunks: Vec<f64> = values.par_chunks(1 << 14).map(|c| c.iter().map(|&v| to_f64(v)).sum::<f64>()).collect();
+    let chunks: Vec<f64> = values
+        .par_chunks(1 << 14)
+        .map(|c| c.iter().map(|&v| to_f64(v)).sum::<f64>())
+        .collect();
     chunks.iter().sum()
 }
 
@@ -436,9 +447,15 @@ pub fn multiplicative_unsharp_mask(
     blur_plane(&mut blur, width, height, sigma);
     let mass = deterministic_sum(plane);
     let (eps, a, a1) = (from_f64(EPS), from_f64(amount), from_f64(1.0 + amount));
-    blur.par_iter_mut().zip(plane.par_iter()).for_each(|(g, &d)| {
-        *g = if d <= ZERO { ZERO } else { d.max(eps).powf(a1) / g.max(eps).powf(a) };
-    });
+    blur.par_iter_mut()
+        .zip(plane.par_iter())
+        .for_each(|(g, &d)| {
+            *g = if d <= ZERO {
+                ZERO
+            } else {
+                d.max(eps).powf(a1) / g.max(eps).powf(a)
+            };
+        });
     let sharpened = deterministic_sum(&blur);
     if sharpened > 0.0 {
         let scale = from_f64(mass / sharpened);
@@ -470,8 +487,9 @@ pub fn apply_grain(
     let stage_timings = stage_timings_enabled();
     let (w, h) = (density_cmy.width, density_cmy.height);
     let lp = layer_grain_params(curves, settings, pixel_size_um);
-    let interps: Vec<LayerInterp> =
-        (0..3).map(|ch| LayerInterp::new(curves, ch, positive)).collect();
+    let interps: Vec<LayerInterp> = (0..3)
+        .map(|ch| LayerInterp::new(curves, ch, positive))
+        .collect();
 
     let sub_layer = |ch: usize, l: usize| -> Vec<Scalar> {
         let t = Instant::now();
@@ -503,46 +521,54 @@ pub fn apply_grain(
 
     // The sub-layers sum in order, so the rounding is the same whichever
     // way they were scheduled.
-    let finalize_channel = |ch: usize, layers: &mut dyn Iterator<Item = Vec<Scalar>>| -> Vec<Scalar> {
-        let mut grain = layers.next().expect("at least one sub-layer");
-        for g in layers {
-            grain.iter_mut().zip(&g).for_each(|(s, v)| *s += *v);
-        }
+    let finalize_channel =
+        |ch: usize, layers: &mut dyn Iterator<Item = Vec<Scalar>>| -> Vec<Scalar> {
+            let mut grain = layers.next().expect("at least one sub-layer");
+            for g in layers {
+                grain.iter_mut().zip(&g).for_each(|(s, v)| *s += *v);
+            }
 
-        // Upstream `_finalize_grain`, which is per channel throughout.
-        let t = Instant::now();
-        add_micro_structure(
-            &mut grain,
-            w,
-            h,
-            settings.micro_structure,
-            pixel_size_um,
-            100 + ch as u32,
-        );
-        blur_plane(&mut grain, w, h, settings.blur);
-        if settings.mult_usm_amount > 0.0 && settings.mult_usm_sigma > 0.0 {
-            multiplicative_unsharp_mask(
+            // Upstream `_finalize_grain`, which is per channel throughout.
+            let t = Instant::now();
+            add_micro_structure(
                 &mut grain,
                 w,
                 h,
-                settings.mult_usm_sigma,
-                settings.mult_usm_amount,
+                settings.micro_structure,
+                pixel_size_um,
+                100 + ch as u32,
             );
-        }
-        let dmin = from_f64(settings.density_min[ch]);
-        grain.par_iter_mut().for_each(|v| *v -= dmin);
-        print_stage_timing(stage_timings, "grain.finalize", t);
-        grain
-    };
+            blur_plane(&mut grain, w, h, settings.blur);
+            if settings.mult_usm_amount > 0.0 && settings.mult_usm_sigma > 0.0 {
+                multiplicative_unsharp_mask(
+                    &mut grain,
+                    w,
+                    h,
+                    settings.mult_usm_sigma,
+                    settings.mult_usm_amount,
+                );
+            }
+            let dmin = from_f64(settings.density_min[ch]);
+            grain.par_iter_mut().for_each(|v| *v -= dmin);
+            print_stage_timing(stage_timings, "grain.finalize", t);
+            grain
+        };
 
     let channels: Vec<usize> = if monochrome { vec![0] } else { vec![0, 1, 2] };
     let n_layers = lp.n_layers();
     // wasm can't spawn the parallel path's OS threads (the browser's CPU
     // engine panicked on any grain); the paths are bit-identical.
-    let mut out_planes: Vec<(usize, Vec<Scalar>)> = if serial_channels || cfg!(target_arch = "wasm32") {
+    let mut out_planes: Vec<(usize, Vec<Scalar>)> = if serial_channels
+        || cfg!(target_arch = "wasm32")
+    {
         channels
             .iter()
-            .map(|&ch| (ch, finalize_channel(ch, &mut (0..n_layers).map(|l| sub_layer(ch, l)))))
+            .map(|&ch| {
+                (
+                    ch,
+                    finalize_channel(ch, &mut (0..n_layers).map(|l| sub_layer(ch, l))),
+                )
+            })
             .collect()
     } else {
         // One OS thread per stream, not a rayon task: a rayon worker waiting
@@ -554,7 +580,10 @@ pub fn apply_grain(
                 .iter()
                 .flat_map(|&ch| (0..n_layers).map(move |l| scope.spawn(move || sub_layer(ch, l))))
                 .collect();
-            streams.into_iter().map(|s| s.join().expect("grain sub-layer")).collect()
+            streams
+                .into_iter()
+                .map(|s| s.join().expect("grain sub-layer"))
+                .collect()
         });
         let mut per_channel: Vec<Vec<Vec<Scalar>>> = Vec::with_capacity(channels.len());
         while !layers.is_empty() {
@@ -600,7 +629,10 @@ pub fn gpu_params(
 ) -> spektrafilm_gpu::GrainGpuParams {
     let lp = layer_grain_params(curves, settings, pixel_size_um);
     let n = lp.n_layers();
-    assert!(n <= MAX_SUB_LAYERS, "{n} sub-layers; the GPU grain supports {MAX_SUB_LAYERS}");
+    assert!(
+        n <= MAX_SUB_LAYERS,
+        "{n} sub-layers; the GPU grain supports {MAX_SUB_LAYERS}"
+    );
     let f32x3 = |v: [f64; 3]| v.map(|x| x as f32);
     let sign = if positive { -1.0 } else { 1.0 };
     let xs: Vec<[f64; 3]> = curves.total.iter().map(|r| r.map(|v| sign * v)).collect();
@@ -614,10 +646,14 @@ pub fn gpu_params(
         })
         .collect();
     inv_dx.push([0.0; 3]);
-    let micro = micro_structure_on(settings.micro_structure, pixel_size_um).map(|(sigma, blur_px)| {
-        let sigma2 = (sigma * sigma).ln_1p();
-        [sigma2 as f32, if blur_px > 0.4 { blur_px as f32 } else { 0.0 }]
-    });
+    let micro =
+        micro_structure_on(settings.micro_structure, pixel_size_um).map(|(sigma, blur_px)| {
+            let sigma2 = (sigma * sigma).ln_1p();
+            [
+                sigma2 as f32,
+                if blur_px > 0.4 { blur_px as f32 } else { 0.0 },
+            ]
+        });
     spektrafilm_gpu::GrainGpuParams {
         interp_x: xs.into_iter().map(f32x3).collect(),
         positive,
@@ -628,17 +664,31 @@ pub fn gpu_params(
         n_particles_per_pixel: lp
             .n_particles_per_pixel
             .iter()
-            .map(|v| v.map(|x| if x.is_finite() && x > 0.0 { x as f32 } else { 0.0 }))
+            .map(|v| {
+                v.map(|x| {
+                    if x.is_finite() && x > 0.0 {
+                        x as f32
+                    } else {
+                        0.0
+                    }
+                })
+            })
             .collect(),
         dye_cloud_sigma_px: (0..n)
-            .map(|l| std::array::from_fn(|ch| lp.dye_cloud_sigma(settings.blur_dye_clouds_um, l, ch) as f32))
+            .map(|l| {
+                std::array::from_fn(|ch| {
+                    lp.dye_cloud_sigma(settings.blur_dye_clouds_um, l, ch) as f32
+                })
+            })
             .collect(),
         grain_uniformity: f32x3(settings.uniformity),
         density_min: f32x3(settings.density_min),
         micro_structure: micro,
         blur_px: settings.blur.max(0.0) as f32,
-        mult_usm: (settings.mult_usm_amount > 0.0 && settings.mult_usm_sigma > 0.0)
-            .then_some([settings.mult_usm_sigma as f32, settings.mult_usm_amount as f32]),
+        mult_usm: (settings.mult_usm_amount > 0.0 && settings.mult_usm_sigma > 0.0).then_some([
+            settings.mult_usm_sigma as f32,
+            settings.mult_usm_amount as f32,
+        ]),
         base_seed: 0,
         monochrome,
     }
@@ -658,7 +708,11 @@ mod tests {
                 (0..3)
                     .map(|l| {
                         let (c, a) = (-1.0 + 0.8 * l as f64, 0.8 - 0.15 * l as f64);
-                        [a * cdf((x - c) / 0.4), a * cdf((x - c - 0.1) / 0.45), a * cdf((x - c + 0.1) / 0.5)]
+                        [
+                            a * cdf((x - c) / 0.4),
+                            a * cdf((x - c - 0.1) / 0.45),
+                            a * cdf((x - c + 0.1) / 0.5),
+                        ]
                     })
                     .collect()
             })
@@ -686,7 +740,10 @@ mod tests {
 
     #[test]
     fn serial_and_parallel_grain_are_bit_identical() {
-        let pool = rayon::ThreadPoolBuilder::new().num_threads(3).build().unwrap();
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(3)
+            .build()
+            .unwrap();
         let mut density = ImageBuf::new(11, 7);
         for (i, px) in density.pixels_mut().enumerate() {
             let v = from_f64((i % 17) as f64 * 0.12 - 0.1);
@@ -696,13 +753,25 @@ mod tests {
         for monochrome in [false, true] {
             for positive in [false, true] {
                 let render = |serial| {
-                    apply_grain(density.clone(), 2.0, &settings(), &curves, positive, monochrome, serial)
+                    apply_grain(
+                        density.clone(),
+                        2.0,
+                        &settings(),
+                        &curves,
+                        positive,
+                        monochrome,
+                        serial,
+                    )
                 };
                 let parallel = pool.install(|| render(false));
                 let serial = pool.install(|| render(true));
                 assert!(serial.data.iter().all(|v| v.is_finite()));
                 assert_eq!(
-                    parallel.data.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                    parallel
+                        .data
+                        .iter()
+                        .map(|v| v.to_bits())
+                        .collect::<Vec<_>>(),
                     serial.data.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
                     "monochrome={monochrome}, positive={positive}",
                 );
@@ -741,7 +810,10 @@ mod tests {
             for k in [5usize, 60, 100] {
                 let pos = interp.locate(c.total[k][1]);
                 let sum: f64 = (0..3).map(|l| layer_density(&c, pos, l, 1)).sum();
-                assert!((sum - c.total[k][1]).abs() < 1e-12, "positive={positive} k={k}");
+                assert!(
+                    (sum - c.total[k][1]).abs() < 1e-12,
+                    "positive={positive} k={k}"
+                );
             }
         }
     }
@@ -756,8 +828,9 @@ mod tests {
     #[test]
     fn multiplicative_unsharp_mask_keeps_the_mass() {
         let (w, h) = (9u32, 7u32);
-        let mut plane: Vec<Scalar> =
-            (0..w * h).map(|i| from_f64(0.2 + ((i * 7) % 11) as f64 * 0.1)).collect();
+        let mut plane: Vec<Scalar> = (0..w * h)
+            .map(|i| from_f64(0.2 + ((i * 7) % 11) as f64 * 0.1))
+            .collect();
         let before: f64 = plane.iter().map(|&v| to_f64(v)).sum();
         multiplicative_unsharp_mask(&mut plane, w, h, 0.7, 1.5);
         let after: f64 = plane.iter().map(|&v| to_f64(v)).sum();

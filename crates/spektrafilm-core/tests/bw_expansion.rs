@@ -1,5 +1,9 @@
 //! New source-based materials: independent Python parity and physical-paper invariants.
-use spektrafilm_core::{params::{RuntimeParams, SpectralBoundary}, pipeline::Pipeline, profile};
+use spektrafilm_core::{
+    params::{RuntimeParams, SpectralBoundary},
+    pipeline::Pipeline,
+    profile,
+};
 use spektrafilm_gpu::cpu_backend::{CpuBackend, scan_log_xyz_cpu};
 use spektrafilm_math::{image::ImageBuf, precision::from_f64, spectral};
 use std::path::PathBuf;
@@ -38,7 +42,12 @@ fn new_materials_match_independent_python_extremes_and_colours() {
     let fixture: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/bw_expansion_python.json")).unwrap();
     for case in fixture["cases"].as_array().unwrap() {
-        for (lut, boundary) in [false, true].into_iter().flat_map(|lut| [(lut, SpectralBoundary::Guard), (lut, SpectralBoundary::Upstream)]) {
+        for (lut, boundary) in [false, true].into_iter().flat_map(|lut| {
+            [
+                (lut, SpectralBoundary::Guard),
+                (lut, SpectralBoundary::Upstream),
+            ]
+        }) {
             let mut p: RuntimeParams = serde_json::from_value(case["params"].clone()).unwrap();
             p.settings.use_enlarger_lut = lut;
             p.settings.use_scanner_lut = lut;
@@ -69,20 +78,31 @@ fn new_materials_match_independent_python_extremes_and_colours() {
             let tolerance = 1e-6;
             #[cfg(not(feature = "precision-f64"))]
             let tolerance = 3e-3;
-            let rgb: Vec<f64> = case["input_rgb"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+            let rgb: Vec<f64> = case["input_rgb"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_f64().unwrap())
+                .collect();
             for (i, (&got, expected)) in out
                 .data
                 .iter()
                 .zip(case["expected_rgb"].as_array().unwrap())
                 .enumerate()
             {
-                assert!(got.is_finite(), "{} LUT={lut}: component {i} is {got}", case["name"]);
+                assert!(
+                    got.is_finite(),
+                    "{} LUT={lut}: component {i} is {got}",
+                    case["name"]
+                );
                 // Upstream folds chromaticities beyond the xy triangle back
                 // inside; the spectral boundary guard moves them toward white
                 // instead (see `adapted_xyz_to_tc_b`). Pixels are independent
                 // here (no spatial effects or auto exposure), so with the
                 // guard every clearly physical pixel must still match.
-                if boundary == SpectralBoundary::Guard && !clearly_physical(&rgb[i / 3 * 3..i / 3 * 3 + 3]) {
+                if boundary == SpectralBoundary::Guard
+                    && !clearly_physical(&rgb[i / 3 * 3..i / 3 * 3 + 3])
+                {
                     continue;
                 }
                 assert!(

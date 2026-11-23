@@ -7,15 +7,20 @@
 //! source scene luminance. This keeps the LUT's hue/chroma mapping while
 //! leaving exposure and highlight/shadow roll-off to the Negs pipeline.
 
-use std::{collections::HashMap, fs, path::{Path, PathBuf}, sync::{Arc, Mutex, OnceLock}};
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, OnceLock},
+};
 
 use rayon::prelude::*;
 use spektrafilm_gpu::Lut3D;
 use spektrafilm_math::{
     colorspace::{self, RgbColourspace},
     image::ImageBuf,
-    precision::{from_f32, to_f32},
     lut::trilinear_3d,
+    precision::{from_f32, to_f32},
 };
 
 const SRGB_TO_AWG3: [[f32; 3]; 3] = [
@@ -25,7 +30,8 @@ const SRGB_TO_AWG3: [[f32; 3]; 3] = [
 ];
 static CUBE_CACHE: OnceLock<Mutex<HashMap<PathBuf, (u64, u128, Arc<Lut3D>)>>> = OnceLock::new();
 type NeutralToneCurve = Vec<(f32, f32)>; // (scene-linear neutral Y, BT.1886-linear output Y)
-static TONE_CACHE: OnceLock<Mutex<HashMap<usize, (Arc<Lut3D>, Arc<NeutralToneCurve>)>>> = OnceLock::new();
+static TONE_CACHE: OnceLock<Mutex<HashMap<usize, (Arc<Lut3D>, Arc<NeutralToneCurve>)>>> =
+    OnceLock::new();
 
 /// Parse a .cube file, normalizing its conventional red-fastest row order to
 /// the core interpolator's red-major layout. Domain remaps are deliberately
@@ -33,12 +39,15 @@ static TONE_CACHE: OnceLock<Mutex<HashMap<usize, (Arc<Lut3D>, Arc<NeutralToneCur
 pub fn load_cube(path: &Path) -> Result<Arc<Lut3D>, String> {
     let metadata = fs::metadata(path)
         .map_err(|e| format!("Cannot read Referent LUT {}: {e}", path.display()))?;
-    let modified = metadata.modified().ok()
+    let modified = metadata
+        .modified()
+        .ok()
         .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
         .map_or(0, |time| time.as_nanos());
     let cache = CUBE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     if let Some((len, stamp, lut)) = cache.lock().unwrap_or_else(|p| p.into_inner()).get(path)
-        && *len == metadata.len() && *stamp == modified
+        && *len == metadata.len()
+        && *stamp == modified
     {
         return Ok(lut.clone());
     }
@@ -50,7 +59,9 @@ pub fn load_cube(path: &Path) -> Result<Arc<Lut3D>, String> {
     let mut values = Vec::<[f32; 3]>::new();
     for line in text.lines() {
         let line = line.split('#').next().unwrap_or("").trim();
-        if line.is_empty() || line.starts_with("TITLE") { continue; }
+        if line.is_empty() || line.starts_with("TITLE") {
+            continue;
+        }
         if let Some(rest) = line.strip_prefix("DOMAIN_MIN") {
             domain_min = parse_triplet(rest, "DOMAIN_MIN")?;
             continue;
@@ -60,12 +71,19 @@ pub fn load_cube(path: &Path) -> Result<Arc<Lut3D>, String> {
             continue;
         }
         if let Some(rest) = line.strip_prefix("LUT_3D_SIZE") {
-            let n: usize = rest.trim().parse().map_err(|_| "Invalid LUT_3D_SIZE".to_owned())?;
-            if !(2..=129).contains(&n) { return Err(format!("Unsupported 3D LUT size: {n}")); }
+            let n: usize = rest
+                .trim()
+                .parse()
+                .map_err(|_| "Invalid LUT_3D_SIZE".to_owned())?;
+            if !(2..=129).contains(&n) {
+                return Err(format!("Unsupported 3D LUT size: {n}"));
+            }
             size = Some(n);
             continue;
         }
-        if line.starts_with("LUT_1D_SIZE") { return Err("Referent input requires a 3D .cube LUT".into()); }
+        if line.starts_with("LUT_1D_SIZE") {
+            return Err("Referent input requires a 3D .cube LUT".into());
+        }
         let mut parts = line.split_whitespace();
         let Some(r) = parts.next() else { continue };
         let (Ok(r), Some(g), Some(b)) = (r.parse::<f32>(), parts.next(), parts.next()) else {
@@ -84,17 +102,30 @@ pub fn load_cube(path: &Path) -> Result<Arc<Lut3D>, String> {
     }
     let n = size.ok_or("Missing LUT_3D_SIZE")?;
     if values.len() != n * n * n {
-        return Err(format!("Expected {} LUT entries, found {}", n * n * n, values.len()));
+        return Err(format!(
+            "Expected {} LUT entries, found {}",
+            n * n * n,
+            values.len()
+        ));
     }
     let mut data = vec![0.0; values.len() * 3];
     // .cube rows enumerate red fastest; Lut3D indexes blue fastest.
-    for b in 0..n { for g in 0..n { for r in 0..n {
-        let src = (b * n * n + g * n + r) * 3;
-        let dst = (r * n * n + g * n + b) * 3;
-        data[dst..dst + 3].copy_from_slice(&values[src / 3]);
-    }}}
-    let lut = Arc::new(Lut3D { size: n as u32, data });
-    cache.lock().unwrap_or_else(|p| p.into_inner())
+    for b in 0..n {
+        for g in 0..n {
+            for r in 0..n {
+                let src = (b * n * n + g * n + r) * 3;
+                let dst = (r * n * n + g * n + b) * 3;
+                data[dst..dst + 3].copy_from_slice(&values[src / 3]);
+            }
+        }
+    }
+    let lut = Arc::new(Lut3D {
+        size: n as u32,
+        data,
+    });
+    cache
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
         .insert(path.to_path_buf(), (metadata.len(), modified, lut.clone()));
     Ok(lut)
 }
@@ -126,9 +157,15 @@ pub fn apply_color_only(image: &ImageBuf, lut: &Arc<Lut3D>, exposure_ev: f64) ->
         let source = [to_f32(px[0]), to_f32(px[1]), to_f32(px[2])];
         let exposed = [source[0] * gain, source[1] * gain, source[2] * gain];
         let awg = [
-            SRGB_TO_AWG3[0][0] * exposed[0] + SRGB_TO_AWG3[0][1] * exposed[1] + SRGB_TO_AWG3[0][2] * exposed[2],
-            SRGB_TO_AWG3[1][0] * exposed[0] + SRGB_TO_AWG3[1][1] * exposed[1] + SRGB_TO_AWG3[1][2] * exposed[2],
-            SRGB_TO_AWG3[2][0] * exposed[0] + SRGB_TO_AWG3[2][1] * exposed[1] + SRGB_TO_AWG3[2][2] * exposed[2],
+            SRGB_TO_AWG3[0][0] * exposed[0]
+                + SRGB_TO_AWG3[0][1] * exposed[1]
+                + SRGB_TO_AWG3[0][2] * exposed[2],
+            SRGB_TO_AWG3[1][0] * exposed[0]
+                + SRGB_TO_AWG3[1][1] * exposed[1]
+                + SRGB_TO_AWG3[1][2] * exposed[2],
+            SRGB_TO_AWG3[2][0] * exposed[0]
+                + SRGB_TO_AWG3[2][1] * exposed[1]
+                + SRGB_TO_AWG3[2][2] * exposed[2],
         ];
         let logc = awg.map(logc3_encode_ei800);
         let rendered = trilinear_3d(&lut.data, lut.size as usize, logc[0], logc[1], logc[2]);
@@ -140,7 +177,8 @@ pub fn apply_color_only(image: &ImageBuf, lut: &Arc<Lut3D>, exposure_ev: f64) ->
         // Undo the LUT's measured neutral-axis tone response, rather than
         // substituting source luma (which also erases legitimate LUT luma
         // changes for colored pixels).
-        let rendered_y = 0.2126 * display_linear[0] + 0.7152 * display_linear[1] + 0.0722 * display_linear[2];
+        let rendered_y =
+            0.2126 * display_linear[0] + 0.7152 * display_linear[1] + 0.0722 * display_linear[2];
         if rendered_y <= 1e-6 || !rendered_y.is_finite() {
             return;
         }
@@ -157,11 +195,7 @@ pub fn apply_color_only(image: &ImageBuf, lut: &Arc<Lut3D>, exposure_ev: f64) ->
 
 /// Apply the full LogC3/AWG3-to-BT.1886 Referent transform to a finished
 /// linear scan. This is the actual display transform, with no tone extraction.
-pub fn apply_output_transform(
-    image: &mut ImageBuf,
-    lut: &Arc<Lut3D>,
-    linear_input_space: &str,
-) {
+pub fn apply_output_transform(image: &mut ImageBuf, lut: &Arc<Lut3D>, linear_input_space: &str) {
     let input = RgbColourspace::input(linear_input_space);
     let srgb = RgbColourspace::output("sRGB");
     let rec709_to_input = colorspace::icc_rgb_to_rgb(srgb, input);
@@ -169,12 +203,22 @@ pub fn apply_output_transform(
     image.par_pixels_mut().for_each(|px| {
         let linear_srgb = colorspace::mat3_vec_f64(
             &input_to_srgb,
-            [to_f32(px[0]) as f64, to_f32(px[1]) as f64, to_f32(px[2]) as f64],
+            [
+                to_f32(px[0]) as f64,
+                to_f32(px[1]) as f64,
+                to_f32(px[2]) as f64,
+            ],
         );
         let awg3 = [
-            SRGB_TO_AWG3[0][0] as f64 * linear_srgb[0] + SRGB_TO_AWG3[0][1] as f64 * linear_srgb[1] + SRGB_TO_AWG3[0][2] as f64 * linear_srgb[2],
-            SRGB_TO_AWG3[1][0] as f64 * linear_srgb[0] + SRGB_TO_AWG3[1][1] as f64 * linear_srgb[1] + SRGB_TO_AWG3[1][2] as f64 * linear_srgb[2],
-            SRGB_TO_AWG3[2][0] as f64 * linear_srgb[0] + SRGB_TO_AWG3[2][1] as f64 * linear_srgb[1] + SRGB_TO_AWG3[2][2] as f64 * linear_srgb[2],
+            SRGB_TO_AWG3[0][0] as f64 * linear_srgb[0]
+                + SRGB_TO_AWG3[0][1] as f64 * linear_srgb[1]
+                + SRGB_TO_AWG3[0][2] as f64 * linear_srgb[2],
+            SRGB_TO_AWG3[1][0] as f64 * linear_srgb[0]
+                + SRGB_TO_AWG3[1][1] as f64 * linear_srgb[1]
+                + SRGB_TO_AWG3[1][2] as f64 * linear_srgb[2],
+            SRGB_TO_AWG3[2][0] as f64 * linear_srgb[0]
+                + SRGB_TO_AWG3[2][1] as f64 * linear_srgb[1]
+                + SRGB_TO_AWG3[2][2] as f64 * linear_srgb[2],
         ];
         let logc = awg3.map(|v| logc3_encode_ei800(v as f32));
         let display = trilinear_3d(&lut.data, lut.size as usize, logc[0], logc[1], logc[2]);
@@ -211,7 +255,9 @@ fn neutral_tone_curve(lut: &Arc<Lut3D>) -> Arc<NeutralToneCurve> {
     }
     let curve = Arc::new(curve);
     let mut entries = cache.lock().unwrap_or_else(|p| p.into_inner());
-    if entries.len() >= 4 { entries.clear(); }
+    if entries.len() >= 4 {
+        entries.clear();
+    }
     entries.insert(key, (lut.clone(), curve.clone()));
     curve
 }
@@ -219,14 +265,28 @@ fn neutral_tone_curve(lut: &Arc<Lut3D>) -> Arc<NeutralToneCurve> {
 /// Invert the sampled monotone neutral-axis tone response by linear
 /// interpolation between adjacent LUT-derived measurements.
 fn invert_neutral_tone(curve: &[(f32, f32)], output_y: f32) -> f32 {
-    let Some(&(first_x, first_y)) = curve.first() else { return output_y };
-    let Some(&(last_x, last_y)) = curve.last() else { return output_y };
-    if output_y <= first_y { return first_x; }
-    if output_y >= last_y { return last_x; }
-    let upper = curve.partition_point(|&(_, y)| y < output_y).min(curve.len() - 1);
+    let Some(&(first_x, first_y)) = curve.first() else {
+        return output_y;
+    };
+    let Some(&(last_x, last_y)) = curve.last() else {
+        return output_y;
+    };
+    if output_y <= first_y {
+        return first_x;
+    }
+    if output_y >= last_y {
+        return last_x;
+    }
+    let upper = curve
+        .partition_point(|&(_, y)| y < output_y)
+        .min(curve.len() - 1);
     let (x0, y0) = curve[upper - 1];
     let (x1, y1) = curve[upper];
-    if y1 <= y0 { x1 } else { x0 + (x1 - x0) * ((output_y - y0) / (y1 - y0)) }
+    if y1 <= y0 {
+        x1
+    } else {
+        x0 + (x1 - x0) * ((output_y - y0) / (y1 - y0))
+    }
 }
 
 #[inline]

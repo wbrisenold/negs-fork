@@ -99,7 +99,11 @@ pub fn profile(space: &RgbColourspace, linear: bool) -> Vec<u8> {
 fn bradford(src: [f64; 3], dst: [f64; 3]) -> [[f64; 3]; 3] {
     let cone = |w: [f64; 3]| BRADFORD.map(|row| row[0] * w[0] + row[1] * w[1] + row[2] * w[2]);
     let (s, d) = (cone(src), cone(dst));
-    let scale = [[d[0] / s[0], 0.0, 0.0], [0.0, d[1] / s[1], 0.0], [0.0, 0.0, d[2] / s[2]]];
+    let scale = [
+        [d[0] / s[0], 0.0, 0.0],
+        [0.0, d[1] / s[1], 0.0],
+        [0.0, 0.0, d[2] / s[2]],
+    ];
     mat3_mul3_f64(&invert(&BRADFORD), &mat3_mul3_f64(&scale, &BRADFORD))
 }
 
@@ -136,7 +140,9 @@ fn curve_tag(cctf: Cctf) -> Vec<u8> {
         _ => {
             tag.extend((TABLE_SIZE as u32).to_be_bytes());
             for i in 0..TABLE_SIZE {
-                let y = cctf.decode(i as f64 / (TABLE_SIZE - 1) as f64).clamp(0.0, 1.0);
+                let y = cctf
+                    .decode(i as f64 / (TABLE_SIZE - 1) as f64)
+                    .clamp(0.0, 1.0);
                 tag.extend(((y * 65535.0).round() as u16).to_be_bytes());
             }
         }
@@ -186,7 +192,10 @@ mod tests {
     #[test]
     fn header_is_well_formed() {
         let p = profile(&SRGB, false);
-        assert_eq!(u32::from_be_bytes(p[0..4].try_into().unwrap()) as usize, p.len());
+        assert_eq!(
+            u32::from_be_bytes(p[0..4].try_into().unwrap()) as usize,
+            p.len()
+        );
         assert_eq!(&p[36..40], b"acsp");
         assert_eq!(&p[12..24], b"mntrRGB XYZ ");
         assert_eq!(p.len() % 4, 0);
@@ -200,7 +209,11 @@ mod tests {
                 xyz(tag(&p, b"rXYZ"))[i] + xyz(tag(&p, b"gXYZ"))[i] + xyz(tag(&p, b"bXYZ"))[i]
             });
             for i in 0..3 {
-                assert!((sum[i] - PCS_D50[i]).abs() < 2e-4, "{}: {sum:?}", space.name);
+                assert!(
+                    (sum[i] - PCS_D50[i]).abs() < 2e-4,
+                    "{}: {sum:?}",
+                    space.name
+                );
             }
         }
     }

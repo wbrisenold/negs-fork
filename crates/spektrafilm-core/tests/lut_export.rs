@@ -108,7 +108,10 @@ fn exported_cube_matches_spectral_render_of_independent_pixels() {
         let mut sized = params.clone();
         sized.io.upscale_factor = 1.0;
         sized.io.photo_long_side_px = Some(12_000);
-        assert_eq!(lut_export::cube(&data, film, paper, sized, 33).unwrap(), text);
+        assert_eq!(
+            lut_export::cube(&data, film, paper, sized, 33).unwrap(),
+            text
+        );
         // Different manual settings must produce a different LUT.
         let mut changed = clean.clone();
         changed.camera.exposure_compensation_ev = -1.0;
@@ -129,10 +132,16 @@ fn explicit_dir_gammas_reach_the_cube() {
 
     let mut stock = RuntimeParams::default();
     stock.film_render.dir_couplers.gamma_samelayer_rgb = Some([0.5159, 0.5934, 0.2829]);
-    assert_eq!(lut_export::cube(&data, film, paper, stock, 5).unwrap(), unset);
+    assert_eq!(
+        lut_export::cube(&data, film, paper, stock, 5).unwrap(),
+        unset
+    );
 
     let mut cooked = RuntimeParams::default();
     cooked.film_render.dir_couplers.gamma_samelayer_rgb = Some([0.52, 0.51, 0.26]);
     cooked.film_render.dir_couplers.gamma_interlayer_r_to_gb = Some([0.16, 0.2]);
-    assert_ne!(rows(&lut_export::cube(&data, film, paper, cooked, 5).unwrap()), rows(&unset));
+    assert_ne!(
+        rows(&lut_export::cube(&data, film, paper, cooked, 5).unwrap()),
+        rows(&unset)
+    );
 }

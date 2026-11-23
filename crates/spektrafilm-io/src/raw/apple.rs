@@ -68,7 +68,11 @@ struct Attempt {
 }
 
 fn generation_name(major: i32) -> &'static str {
-    if major == 9 { "Apple RAW 9" } else { "Apple RAW 8" }
+    if major == 9 {
+        "Apple RAW 9"
+    } else {
+        "Apple RAW 8"
+    }
 }
 
 impl RawDecoder for AppleRawDecoder {
@@ -93,13 +97,17 @@ impl RawDecoder for AppleRawDecoder {
         let tried = if attempt.used == 8 { 8 } else { 9 };
         match first {
             Ok(raw) => return Ok(raw),
-            Err(error) if error.is::<UnsupportedRaw>() => failures.push(format!("{}: {error:#}", generation_name(tried))),
+            Err(error) if error.is::<UnsupportedRaw>() => {
+                failures.push(format!("{}: {error:#}", generation_name(tried)))
+            }
             Err(error) => return Err(error.context(format!("{} failed", generation_name(tried)))),
         }
         if tried == 9 {
             match AppleRawVersion(8).decode(path, options) {
                 Ok(raw) => return Ok(raw),
-                Err(error) if error.is::<UnsupportedRaw>() => failures.push(format!("{}: {error:#}", generation_name(8))),
+                Err(error) if error.is::<UnsupportedRaw>() => {
+                    failures.push(format!("{}: {error:#}", generation_name(8)))
+                }
                 Err(error) => return Err(error.context(format!("{} failed", generation_name(8)))),
             }
         }
@@ -121,12 +129,21 @@ impl RawDecoder for AppleRawVersion {
 /// corrections Negs reads itself ([`crate::lens`]), applied in sensor
 /// coordinates before orientation as on the rawler path. `major` 9 or 8, or
 /// 0 for 9 if the file offers it, else 8 (`attempt` says which).
-fn decode_generation(major: i32, path: &Path, options: RawDecodeOptions, attempt: &mut Attempt) -> Result<RawImage> {
+fn decode_generation(
+    major: i32,
+    path: &Path,
+    options: RawDecodeOptions,
+    attempt: &mut Attempt,
+) -> Result<RawImage> {
     options.white_balance.validate()?;
     // Read before decoding, so Apple can leave such a file unoriented, and
     // so a reduced read stays whole for a file Negs corrects itself.
     let profile_read = options.lens_correction.enabled || options.max_long_side > 0;
-    let profile = if profile_read { crate::lens::read_profile(path) } else { None };
+    let profile = if profile_read {
+        crate::lens::read_profile(path)
+    } else {
+        None
+    };
     let own_lens = profile.is_some() && options.lens_correction.enabled;
     let file = path;
     let path = CString::new(path.as_os_str().as_bytes())?;
@@ -150,7 +167,11 @@ fn decode_generation(major: i32, path: &Path, options: RawDecodeOptions, attempt
             path.as_ptr(),
             major,
             options.apply_orientation.into(),
-            matches!(options.white_balance.mode, crate::RawWhiteBalanceMode::AsShot | crate::RawWhiteBalanceMode::Custom).into(),
+            matches!(
+                options.white_balance.mode,
+                crate::RawWhiteBalanceMode::AsShot | crate::RawWhiteBalanceMode::Custom
+            )
+            .into(),
             options.lens_correction.enabled.into(),
             own_lens.into(),
             options.decode_scale.clamp(0.05, 1.0),
@@ -162,7 +183,11 @@ fn decode_generation(major: i32, path: &Path, options: RawDecodeOptions, attempt
     // The native strings are bounded and snprintf-terminated.
     attempt.used = native.major;
     if native.declined[0] != 0 {
-        attempt.declined = Some(unsafe { CStr::from_ptr(native.declined.as_ptr()) }.to_string_lossy().into_owned());
+        attempt.declined = Some(
+            unsafe { CStr::from_ptr(native.declined.as_ptr()) }
+                .to_string_lossy()
+                .into_owned(),
+        );
     }
     if status != 0 {
         let error = unsafe { CStr::from_ptr(native.error.as_ptr()) }
@@ -181,7 +206,10 @@ fn decode_generation(major: i32, path: &Path, options: RawDecodeOptions, attempt
     // Successful native rendering owns exactly width*height*4 float32
     // components. Drop releases the buffer on every Rust error path.
     let rgba = unsafe { std::slice::from_raw_parts(native.pixels, count * 4) };
-    if !rgba.par_chunks_exact(4).all(|p| p[..3].iter().all(|v| v.is_finite())) {
+    if !rgba
+        .par_chunks_exact(4)
+        .all(|p| p[..3].iter().all(|v| v.is_finite()))
+    {
         return Err(UnsupportedRaw("Apple RAW returned non-finite RGB values".into()).into());
     }
     let mut rgb = vec![0.0f32; count * 3];
@@ -192,15 +220,27 @@ fn decode_generation(major: i32, path: &Path, options: RawDecodeOptions, attempt
     let mut lens_correction_supported = native.lens_correction_supported != 0;
     // Orientation still to apply: Apple left it to us (deferred) or the
     // caller asked for none.
-    let pending = if options.apply_orientation && native.oriented == 0 { native.orientation as u16 } else { 1 };
+    let pending = if options.apply_orientation && native.oriented == 0 {
+        native.orientation as u16
+    } else {
+        1
+    };
     // Apple rotated the pixels by a quarter turn, so its unoriented extent
     // is transposed.
     let transposed = native.oriented != 0 && native.orientation >= 5;
     // Upright, as the image will be once `pending` is applied.
-    let full = if pending >= 5 { (native.full_height, native.full_width) } else { (native.full_width, native.full_height) };
-    let reduced_from = ((native.full_width, native.full_height) != (native.width, native.height)).then_some(full);
-    let decoder_version = Some(unsafe { CStr::from_ptr(native.version.as_ptr()) }
-        .to_string_lossy().into_owned());
+    let full = if pending >= 5 {
+        (native.full_height, native.full_width)
+    } else {
+        (native.full_width, native.full_height)
+    };
+    let reduced_from =
+        ((native.full_width, native.full_height) != (native.width, native.height)).then_some(full);
+    let decoder_version = Some(
+        unsafe { CStr::from_ptr(native.version.as_ptr()) }
+            .to_string_lossy()
+            .into_owned(),
+    );
     drop(native);
     // Unclamped: colours outside sRGB arrive as negative coordinates and
     // the spectral model takes them; only non-finite values are refused.
@@ -211,7 +251,11 @@ fn decode_generation(major: i32, path: &Path, options: RawDecodeOptions, attempt
     let data: Vec<Scalar> = rgb.into_par_iter().map(from_f32).collect();
     let mut image = ImageBuf::from_data(width, height, data);
     if !lens_correction_supported {
-        let profile = if profile_read { profile } else { crate::lens::read_profile(file) };
+        let profile = if profile_read {
+            profile
+        } else {
+            crate::lens::read_profile(file)
+        };
         if let Some(profile) = profile {
             let (w, h) = (image.width as usize, image.height as usize);
             let size = if transposed { (h, w) } else { (w, h) };

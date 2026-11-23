@@ -21,7 +21,12 @@ const REFERENCE_CLIP_LIMIT: f64 = 1.25;
 /// Apply the smooth HNCS-style lightness curve in the selected output space.
 /// The transform is global and scale-independent: matching output luminance
 /// changes all pixels by the same curve, without analyzing neighboring tiles.
-pub fn apply(image: &mut ImageBuf, output_space: &str, encoded: bool, settings: &crate::post::HncsParams) {
+pub fn apply(
+    image: &mut ImageBuf,
+    output_space: &str,
+    encoded: bool,
+    settings: &crate::post::HncsParams,
+) {
     let space = RgbColourspace::output(output_space);
     let xyz_to_rgb = colorspace::mat3_inverse(&space.rgb_to_xyz);
     let white = space.whitepoint_xyz;
@@ -58,7 +63,8 @@ pub fn apply(image: &mut ImageBuf, output_space: &str, encoded: bool, settings: 
         // Match the reference recipe's exposure lift and smooth film shoulder
         // without quantizing Lab a/b or introducing tile-local contrast.
         let lifted = l_star.powf(0.8);
-        let target_l = protect_hncs_lift(l_star, film_curve(lifted), a, b, settings.skin_protection) * 100.0;
+        let target_l =
+            protect_hncs_lift(l_star, film_curve(lifted), a, b, settings.skin_protection) * 100.0;
         let target_fy = (target_l + 16.0) / 116.0;
         let target_fx = target_fy + a / 500.0;
         let target_fz = target_fy - b / 200.0;
@@ -84,7 +90,12 @@ pub fn apply(image: &mut ImageBuf, output_space: &str, encoded: bool, settings: 
 /// Reference-style HNCS path: 8-bit exposure LUT, 8×8 CLAHE, then film LUT.
 /// LUT values truncate to u8 like NumPy's `astype(np.uint8)` upstream.
 /// Color conversion is a Rust approximation, not a bit-exact OpenCV port.
-pub fn apply_reference(image: &mut ImageBuf, output_space: &str, encoded: bool, settings: &crate::post::HncsParams) {
+pub fn apply_reference(
+    image: &mut ImageBuf,
+    output_space: &str,
+    encoded: bool,
+    settings: &crate::post::HncsParams,
+) {
     let source = RgbColourspace::output(output_space);
     let srgb = RgbColourspace::output("sRGB");
     let srgb_xyz_to_rgb = colorspace::mat3_inverse(&srgb.rgb_to_xyz);
@@ -98,19 +109,21 @@ pub fn apply_reference(image: &mut ImageBuf, output_space: &str, encoded: bool, 
     }
 
     let mut lab = vec![[0u8; 3]; w * h];
-    lab.par_iter_mut().zip(image.data.par_chunks_exact(3)).for_each(|(out, pixel)| {
-        let rgb = [0, 1, 2].map(|i| {
-            let value = to_f64(pixel[i]);
-            if encoded {
-                source.cctf.decode(value)
-            } else {
-                value
-            }
+    lab.par_iter_mut()
+        .zip(image.data.par_chunks_exact(3))
+        .for_each(|(out, pixel)| {
+            let rgb = [0, 1, 2].map(|i| {
+                let value = to_f64(pixel[i]);
+                if encoded {
+                    source.cctf.decode(value)
+                } else {
+                    value
+                }
+            });
+            let linear = colorspace::mat3_vec_f64(&to_srgb, rgb);
+            let rgb = linear.map(|value| srgb.cctf.encode(value).clamp(0.0, 1.0));
+            *out = rgb_to_lab8(rgb);
         });
-        let linear = colorspace::mat3_vec_f64(&to_srgb, rgb);
-        let rgb = linear.map(|value| srgb.cctf.encode(value).clamp(0.0, 1.0));
-        *out = rgb_to_lab8(rgb);
-    });
 
     let original_lightness: Vec<u8> = lab.par_iter().map(|pixel| pixel[0]).collect();
     let mut lightness = original_lightness.clone();
@@ -119,29 +132,42 @@ pub fn apply_reference(image: &mut ImageBuf, output_space: &str, encoded: bool, 
     });
     let lifted = lightness.clone();
     clahe_reference(&mut lightness, w, h);
-    lightness.par_iter_mut().zip(lifted.par_iter()).for_each(|(local, lifted)| {
-        let clahe = *lifted as f64 / 255.0
-            + (*local as f64 / 255.0 - *lifted as f64 / 255.0)
-                * (settings.clahe_strength.clamp(0.0, 100.0) / 100.0) as f64;
-        *local = (film_curve(clahe) * 255.0).round().clamp(0.0, 255.0) as u8;
-    });
+    lightness
+        .par_iter_mut()
+        .zip(lifted.par_iter())
+        .for_each(|(local, lifted)| {
+            let clahe = *lifted as f64 / 255.0
+                + (*local as f64 / 255.0 - *lifted as f64 / 255.0)
+                    * (settings.clahe_strength.clamp(0.0, 100.0) / 100.0) as f64;
+            *local = (film_curve(clahe) * 255.0).round().clamp(0.0, 255.0) as u8;
+        });
 
-    image.data.par_chunks_exact_mut(3).zip(lab.par_iter().zip(lightness.par_iter()))
+    image
+        .data
+        .par_chunks_exact_mut(3)
+        .zip(lab.par_iter().zip(lightness.par_iter()))
         .for_each(|(output_pixel, (pixel, light))| {
-        let original_l = pixel[0] as f64 / 255.0;
-        let a = pixel[1] as f64 - 128.0;
-        let b = pixel[2] as f64 - 128.0;
-        let target_l = protect_hncs_lift(original_l, *light as f64 / 255.0, a, b, settings.skin_protection);
-        let linear = lab_to_gamut_rgb_srgb(target_l * 100.0, a, b, &srgb_xyz_to_rgb, srgb_white);
-        let output = colorspace::mat3_vec_f64(&from_srgb, linear);
-        for channel in 0..3 {
-            output_pixel[channel] = from_f64(if encoded {
-                source.cctf.encode(output[channel])
-            } else {
-                output[channel]
-            });
-        }
-    });
+            let original_l = pixel[0] as f64 / 255.0;
+            let a = pixel[1] as f64 - 128.0;
+            let b = pixel[2] as f64 - 128.0;
+            let target_l = protect_hncs_lift(
+                original_l,
+                *light as f64 / 255.0,
+                a,
+                b,
+                settings.skin_protection,
+            );
+            let linear =
+                lab_to_gamut_rgb_srgb(target_l * 100.0, a, b, &srgb_xyz_to_rgb, srgb_white);
+            let output = colorspace::mat3_vec_f64(&from_srgb, linear);
+            for channel in 0..3 {
+                output_pixel[channel] = from_f64(if encoded {
+                    source.cctf.encode(output[channel])
+                } else {
+                    output[channel]
+                });
+            }
+        });
 }
 
 fn smoothstep(edge0: f64, edge1: f64, x: f64) -> f64 {
@@ -157,7 +183,8 @@ fn protect_hncs_lift(original_l: f64, target_l: f64, a: f64, b: f64, amount: f32
     let warm_hue = (1.0 - (hue_distance / 48.0).clamp(0.0, 1.0)).powi(2);
     let skin = smoothstep(5.0, 16.0, chroma) * warm_hue * smoothstep(0.35, 0.72, original_l);
     let highlight = smoothstep(0.78, 0.98, original_l) * 0.55;
-    let protection = (skin.max(highlight) * (amount.clamp(0.0, 100.0) as f64 / 100.0)).clamp(0.0, 1.0);
+    let protection =
+        (skin.max(highlight) * (amount.clamp(0.0, 100.0) as f64 / 100.0)).clamp(0.0, 1.0);
     if target_l > original_l {
         target_l - (target_l - original_l) * protection
     } else {
@@ -166,47 +193,75 @@ fn protect_hncs_lift(original_l: f64, target_l: f64, a: f64, b: f64, amount: f32
 }
 
 fn lab_to_gamut_rgb(
-    target_xyz: [f64; 3], a: f64, b: f64, l_star: f64,
-    xyz_to_rgb: &[[f64; 3]; 3], white: [f64; 3],
+    target_xyz: [f64; 3],
+    a: f64,
+    b: f64,
+    l_star: f64,
+    xyz_to_rgb: &[[f64; 3]; 3],
+    white: [f64; 3],
 ) -> [f64; 3] {
     let fy = (l_star + 16.0) / 116.0;
     let convert = |scale: f64| {
         let fx = fy + (a * scale) / 500.0;
         let fz = fy - (b * scale) / 200.0;
-        colorspace::mat3_vec_f64(xyz_to_rgb, [
-            white[0] * lab_f_inverse(fx),
-            white[1] * lab_f_inverse(fy),
-            white[2] * lab_f_inverse(fz),
-        ])
+        colorspace::mat3_vec_f64(
+            xyz_to_rgb,
+            [
+                white[0] * lab_f_inverse(fx),
+                white[1] * lab_f_inverse(fy),
+                white[2] * lab_f_inverse(fz),
+            ],
+        )
     };
     let output = colorspace::mat3_vec_f64(xyz_to_rgb, target_xyz);
-    if output.iter().all(|v| (0.0..=1.0).contains(v)) { return output; }
+    if output.iter().all(|v| (0.0..=1.0).contains(v)) {
+        return output;
+    }
     let (mut low, mut high) = (0.0, 1.0);
     for _ in 0..12 {
         let mid = (low + high) * 0.5;
-        if convert(mid).iter().all(|v| (0.0..=1.0).contains(v)) { low = mid; } else { high = mid; }
+        if convert(mid).iter().all(|v| (0.0..=1.0).contains(v)) {
+            low = mid;
+        } else {
+            high = mid;
+        }
     }
     convert(low).map(|v| v.clamp(0.0, 1.0))
 }
 
 fn lab_to_gamut_rgb_srgb(
-    l_star: f64, a: f64, b: f64, xyz_to_rgb: &[[f64; 3]; 3], white: [f64; 3],
+    l_star: f64,
+    a: f64,
+    b: f64,
+    xyz_to_rgb: &[[f64; 3]; 3],
+    white: [f64; 3],
 ) -> [f64; 3] {
     let fy = (l_star + 16.0) / 116.0;
     let convert = |scale: f64| {
         let fx = fy + a * scale / 500.0;
         let fz = fy - b * scale / 200.0;
-        colorspace::mat3_vec_f64(xyz_to_rgb, [
-            white[0] * lab_f_inverse(fx), white[1] * lab_f_inverse(fy), white[2] * lab_f_inverse(fz),
-        ])
+        colorspace::mat3_vec_f64(
+            xyz_to_rgb,
+            [
+                white[0] * lab_f_inverse(fx),
+                white[1] * lab_f_inverse(fy),
+                white[2] * lab_f_inverse(fz),
+            ],
+        )
     };
     let output = convert(1.0);
-    if output.iter().all(|v| (0.0..=1.0).contains(v)) { return output; }
+    if output.iter().all(|v| (0.0..=1.0).contains(v)) {
+        return output;
+    }
     let mut low = 0.0;
     let mut high = 1.0;
     for _ in 0..12 {
         let mid = (low + high) * 0.5;
-        if convert(mid).iter().all(|v| (0.0..=1.0).contains(v)) { low = mid; } else { high = mid; }
+        if convert(mid).iter().all(|v| (0.0..=1.0).contains(v)) {
+            low = mid;
+        } else {
+            high = mid;
+        }
     }
     convert(low).map(|v| v.clamp(0.0, 1.0))
 }
@@ -217,12 +272,15 @@ fn clahe_reference(image: &mut [u8], width: usize, height: usize) {
     let padded_w = tile_w * REFERENCE_TILE_GRID;
     let padded_h = tile_h * REFERENCE_TILE_GRID;
     let mut padded = vec![0u8; padded_w * padded_h];
-    padded.par_chunks_mut(padded_w).enumerate().for_each(|(y, row)| {
-        let sy = reflect101(y, height);
-        for (x, value) in row.iter_mut().enumerate() {
-            *value = image[sy * width + reflect101(x, width)];
-        }
-    });
+    padded
+        .par_chunks_mut(padded_w)
+        .enumerate()
+        .for_each(|(y, row)| {
+            let sy = reflect101(y, height);
+            for (x, value) in row.iter_mut().enumerate() {
+                *value = image[sy * width + reflect101(x, width)];
+            }
+        });
 
     let tile_area = tile_w * tile_h;
     let limit = ((REFERENCE_CLIP_LIMIT * tile_area as f64 / 256.0).floor() as u32).max(1);
@@ -293,11 +351,7 @@ fn reflect101(value: usize, size: usize) -> usize {
     }
     let period = 2 * size - 2;
     let p = value % period;
-    if p < size {
-        p
-    } else {
-        period - p
-    }
+    if p < size { p } else { period - p }
 }
 
 fn rgb_to_lab8(rgb: [f64; 3]) -> [u8; 3] {
@@ -374,7 +428,12 @@ mod tests {
             }
         }
 
-        apply(&mut image, "sRGB", false, &crate::post::HncsParams::default());
+        apply(
+            &mut image,
+            "sRGB",
+            false,
+            &crate::post::HncsParams::default(),
+        );
 
         // Both pixels began with identical RGB. A global tone curve must give
         // them identical output even though their surrounding regions differ.

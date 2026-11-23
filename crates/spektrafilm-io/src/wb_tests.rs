@@ -159,39 +159,88 @@ fn selection_reloads_raw_and_export_json_reproduces_preview_pixels() {
 fn byte_loaders_apply_the_same_wb_as_path_loaders() {
     let file = write_fixture();
     let bytes = std::fs::read(&file.0).unwrap();
-    let wbs = RawWhiteBalanceMode::ALL.map(|mode| RawWhiteBalance { mode, temperature: 3200.0, tint: 0.85, ..Default::default() });
+    let wbs = RawWhiteBalanceMode::ALL.map(|mode| RawWhiteBalance {
+        mode,
+        temperature: 3200.0,
+        tint: 0.85,
+        ..Default::default()
+    });
     for wb in wbs {
         let path = load_raw_with_wb(&file.0, wb).unwrap();
-        assert_eq!(load_raw_bytes(&bytes, wb).unwrap().data, path.data, "{:?}", wb.mode);
+        assert_eq!(
+            load_raw_bytes(&bytes, wb).unwrap().data,
+            path.data,
+            "{:?}",
+            wb.mode
+        );
         let (unoriented, orientation) = load_raw_bytes_unoriented(&bytes, wb).unwrap();
         assert_eq!(orientation, 6);
-        assert_eq!(unoriented.oriented(orientation).data, path.data, "{:?}", wb.mode);
+        assert_eq!(
+            unoriented.oriented(orientation).data,
+            path.data,
+            "{:?}",
+            wb.mode
+        );
         for mode in [bounded::Mode::LargeBayer, bounded::Mode::ForceBayer] {
             match bounded::load_raw_bytes_kept(&bytes, wb, 0, 1e9, mode) {
-                Ok(kept) => assert_eq!(kept.image.oriented(kept.orientation).data, path.data, "{:?} {mode:?}", wb.mode),
+                Ok(kept) => assert_eq!(
+                    kept.image.oriented(kept.orientation).data,
+                    path.data,
+                    "{:?} {mode:?}",
+                    wb.mode
+                ),
                 // The linear fixture isn't a Bayer mosaic: forcing the banded
                 // developer refuses it rather than ignoring the WB.
                 Err(e) => assert!(matches!(mode, bounded::Mode::ForceBayer), "{e:#}"),
             }
         }
     }
-    let [as_shot, daylight, tungsten, custom] = wbs.map(|wb| load_raw_bytes(&bytes, wb).unwrap().data);
+    let [as_shot, daylight, tungsten, custom] =
+        wbs.map(|wb| load_raw_bytes(&bytes, wb).unwrap().data);
     assert_ne!(daylight, as_shot);
     assert_ne!(tungsten, daylight);
     assert_ne!(custom, daylight);
-    let custom_daylight = RawWhiteBalance { mode: RawWhiteBalanceMode::Custom, temperature: 6504.0, tint: 1.0, ..Default::default() };
-    assert_eq!(load_raw_bytes(&bytes, custom_daylight).unwrap().data, daylight);
-    assert_eq!(load_raw_bytes(&bytes, RawWhiteBalance::default()).unwrap().data, as_shot);
-    let invalid = RawWhiteBalance { mode: RawWhiteBalanceMode::Custom, temperature: 1000.0, tint: 1.0, ..Default::default() };
+    let custom_daylight = RawWhiteBalance {
+        mode: RawWhiteBalanceMode::Custom,
+        temperature: 6504.0,
+        tint: 1.0,
+        ..Default::default()
+    };
+    assert_eq!(
+        load_raw_bytes(&bytes, custom_daylight).unwrap().data,
+        daylight
+    );
+    assert_eq!(
+        load_raw_bytes(&bytes, RawWhiteBalance::default())
+            .unwrap()
+            .data,
+        as_shot
+    );
+    let invalid = RawWhiteBalance {
+        mode: RawWhiteBalanceMode::Custom,
+        temperature: 1000.0,
+        tint: 1.0,
+        ..Default::default()
+    };
     for error in [
         load_raw_bytes(&bytes, invalid).unwrap_err(),
         load_raw_bytes_unoriented(&bytes, invalid).unwrap_err(),
-        bounded::load_raw_bytes_kept(&bytes, invalid, 0, 1e9, bounded::Mode::LargeBayer).err().unwrap(),
+        bounded::load_raw_bytes_kept(&bytes, invalid, 0, 1e9, bounded::Mode::LargeBayer)
+            .err()
+            .unwrap(),
     ] {
-        assert!(format!("{error:#}").contains("temperature must be between 1667 and 25000 K"), "{error:#}");
+        assert!(
+            format!("{error:#}").contains("temperature must be between 1667 and 25000 K"),
+            "{error:#}"
+        );
     }
     // Inactive custom values are kept but not validated or applied.
-    let inactive = RawWhiteBalance { mode: RawWhiteBalanceMode::Daylight, temperature: f64::NAN, tint: -1.0, ..Default::default() };
+    let inactive = RawWhiteBalance {
+        mode: RawWhiteBalanceMode::Daylight,
+        temperature: f64::NAN,
+        tint: -1.0,
+        ..Default::default()
+    };
     assert_eq!(load_raw_bytes(&bytes, inactive).unwrap().data, daylight);
 }
 
@@ -320,9 +369,14 @@ fn write_xtrans_fixture() -> TempFile {
     camera.clean_make = "Spektrafilm".into();
     camera.clean_model = "X-Trans test".into();
     camera.cfa = rawler::cfa::CFA::new("GGRGGBGGBGGRBRGRBGGGBGGRGGRGGBRBGBRG");
-    camera.color_matrix.insert(Illuminant::D65, vec![0.5, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.75]);
+    camera.color_matrix.insert(
+        Illuminant::D65,
+        vec![0.5, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.75],
+    );
     let (width, height) = (72, 72);
-    let data = (0..width * height).map(|i| (2000 + (i * 7919) % 50000) as u16).collect();
+    let data = (0..width * height)
+        .map(|i| (2000 + (i * 7919) % 50000) as u16)
+        .collect();
     let raw = RawImage::new(
         camera.clone(),
         PixU16::new_with(data, width, height),
@@ -338,7 +392,13 @@ fn write_xtrans_fixture() -> TempFile {
     writer.load_base_tags(&raw).unwrap();
     let mut frame = writer.subframe_on_root(0);
     frame
-        .raw_image(&raw, CropMode::None, DngCompression::Uncompressed, DngPhotometricConversion::Original, 1)
+        .raw_image(
+            &raw,
+            CropMode::None,
+            DngCompression::Uncompressed,
+            DngPhotometricConversion::Original,
+            1,
+        )
         .unwrap();
     frame.finalize().unwrap();
     writer.close().unwrap();
@@ -354,24 +414,52 @@ fn xtrans_demosaic_is_markesteijn_unless_asked() {
     let bytes = std::fs::read(&file.0).unwrap();
     let (default, _) = load_raw_bytes_unoriented(&bytes, RawWhiteBalance::default()).unwrap();
     let mut asked = 0;
-    let (markesteijn, _) = load_raw_bytes_unoriented_with(&bytes, RawWhiteBalance::default(), |pixels| {
-        asked = pixels;
-        XTransDemosaic::Markesteijn
-    })
-    .unwrap();
+    let (markesteijn, _) =
+        load_raw_bytes_unoriented_with(&bytes, RawWhiteBalance::default(), |pixels| {
+            asked = pixels;
+            XTransDemosaic::Markesteijn
+        })
+        .unwrap();
     assert_eq!(asked, 72 * 72);
     assert_eq!(markesteijn.data, default.data);
-    assert_eq!(load_raw_bytes(&bytes, RawWhiteBalance::default()).unwrap().data, default.data);
-    let (bilinear, _) = load_raw_bytes_unoriented_with(&bytes, RawWhiteBalance::default(), |_| XTransDemosaic::Bilinear).unwrap();
-    assert_eq!((bilinear.width, bilinear.height), (default.width, default.height));
+    assert_eq!(
+        load_raw_bytes(&bytes, RawWhiteBalance::default())
+            .unwrap()
+            .data,
+        default.data
+    );
+    let (bilinear, _) = load_raw_bytes_unoriented_with(&bytes, RawWhiteBalance::default(), |_| {
+        XTransDemosaic::Bilinear
+    })
+    .unwrap();
+    assert_eq!(
+        (bilinear.width, bilinear.height),
+        (default.width, default.height)
+    );
     assert_ne!(bilinear.data, default.data);
 
     // The same develop with rawler's own two demosaics, directly.
-    let raw = rawler::decode(&rawler::rawsource::RawSource::new_from_slice(&bytes), &Default::default()).unwrap();
-    let rgb = |xtrans| match (RawDevelop { xtrans, ..RawDevelop::default() }).develop_intermediate(&raw).unwrap() {
+    let raw = rawler::decode(
+        &rawler::rawsource::RawSource::new_from_slice(&bytes),
+        &Default::default(),
+    )
+    .unwrap();
+    let rgb = |xtrans| match (RawDevelop {
+        xtrans,
+        ..RawDevelop::default()
+    })
+    .develop_intermediate(&raw)
+    .unwrap()
+    {
         rawler::imgop::develop::Intermediate::ThreeColor(rgb) => rgb.data,
         _ => panic!("not RGB"),
     };
-    assert_ne!(rgb(XTransDemosaic::Markesteijn), rgb(XTransDemosaic::Bilinear));
-    assert_eq!(rgb(XTransDemosaic::Markesteijn), rgb(XTransDemosaic::default()));
+    assert_ne!(
+        rgb(XTransDemosaic::Markesteijn),
+        rgb(XTransDemosaic::Bilinear)
+    );
+    assert_eq!(
+        rgb(XTransDemosaic::Markesteijn),
+        rgb(XTransDemosaic::default())
+    );
 }

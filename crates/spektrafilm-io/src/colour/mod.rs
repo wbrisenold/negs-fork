@@ -68,21 +68,39 @@ pub struct InputInterpretation {
 
 impl Default for InputInterpretation {
     fn default() -> Self {
-        Self { mode: InputMode::Auto, color_space: SRGB.name.into(), linear: false }
+        Self {
+            mode: InputMode::Auto,
+            color_space: SRGB.name.into(),
+            linear: false,
+        }
     }
 }
 
 /// The colour spaces offered as [`InputMode::Assume`] overrides.
 pub const LOGC3_AWG3: &str = "ARRI LogC3 / AWG3";
-pub const ASSUMABLE: [&str; 6] = ["sRGB", "Display P3", "Adobe RGB (1998)", "ProPhoto RGB", "ITU-R BT.2020", LOGC3_AWG3];
+pub const ASSUMABLE: [&str; 6] = [
+    "sRGB",
+    "Display P3",
+    "Adobe RGB (1998)",
+    "ProPhoto RGB",
+    "ITU-R BT.2020",
+    LOGC3_AWG3,
+];
 
 impl InputInterpretation {
     pub fn assume(color_space: &str, linear: bool) -> Self {
-        Self { mode: InputMode::Assume, color_space: color_space.into(), linear }
+        Self {
+            mode: InputMode::Assume,
+            color_space: color_space.into(),
+            linear,
+        }
     }
 
     pub fn manual() -> Self {
-        Self { mode: InputMode::Manual, ..Self::default() }
+        Self {
+            mode: InputMode::Manual,
+            ..Self::default()
+        }
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -178,7 +196,10 @@ enum Decode {
     /// Manual mode: the values unchanged.
     Passthrough,
     /// Per-channel tone curves, then a matrix to linear sRGB (`None`: none needed).
-    Rgb { curves: [Trc; 3], matrix: Option<[[f64; 3]; 3]> },
+    Rgb {
+        curves: [Trc; 3],
+        matrix: Option<[[f64; 3]; 3]>,
+    },
     /// A grey tone curve into all three channels (a neutral).
     Gray(Trc),
     /// A lookup-table profile to PCS XYZ, then to linear sRGB.
@@ -188,9 +209,9 @@ enum Decode {
 }
 
 const AWG3_CHROMATICITIES: [[f64; 2]; 4] = [
-    [0.3127, 0.3290], // D65 white
-    [0.6840, 0.3130], // red
-    [0.2210, 0.8480], // green
+    [0.3127, 0.3290],  // D65 white
+    [0.6840, 0.3130],  // red
+    [0.2210, 0.8480],  // green
     [0.0861, -0.1020], // blue
 ];
 
@@ -207,7 +228,10 @@ impl Decode {
     fn named(space: &RgbColourspace, linear: bool) -> Self {
         let trc = Trc::Cctf(if linear { Cctf::Linear } else { space.cctf });
         let matrix = (space.name != SRGB.name).then(|| colorspace::icc_rgb_to_rgb(space, &SRGB));
-        Decode::Rgb { curves: [trc.clone(), trc.clone(), trc], matrix }
+        Decode::Rgb {
+            curves: [trc.clone(), trc.clone(), trc],
+            matrix,
+        }
     }
 }
 
@@ -228,7 +252,10 @@ fn chromaticities_to_srgb(c: [[f64; 2]; 4]) -> Option<[[f64; 3]; 3]> {
     let to_xyz: [[f64; 3]; 3] = std::array::from_fn(|i| std::array::from_fn(|j| p[i][j] * s[j]));
     let m = colorspace::mat3_mul3_f64(
         &colorspace::mat3_inverse(&SRGB.rgb_to_xyz),
-        &colorspace::mat3_mul3_f64(&colorspace::bradford_matrix(w, SRGB.whitepoint_xyz), &to_xyz),
+        &colorspace::mat3_mul3_f64(
+            &colorspace::bradford_matrix(w, SRGB.whitepoint_xyz),
+            &to_xyz,
+        ),
     );
     m.iter().flatten().all(|v| v.is_finite()).then_some(m)
 }
@@ -257,7 +284,11 @@ fn display_name(space: &RgbColourspace, linear: bool) -> String {
         "ITU-R BT.2020" => "Rec. 2020",
         other => other,
     };
-    if linear { format!("Linear {name}") } else { name.to_string() }
+    if linear {
+        format!("Linear {name}")
+    } else {
+        name.to_string()
+    }
 }
 
 struct Decision {
@@ -289,7 +320,9 @@ fn cicp(code: [u8; 4]) -> Result<Option<(Decode, String)>, String> {
     if matrix != 0 || full_range != 1 {
         return Ok(None);
     }
-    let Decode::Rgb { matrix, .. } = Decode::named(primaries, false) else { unreachable!() };
+    let Decode::Rgb { matrix, .. } = Decode::named(primaries, false) else {
+        unreachable!()
+    };
     let t = Trc::Cctf(trc);
     let name = match (primaries.name, trc) {
         (_, Cctf::Linear) => display_name(primaries, true),
@@ -297,7 +330,13 @@ fn cicp(code: [u8; 4]) -> Result<Option<(Decode, String)>, String> {
         ("Display P3", Cctf::Srgb) => "Display P3".into(),
         _ => format!("{} primaries, {curve_name}", display_name(primaries, false)),
     };
-    Ok(Some((Decode::Rgb { curves: [t.clone(), t.clone(), t], matrix }, name)))
+    Ok(Some((
+        Decode::Rgb {
+            curves: [t.clone(), t.clone(), t],
+            matrix,
+        },
+        name,
+    )))
 }
 
 /// An embedded ICC profile, if it is usable for these pixels.
@@ -310,11 +349,19 @@ fn embedded(data: &[u8], gray: bool) -> Result<(Decode, String), String> {
         icc::Kind::Lut(lut) => lut.inputs == if gray { 1 } else { 3 },
     };
     if !matches {
-        let what = String::from_utf8_lossy(&profile.colour_space).trim().to_string();
-        return Err(format!("it is a {what} profile, but the image is {}", if gray { "grey" } else { "RGB" }));
+        let what = String::from_utf8_lossy(&profile.colour_space)
+            .trim()
+            .to_string();
+        return Err(format!(
+            "it is a {what} profile, but the image is {}",
+            if gray { "grey" } else { "RGB" }
+        ));
     }
     if !matches!(&profile.class, b"mntr" | b"scnr" | b"spac") {
-        return Err(format!("it is a {} profile, not an image profile", String::from_utf8_lossy(&profile.class).trim()));
+        return Err(format!(
+            "it is a {} profile, not an image profile",
+            String::from_utf8_lossy(&profile.class).trim()
+        ));
     }
     let name = icc::recognise(&kind)
         .map(|(cs, linear)| display_name(cs, linear))
@@ -323,7 +370,10 @@ fn embedded(data: &[u8], gray: bool) -> Result<(Decode, String), String> {
     let decode = match kind {
         icc::Kind::RgbMatrix { colorants, curves } => {
             let [r, g, b] = curves.map(Trc::Icc);
-            Decode::Rgb { curves: [r, g, b], matrix: Some(colorspace::mat3_mul3_f64(&pcs_to_srgb(), &colorants)) }
+            Decode::Rgb {
+                curves: [r, g, b],
+                matrix: Some(colorspace::mat3_mul3_f64(&pcs_to_srgb(), &colorants)),
+            }
         }
         icc::Kind::GrayTrc(curve) => Decode::Gray(Trc::Icc(curve)),
         icc::Kind::Lut(lut) => Decode::Lut(lut),
@@ -335,20 +385,39 @@ fn automatic(info: &FileColour) -> Result<Decision> {
     let mut warning = None;
     if let Some(code) = info.png.as_ref().and_then(|p| p.cicp) {
         match cicp(code) {
-            Ok(Some((decode, encoding))) => return Ok(Decision { decode, source: InputSource::PngCicp, encoding, warning }),
+            Ok(Some((decode, encoding))) => {
+                return Ok(Decision {
+                    decode,
+                    source: InputSource::PngCicp,
+                    encoding,
+                    warning,
+                });
+            }
             Ok(None) => warning = Some(format!("Ignored unsupported cICP colour code {code:?}.")),
             Err(e) => bail!("This PNG can't be read correctly: {e}."),
         }
     }
     if let Some(data) = &info.icc {
         match embedded(data, info.gray) {
-            Ok((decode, encoding)) => return Ok(Decision { decode, source: InputSource::EmbeddedProfile, encoding, warning }),
+            Ok((decode, encoding)) => {
+                return Ok(Decision {
+                    decode,
+                    source: InputSource::EmbeddedProfile,
+                    encoding,
+                    warning,
+                });
+            }
             Err(e) => warning = Some(format!("Ignored the embedded colour profile: {e}.")),
         }
     }
     if let Some(png) = &info.png {
         if png.srgb {
-            return Ok(Decision { decode: Decode::named(&SRGB, false), source: InputSource::PngSrgb, encoding: "sRGB".into(), warning });
+            return Ok(Decision {
+                decode: Decode::named(&SRGB, false),
+                source: InputSource::PngSrgb,
+                encoding: "sRGB".into(),
+                warning,
+            });
         }
         if png.gamma.is_some() || png.chromaticities.is_some() {
             let matrix = match png.chromaticities {
@@ -360,14 +429,34 @@ fn automatic(info: &FileColour) -> Result<Decision> {
                 None => Trc::Cctf(Cctf::Srgb),
             };
             let encoding = match png.gamma {
-                Some(g) => format!("Gamma {:.2}{}", 1.0 / g, if matrix.is_some() { ", stated primaries" } else { ", sRGB primaries" }),
+                Some(g) => format!(
+                    "Gamma {:.2}{}",
+                    1.0 / g,
+                    if matrix.is_some() {
+                        ", stated primaries"
+                    } else {
+                        ", sRGB primaries"
+                    }
+                ),
                 None => "sRGB curve, stated primaries".into(),
             };
             if png.chromaticities.is_some() && matrix.is_none() {
                 warning = Some("Ignored invalid cHRM chromaticities.".into());
             }
-            let decode = if info.gray { Decode::Gray(curve) } else { Decode::Rgb { curves: [curve.clone(), curve.clone(), curve], matrix } };
-            return Ok(Decision { decode, source: InputSource::PngGamma, encoding, warning });
+            let decode = if info.gray {
+                Decode::Gray(curve)
+            } else {
+                Decode::Rgb {
+                    curves: [curve.clone(), curve.clone(), curve],
+                    matrix,
+                }
+            };
+            return Ok(Decision {
+                decode,
+                source: InputSource::PngGamma,
+                encoding,
+                warning,
+            });
         }
     }
     if let Some(colour) = info.exif.as_deref().and_then(tags::exif_colour) {
@@ -375,10 +464,20 @@ fn automatic(info: &FileColour) -> Result<Decision> {
             tags::ExifColour::Srgb => &SRGB,
             tags::ExifColour::AdobeRgb => space("Adobe RGB (1998)"),
         };
-        return Ok(Decision { decode: Decode::named(cs, false), source: InputSource::Exif, encoding: display_name(cs, false), warning });
+        return Ok(Decision {
+            decode: Decode::named(cs, false),
+            source: InputSource::Exif,
+            encoding: display_name(cs, false),
+            warning,
+        });
     }
     let linear = info.float;
-    Ok(Decision { decode: Decode::named(&SRGB, linear), source: InputSource::Untagged, encoding: display_name(&SRGB, linear), warning })
+    Ok(Decision {
+        decode: Decode::named(&SRGB, linear),
+        source: InputSource::Untagged,
+        encoding: display_name(&SRGB, linear),
+        warning,
+    })
 }
 
 fn summary(source: InputSource, encoding: &str) -> String {
@@ -397,10 +496,17 @@ fn summary(source: InputSource, encoding: &str) -> String {
 
 /// Decides how to read a decoded non-RAW file and converts it to the
 /// engine's representation (or passes it through in manual mode).
-pub fn convert(image: image::DynamicImage, info: &FileColour, interpretation: &InputInterpretation, png: bool) -> Result<(ImageBuf, InputColour)> {
+pub fn convert(
+    image: image::DynamicImage,
+    info: &FileColour,
+    interpretation: &InputInterpretation,
+    png: bool,
+) -> Result<(ImageBuf, InputColour)> {
     interpretation.validate()?;
     if info.cmyk {
-        bail!("CMYK images aren't supported. Convert the image to RGB with its profile in an image editor first.");
+        bail!(
+            "CMYK images aren't supported. Convert the image to RGB with its profile in an image editor first."
+        );
     }
     let auto = automatic(info)?;
     let automatic_summary = summary(auto.source, &auto.encoding);
@@ -416,10 +522,20 @@ pub fn convert(image: image::DynamicImage, info: &FileColour, interpretation: &I
             let (cs, linear) = (space(&interpretation.color_space), interpretation.linear);
             let decode = Decode::named(cs, linear);
             let decode = match (info.gray, decode) {
-                (true, Decode::Rgb { curves: [c, ..], .. }) => Decode::Gray(c),
+                (
+                    true,
+                    Decode::Rgb {
+                        curves: [c, ..], ..
+                    },
+                ) => Decode::Gray(c),
                 (_, d) => d,
             };
-            Decision { decode, source: InputSource::Override, encoding: display_name(cs, linear), warning: None }
+            Decision {
+                decode,
+                source: InputSource::Override,
+                encoding: display_name(cs, linear),
+                warning: None,
+            }
         }
         InputMode::Manual if png => Decision {
             decode: Decode::named(&SRGB, false),
@@ -442,7 +558,14 @@ pub fn convert(image: image::DynamicImage, info: &FileColour, interpretation: &I
     let non_finite: usize = image
         .data
         .par_iter_mut()
-        .map(|v| if v.is_finite() { 0 } else { *v = from_f64(0.0); 1 })
+        .map(|v| {
+            if v.is_finite() {
+                0
+            } else {
+                *v = from_f64(0.0);
+                1
+            }
+        })
         .sum();
     let mut warning = decision.warning;
     if non_finite > 0 {
@@ -450,15 +573,18 @@ pub fn convert(image: image::DynamicImage, info: &FileColour, interpretation: &I
         warning = Some(warning.map_or(note.clone(), |w| format!("{w} {note}")));
     }
     let summary = summary(decision.source, &decision.encoding);
-    Ok((image, InputColour {
-        source: decision.source,
-        encoding: decision.encoding,
-        automatic: automatic_summary,
-        summary,
-        warning,
-        scene_referred,
-        linear_srgb,
-    }))
+    Ok((
+        image,
+        InputColour {
+            source: decision.source,
+            encoding: decision.encoding,
+            automatic: automatic_summary,
+            summary,
+            warning,
+            scene_referred,
+            linear_srgb,
+        },
+    ))
 }
 
 /// The largest integer sample value, or `None` for float data.
@@ -479,7 +605,9 @@ fn curve_fn(trc: &Trc, max: Option<u32>) -> Box<dyn Fn(f32) -> f64 + Send + Sync
     }
     match max {
         Some(max) => {
-            let table: Vec<f64> = (0..=max).map(|i| trc.decode(i as f64 / max as f64)).collect();
+            let table: Vec<f64> = (0..=max)
+                .map(|i| trc.decode(i as f64 / max as f64))
+                .collect();
             let scale = max as f32;
             Box::new(move |v| table[((v * scale).round() as usize).min(table.len() - 1)])
         }
@@ -494,37 +622,58 @@ fn apply(image: image::DynamicImage, decode: &Decode) -> Result<ImageBuf> {
     let (w, h) = (image.width(), image.height());
     let max = integer_max(&image);
     let out = match decode {
-        Decode::Passthrough => image.to_rgb32f().into_raw().into_par_iter().map(|v| from_f64(f64::from(v))).collect(),
+        Decode::Passthrough => image
+            .to_rgb32f()
+            .into_raw()
+            .into_par_iter()
+            .map(|v| from_f64(f64::from(v)))
+            .collect(),
         Decode::Rgb { curves, matrix } => {
             let rgb = image.to_rgb32f().into_raw();
             drop(image);
-            let f = [curve_fn(&curves[0], max), curve_fn(&curves[1], max), curve_fn(&curves[2], max)];
+            let f = [
+                curve_fn(&curves[0], max),
+                curve_fn(&curves[1], max),
+                curve_fn(&curves[2], max),
+            ];
             let mut out: Vec<Scalar> = vec![from_f64(0.0); rgb.len()];
-            out.par_chunks_exact_mut(3).zip(rgb.par_chunks_exact(3)).for_each(|(o, p)| {
-                let lin = [f[0](p[0]), f[1](p[1]), f[2](p[2])];
-                let v = matrix.as_ref().map_or(lin, |m| colorspace::mat3_vec_f64(m, lin));
-                o.copy_from_slice(&v.map(from_f64));
-            });
+            out.par_chunks_exact_mut(3)
+                .zip(rgb.par_chunks_exact(3))
+                .for_each(|(o, p)| {
+                    let lin = [f[0](p[0]), f[1](p[1]), f[2](p[2])];
+                    let v = matrix
+                        .as_ref()
+                        .map_or(lin, |m| colorspace::mat3_vec_f64(m, lin));
+                    o.copy_from_slice(&v.map(from_f64));
+                });
             out
         }
         Decode::Gray(trc) => {
             let luma = image.to_luma32f().into_raw();
             let f = curve_fn(trc, max);
             let mut out: Vec<Scalar> = vec![from_f64(0.0); luma.len() * 3];
-            out.par_chunks_exact_mut(3).zip(luma.par_iter()).for_each(|(o, &v)| o.fill(from_f64(f(v))));
+            out.par_chunks_exact_mut(3)
+                .zip(luma.par_iter())
+                .for_each(|(o, &v)| o.fill(from_f64(f(v))));
             out
         }
         Decode::Lut(lut) => {
             let gray = lut.inputs == 1;
-            let src = if gray { image.to_luma32f().into_raw() } else { image.to_rgb32f().into_raw() };
+            let src = if gray {
+                image.to_luma32f().into_raw()
+            } else {
+                image.to_rgb32f().into_raw()
+            };
             drop(image);
             let to_srgb = pcs_to_srgb();
             let mut out: Vec<Scalar> = vec![from_f64(0.0); w as usize * h as usize * 3];
-            out.par_chunks_exact_mut(3).zip(src.par_chunks_exact(lut.inputs)).for_each(|(o, p)| {
-                let device: Vec<f64> = p.iter().map(|&v| f64::from(v)).collect();
-                let v = colorspace::mat3_vec_f64(&to_srgb, lut.eval(&device));
-                o.copy_from_slice(&v.map(from_f64));
-            });
+            out.par_chunks_exact_mut(3)
+                .zip(src.par_chunks_exact(lut.inputs))
+                .for_each(|(o, p)| {
+                    let device: Vec<f64> = p.iter().map(|&v| f64::from(v)).collect();
+                    let v = colorspace::mat3_vec_f64(&to_srgb, lut.eval(&device));
+                    o.copy_from_slice(&v.map(from_f64));
+                });
             out
         }
         Decode::LogC3 => {
@@ -533,11 +682,13 @@ fn apply(image: image::DynamicImage, decode: &Decode) -> Result<ImageBuf> {
             let awg3_to_srgb = chromaticities_to_srgb(AWG3_CHROMATICITIES)
                 .expect("ARRI Wide Gamut 3 primaries are valid");
             let mut out: Vec<Scalar> = vec![from_f64(0.0); encoded.len()];
-            out.par_chunks_exact_mut(3).zip(encoded.par_chunks_exact(3)).for_each(|(o, p)| {
-                let linear_awg3 = std::array::from_fn(|i| decode_logc3_ei800(f64::from(p[i])));
-                let linear_srgb = colorspace::mat3_vec_f64(&awg3_to_srgb, linear_awg3);
-                o.copy_from_slice(&linear_srgb.map(from_f64));
-            });
+            out.par_chunks_exact_mut(3)
+                .zip(encoded.par_chunks_exact(3))
+                .for_each(|(o, p)| {
+                    let linear_awg3 = std::array::from_fn(|i| decode_logc3_ei800(f64::from(p[i])));
+                    let linear_srgb = colorspace::mat3_vec_f64(&awg3_to_srgb, linear_awg3);
+                    o.copy_from_slice(&linear_srgb.map(from_f64));
+                });
             out
         }
     };

@@ -48,7 +48,15 @@ struct Step {
 }
 
 fn step(what: &'static str, hit: bool, edit: impl Fn(&mut RuntimeParams) + 'static) -> Step {
-    Step { what, edit: Box::new(edit), film: "kodak_portra_400", frame: 1, slot: 0, size: (96, 64), hit }
+    Step {
+        what,
+        edit: Box::new(edit),
+        film: "kodak_portra_400",
+        frame: 1,
+        slot: 0,
+        size: (96, 64),
+        hit,
+    }
 }
 
 #[test]
@@ -67,36 +75,96 @@ fn a_kept_film_side_renders_what_the_whole_chain_renders() {
         step("magenta filter", true, |p| p.enlarger.m_filter_shift = 0.05),
         step("yellow filter", true, |p| p.enlarger.y_filter_shift = -0.04),
         step("print glare", true, |p| p.print_render.glare.percent = 0.05),
-        step("scanner unsharp mask", true, |p| p.scanner.unsharp_mask = [0.6, 0.5]),
+        step("scanner unsharp mask", true, |p| {
+            p.scanner.unsharp_mask = [0.6, 0.5]
+        }),
         step("scanner lens blur", true, |p| p.scanner.lens_blur = 0.7),
         step("linear output", true, |p| p.io.output_cctf_encoding = false),
         step("scan the film", true, |p| p.io.scan_film = true),
-        step("print exposure, scanning the film", true, |p| p.enlarger.print_exposure = 0.8),
+        step("print exposure, scanning the film", true, |p| {
+            p.enlarger.print_exposure = 0.8
+        }),
         step("print again", true, |p| p.io.scan_film = false),
-        step("exposure compensation", false, |p| p.camera.exposure_compensation_ev = 0.3),
-        step("print exposure after a miss", true, |p| p.enlarger.print_exposure = 1.1),
-        step("halation", false, |p| p.film_render.halation.halation_amount = 0.5),
-        step("scatter", false, |p| p.film_render.halation.scatter_amount = 0.7),
-        step("DIR couplers", false, |p| p.film_render.dir_couplers.amount = 0.7),
+        step("exposure compensation", false, |p| {
+            p.camera.exposure_compensation_ev = 0.3
+        }),
+        step("print exposure after a miss", true, |p| {
+            p.enlarger.print_exposure = 1.1
+        }),
+        step("halation", false, |p| {
+            p.film_render.halation.halation_amount = 0.5
+        }),
+        step("scatter", false, |p| {
+            p.film_render.halation.scatter_amount = 0.7
+        }),
+        step("DIR couplers", false, |p| {
+            p.film_render.dir_couplers.amount = 0.7
+        }),
         step("grain blur", false, |p| p.film_render.grain.blur = 0.8),
-        step("print exposure, grain kept", true, |p| p.enlarger.print_exposure = 1.2),
+        step("print exposure, grain kept", true, |p| {
+            p.enlarger.print_exposure = 1.2
+        }),
         step("grain off", false, |p| p.film_render.grain.active = false),
         step("camera lens blur", false, |p| p.camera.lens_blur_um = 2.0),
-        step("highlight boost", false, |p| p.film_render.halation.boost_ev = 0.5),
-        step("auto exposure off", false, |p| p.camera.auto_exposure = false),
+        step("highlight boost", false, |p| {
+            p.film_render.halation.boost_ev = 0.5
+        }),
+        step("auto exposure off", false, |p| {
+            p.camera.auto_exposure = false
+        }),
         step("input decoding", false, |p| p.io.input_cctf_decoding = true),
         step("Prep", false, |p| p.prep.shadows = -40.),
-        step("print exposure with Prep", true, |p| p.enlarger.print_exposure = 0.9),
-        step("Prep exposure only", false, |p| p.prep = spektrafilm_core::prep::PrepParams { exposure_ev: 0.4, ..Default::default() }),
-        step("print exposure with Prep exposure", true, |p| p.enlarger.print_exposure = 1.0),
+        step("print exposure with Prep", true, |p| {
+            p.enlarger.print_exposure = 0.9
+        }),
+        step("Prep exposure only", false, |p| {
+            p.prep = spektrafilm_core::prep::PrepParams {
+                exposure_ev: 0.4,
+                ..Default::default()
+            }
+        }),
+        step("print exposure with Prep exposure", true, |p| {
+            p.enlarger.print_exposure = 1.0
+        }),
     ];
-    steps.push(Step { film: "kodak_gold_200", ..step("another film", false, |_| {}) });
-    steps.push(Step { film: "kodak_gold_200", ..step("its print exposure", true, |p| p.enlarger.print_exposure = 1.4) });
-    steps.push(Step { film: "kodak_gold_200", frame: 2, ..step("another frame name", false, |_| {}) });
-    steps.push(Step { film: "kodak_gold_200", frame: 2, slot: 1, ..step("another slot", false, |_| {}) });
-    steps.push(Step { film: "kodak_gold_200", frame: 2, ..step("slot 0 kept beside slot 1", true, |_| {}) });
-    steps.push(Step { film: "kodak_gold_200", frame: 2, size: (80, 64), ..step("another size", false, |_| {}) });
-    steps.push(Step { film: "kodak_gold_200", frame: 2, size: (80, 64), ..step("that size again", true, |_| {}) });
+    steps.push(Step {
+        film: "kodak_gold_200",
+        ..step("another film", false, |_| {})
+    });
+    steps.push(Step {
+        film: "kodak_gold_200",
+        ..step("its print exposure", true, |p| {
+            p.enlarger.print_exposure = 1.4
+        })
+    });
+    steps.push(Step {
+        film: "kodak_gold_200",
+        frame: 2,
+        ..step("another frame name", false, |_| {})
+    });
+    steps.push(Step {
+        film: "kodak_gold_200",
+        frame: 2,
+        slot: 1,
+        ..step("another slot", false, |_| {})
+    });
+    steps.push(Step {
+        film: "kodak_gold_200",
+        frame: 2,
+        ..step("slot 0 kept beside slot 1", true, |_| {})
+    });
+    steps.push(Step {
+        film: "kodak_gold_200",
+        frame: 2,
+        size: (80, 64),
+        ..step("another size", false, |_| {})
+    });
+    steps.push(Step {
+        film: "kodak_gold_200",
+        frame: 2,
+        size: (80, 64),
+        ..step("that size again", true, |_| {})
+    });
 
     let mut params = RuntimeParams::default();
     params.camera.auto_exposure = true;
@@ -112,25 +180,58 @@ fn a_kept_film_side_renders_what_the_whole_chain_renders() {
         hits = gpu.film_cache_hits();
         // The whole chain, as without the cache; a render that doesn't ask
         // for the cache (a thumbnail) leaves the kept one alone.
-        let whole = pipeline(step.film, &params).process_resident_borrowed(&source, &gpu).expect("resident render");
-        assert_eq!(gpu.film_cache_hits(), hits, "{}: an uncached render hit", step.what);
-        assert!(bits(&kept) == bits(&whole), "{}: kept film side renders differently", step.what);
-        assert_eq!(hit, step.hit, "{}: hit {hit}, expected {}", step.what, step.hit);
+        let whole = pipeline(step.film, &params)
+            .process_resident_borrowed(&source, &gpu)
+            .expect("resident render");
+        assert_eq!(
+            gpu.film_cache_hits(),
+            hits,
+            "{}: an uncached render hit",
+            step.what
+        );
+        assert!(
+            bits(&kept) == bits(&whole),
+            "{}: kept film side renders differently",
+            step.what
+        );
+        assert_eq!(
+            hit, step.hit,
+            "{}: hit {hit}, expected {}",
+            step.what, step.hit
+        );
     }
 
     // Released (another photograph, the editor closed, memory pressure):
     // nothing is kept, and the next render misses and renders the same.
     let held = gpu.film_cache_bytes();
-    assert_eq!(held, (80 * 64 + 96 * 64) * 12, "slot 0 at 80×64 and slot 1 at 96×64 are kept");
+    assert_eq!(
+        held,
+        (80 * 64 + 96 * 64) * 12,
+        "slot 0 at 80×64 and slot 1 at 96×64 are kept"
+    );
     assert_eq!(gpu.release_film_cache(), held);
     assert_eq!(gpu.film_cache_bytes(), 0, "every kept film side is gone");
     assert_eq!(gpu.release_film_cache(), 0, "releasing again is harmless");
     let source = image(80, 64);
-    let render = || pipeline("kodak_gold_200", &params).with_film_cache(0, 2).process_resident_borrowed(&source, &gpu).unwrap();
+    let render = || {
+        pipeline("kodak_gold_200", &params)
+            .with_film_cache(0, 2)
+            .process_resident_borrowed(&source, &gpu)
+            .unwrap()
+    };
     let after = render();
-    assert_eq!(gpu.film_cache_hits(), hits, "a released film side was reused");
-    let whole = pipeline("kodak_gold_200", &params).process_resident_borrowed(&source, &gpu).unwrap();
-    assert!(bits(&after) == bits(&whole), "the render after a release renders differently");
+    assert_eq!(
+        gpu.film_cache_hits(),
+        hits,
+        "a released film side was reused"
+    );
+    let whole = pipeline("kodak_gold_200", &params)
+        .process_resident_borrowed(&source, &gpu)
+        .unwrap();
+    assert!(
+        bits(&after) == bits(&whole),
+        "the render after a release renders differently"
+    );
     assert_eq!(gpu.film_cache_bytes(), 80 * 64 * 12, "kept again");
     assert!(bits(&render()) == bits(&whole));
     assert_eq!(gpu.film_cache_hits(), hits + 1, "and reused");

@@ -45,7 +45,10 @@ pub(super) fn read(src: &RawSource) -> Option<Profile> {
         _ => return None,
     };
     let opcodes = parse(&bytes)?;
-    Some(Profile { source: Source::Dng, model: Model::Dng(opcodes) })
+    Some(Profile {
+        source: Source::Dng,
+        model: Model::Dng(opcodes),
+    })
 }
 
 fn be_u32(b: &[u8], at: usize) -> Option<u32> {
@@ -67,7 +70,10 @@ fn centre(b: &[u8], at: usize) -> Option<(f64, f64)> {
 pub(super) fn parse(b: &[u8]) -> Option<Opcodes> {
     let count = be_u32(b, 0)?;
     let mut at = 4;
-    let mut out = Opcodes { warp: None, vignette: None };
+    let mut out = Opcodes {
+        warp: None,
+        vignette: None,
+    };
     for _ in 0..count.min(256) {
         let id = be_u32(b, at)?;
         let size = be_u32(b, at + 12)? as usize;
@@ -141,18 +147,23 @@ impl Opcodes {
 
 impl Placed<'_> {
     pub(super) fn gain(&self, x: f64, y: f64) -> f64 {
-        let Some((v, cx, cy, m)) = self.vignette else { return 1.0 };
+        let Some((v, cx, cy, m)) = self.vignette else {
+            return 1.0;
+        };
         let r2 = ((x - cx) / m).powi(2) + ((y - cy) / m).powi(2);
         let k = &v.k;
         1.0 + r2 * (k[0] + r2 * (k[1] + r2 * (k[2] + r2 * (k[3] + r2 * k[4]))))
     }
 
     pub(super) fn splits_planes(&self) -> bool {
-        self.warp.is_some_and(|(w, ..)| w.planes.windows(2).any(|p| p[0] != p[1]))
+        self.warp
+            .is_some_and(|(w, ..)| w.planes.windows(2).any(|p| p[0] != p[1]))
     }
 
     pub(super) fn source(&self, plane: usize, x: f64, y: f64) -> (f64, f64) {
-        let Some((w, cx, cy, m)) = self.warp else { return (x, y) };
+        let Some((w, cx, cy, m)) = self.warp else {
+            return (x, y);
+        };
         let k = &w.planes[plane.min(w.planes.len() - 1)];
         let (dx, dy) = ((x - cx) / m, (y - cy) / m);
         let r2 = dx * dx + dy * dy;

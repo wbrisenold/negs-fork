@@ -14,8 +14,8 @@
 //! over the source file's camera metadata read by [`read_metadata`].
 
 pub mod border;
-pub mod brightness;
 pub mod bounded;
+pub mod brightness;
 pub mod colour;
 pub mod crop;
 pub mod encoding;
@@ -31,10 +31,15 @@ mod white_balance;
 
 pub use colour::{InputColour, InputInterpretation, InputMode};
 pub use metadata::{ImageMetadata, read_metadata};
-pub use save::save_image;
 pub use raw::LensCorrection;
 pub use rawler::imgop::develop::XTransDemosaic;
-pub use white_balance::{CanonR5WhiteBalancePreset, DarktableCameraWhiteBalance, DarktableCameraWhiteBalancePreset, DarktableCameraWhiteBalanceTuning, ItcwbEstimate, RawWhiteBalance, RawWhiteBalanceMethod, RawWhiteBalanceMode, darktable_camera_white_balance, estimate_itcwb, estimate_itcwb_with_method};
+pub use save::save_image;
+pub use white_balance::{
+    CanonR5WhiteBalancePreset, DarktableCameraWhiteBalance, DarktableCameraWhiteBalancePreset,
+    DarktableCameraWhiteBalanceTuning, ItcwbEstimate, RawWhiteBalance, RawWhiteBalanceMethod,
+    RawWhiteBalanceMode, darktable_camera_white_balance, estimate_itcwb,
+    estimate_itcwb_with_method,
+};
 
 /// Read the exact per-channel As Shot multipliers recorded in a RAW file.
 /// These are camera values, not a guessed Kelvin/tint conversion.
@@ -113,7 +118,14 @@ pub fn load_image(path: &Path, formats: Formats) -> Result<ImageBuf> {
 
 /// [`load_image_colour`] with automatic input interpretation, without the report.
 pub fn load_image_with_wb(path: &Path, formats: Formats, wb: RawWhiteBalance) -> Result<ImageBuf> {
-    Ok(load_image_colour(path, formats, wb, LensCorrection::default(), &InputInterpretation::default())?.image)
+    Ok(load_image_colour(
+        path,
+        formats,
+        wb,
+        LensCorrection::default(),
+        &InputInterpretation::default(),
+    )?
+    .image)
 }
 
 /// An input in the engine's representation, and what it was read as.
@@ -164,7 +176,9 @@ pub fn load_image_colour_limited(
             },
             raw::RawDecoderPreference::Auto,
         )?;
-        let full_size = decoded.reduced_from.unwrap_or((decoded.image.width, decoded.image.height));
+        let full_size = decoded
+            .reduced_from
+            .unwrap_or((decoded.image.width, decoded.image.height));
         return Ok(LoadedImage {
             image: decoded.image,
             as_shot_white_balance: decoded.as_shot_white_balance,
@@ -200,12 +214,17 @@ pub fn load_image_colour_scaled(
         let decoded = raw::decode_raw(
             path,
             raw::RawDecodeOptions {
-                white_balance: wb, apply_orientation: true, lens_correction: lens, decode_scale,
+                white_balance: wb,
+                apply_orientation: true,
+                lens_correction: lens,
+                decode_scale,
                 max_long_side: 0,
             },
             decoder,
         )?;
-        let full_size = decoded.reduced_from.unwrap_or((decoded.image.width, decoded.image.height));
+        let full_size = decoded
+            .reduced_from
+            .unwrap_or((decoded.image.width, decoded.image.height));
         return Ok(LoadedImage {
             image: decoded.image,
             as_shot_white_balance: decoded.as_shot_white_balance,
@@ -218,44 +237,71 @@ pub fn load_image_colour_scaled(
         bail!("unsupported image format: .{ext} (supported: tiff, png, raw)");
     }
     let (img, info, format) = decode_no_limits(path)?;
-    let (image, colour) = colour::convert(img, &info, interpretation, format == image::ImageFormat::Png)?;
+    let (image, colour) = colour::convert(
+        img,
+        &info,
+        interpretation,
+        format == image::ImageFormat::Png,
+    )?;
     let full_size = (image.width, image.height);
-    Ok(LoadedImage { image, as_shot_white_balance: None, colour, lens_correction_supported: false, full_size })
+    Ok(LoadedImage {
+        image,
+        as_shot_white_balance: None,
+        colour,
+        lens_correction_supported: false,
+        full_size,
+    })
 }
 
 /// Decode with the `image` crate's memory limits disabled and apply the
 /// EXIF/TIFF orientation tag, keeping what the file says about its colour.
 /// The default 512 MiB cap rejects large float TIFFs (a 60 MP 32-bit RGB
 /// frame alone is ~720 MiB). Local files are trusted.
-fn decode_no_limits(path: &Path) -> Result<(image::DynamicImage, colour::FileColour, image::ImageFormat)> {
+fn decode_no_limits(
+    path: &Path,
+) -> Result<(image::DynamicImage, colour::FileColour, image::ImageFormat)> {
     let mut reader = image::ImageReader::open(path)
         .with_context(|| format!("opening image: {}", path.display()))?
         .with_guessed_format()
         .with_context(|| format!("detecting image format: {}", path.display()))?;
     reader.no_limits();
-    let format = reader.format().with_context(|| format!("unknown image format: {}", path.display()))?;
+    let format = reader
+        .format()
+        .with_context(|| format!("unknown image format: {}", path.display()))?;
     let mut decoder = reader
         .into_decoder()
         .with_context(|| format!("decoding image: {}", path.display()))?;
     use image::ImageDecoder;
-    let orientation = decoder.orientation().unwrap_or(image::metadata::Orientation::NoTransforms);
+    let orientation = decoder
+        .orientation()
+        .unwrap_or(image::metadata::Orientation::NoTransforms);
     let open = || std::fs::File::open(path).map(std::io::BufReader::new);
     let mut info = colour::FileColour {
         icc: decoder.icc_profile().ok().flatten(),
         exif: decoder.exif_metadata().ok().flatten(),
-        cmyk: matches!(decoder.original_color_type(), image::ExtendedColorType::Cmyk8 | image::ExtendedColorType::Cmyk16),
+        cmyk: matches!(
+            decoder.original_color_type(),
+            image::ExtendedColorType::Cmyk8 | image::ExtendedColorType::Cmyk16
+        ),
         ..Default::default()
     };
     match format {
         image::ImageFormat::Png => info.png = open().ok().and_then(colour::tags::png_chunks),
-        image::ImageFormat::Jpeg => info.cmyk |= open().ok().and_then(colour::tags::jpeg_components) == Some(4),
-        image::ImageFormat::Tiff if info.icc.is_none() => info.icc = open().ok().and_then(colour::tags::tiff_icc),
+        image::ImageFormat::Jpeg => {
+            info.cmyk |= open().ok().and_then(colour::tags::jpeg_components) == Some(4)
+        }
+        image::ImageFormat::Tiff if info.icc.is_none() => {
+            info.icc = open().ok().and_then(colour::tags::tiff_icc)
+        }
         _ => {}
     }
     let mut img = image::DynamicImage::from_decoder(decoder)
         .with_context(|| format!("decoding image: {}", path.display()))?;
     img.apply_orientation(orientation);
-    info.float = matches!(img, image::DynamicImage::ImageRgb32F(_) | image::DynamicImage::ImageRgba32F(_));
+    info.float = matches!(
+        img,
+        image::DynamicImage::ImageRgb32F(_) | image::DynamicImage::ImageRgba32F(_)
+    );
     info.gray = !img.color().has_color();
     Ok((img, info, format))
 }
@@ -303,7 +349,12 @@ pub(crate) struct RawlerImage {
     pub lens: Option<lens::Source>,
 }
 
-fn load_raw_rawler(path: &Path, orient: bool, wb: RawWhiteBalance, lens: LensCorrection) -> Result<RawlerImage> {
+fn load_raw_rawler(
+    path: &Path,
+    orient: bool,
+    wb: RawWhiteBalance,
+    lens: LensCorrection,
+) -> Result<RawlerImage> {
     use rawler::rawsource::RawSource;
     wb.validate()?;
     let src =
@@ -315,7 +366,14 @@ fn load_raw_rawler(path: &Path, orient: bool, wb: RawWhiteBalance, lens: LensCor
 /// which have no files.
 pub fn load_raw_bytes(bytes: &[u8], wb: RawWhiteBalance) -> Result<ImageBuf> {
     wb.validate()?;
-    Ok(develop_rawler(&rawler::rawsource::RawSource::new_from_slice(bytes), true, wb, LensCorrection::default(), |_| XTransDemosaic::default())?.image)
+    Ok(develop_rawler(
+        &rawler::rawsource::RawSource::new_from_slice(bytes),
+        true,
+        wb,
+        LensCorrection::default(),
+        |_| XTransDemosaic::default(),
+    )?
+    .image)
 }
 
 /// [`load_raw_bytes`] without turning the image upright, and the EXIF
@@ -336,7 +394,10 @@ pub fn load_raw_bytes_unoriented_with(
     wb.validate()?;
     let src = rawler::rawsource::RawSource::new_from_slice(bytes);
     let image = develop_rawler(&src, false, wb, LensCorrection::default(), xtrans)?.image;
-    Ok((image, raw_exif_orientation(&src, &rawler::decoders::RawDecodeParams::default())))
+    Ok((
+        image,
+        raw_exif_orientation(&src, &rawler::decoders::RawDecodeParams::default()),
+    ))
 }
 
 fn develop_rawler(
@@ -350,24 +411,37 @@ fn develop_rawler(
     let decode_params = RawDecodeParams::default();
     let raw = rawler::decode(src, &decode_params)
         .map_err(|e| anyhow::anyhow!("RAW decode failed: {e:?}"))?;
-    let as_shot_white_balance = Some(raw.wb_coeffs.map(|gain| {
-        (gain.is_finite() && gain > 0.0).then_some(gain)
-    }));
+    let as_shot_white_balance = Some(
+        raw.wb_coeffs
+            .map(|gain| (gain.is_finite() && gain > 0.0).then_some(gain)),
+    );
     let area = lens_area(&raw);
     let xtrans = xtrans(raw.width * raw.height);
     let mut img = develop_decoded_with(raw, wb, xtrans)?;
     // Lens corrections are defined in sensor coordinates: before orientation.
     let profile = lens::read_profile_from(src);
-    if lens_correction.enabled && let Some(profile) = &profile {
-        let area = area.filter(|a| a.developed == (img.width as usize, img.height as usize)).map(|a| a.area);
+    if lens_correction.enabled
+        && let Some(profile) = &profile
+    {
+        let area = area
+            .filter(|a| a.developed == (img.width as usize, img.height as usize))
+            .map(|a| a.area);
         lens::apply(&mut img, profile, area);
     }
     let lens = profile.map(|p| p.source);
     if !orient {
-        return Ok(RawlerImage { image: img, as_shot_white_balance, lens });
+        return Ok(RawlerImage {
+            image: img,
+            as_shot_white_balance,
+            lens,
+        });
     }
     // rawler still sets RawImage::orientation to Normal: read EXIF ourselves.
-    Ok(RawlerImage { image: img.oriented(raw_exif_orientation(src, &decode_params)), as_shot_white_balance, lens })
+    Ok(RawlerImage {
+        image: img.oriented(raw_exif_orientation(src, &decode_params)),
+        as_shot_white_balance,
+        lens,
+    })
 }
 
 /// The active area (where DNG lens opcodes are defined) relative to the image
@@ -399,11 +473,19 @@ fn develop_decoded(raw: rawler::RawImage, wb: RawWhiteBalance) -> Result<ImageBu
     develop_decoded_with(raw, wb, XTransDemosaic::default())
 }
 
-fn develop_decoded_with(mut raw: rawler::RawImage, wb: RawWhiteBalance, xtrans: XTransDemosaic) -> Result<ImageBuf> {
+fn develop_decoded_with(
+    mut raw: rawler::RawImage,
+    wb: RawWhiteBalance,
+    xtrans: XTransDemosaic,
+) -> Result<ImageBuf> {
     use rawler::imgop::develop::{ProcessingStep, RawDevelop};
-    let mut dev = RawDevelop { xtrans, ..RawDevelop::default() };
+    let mut dev = RawDevelop {
+        xtrans,
+        ..RawDevelop::default()
+    };
     // Our `calibrate` replaces rawler's, which clips (see there).
-    dev.steps.retain(|s| !matches!(s, ProcessingStep::SRgb | ProcessingStep::Calibrate));
+    dev.steps
+        .retain(|s| !matches!(s, ProcessingStep::SRgb | ProcessingStep::Calibrate));
     // rawler guards `decode` against panics but not `develop_intermediate`,
     // which still has `panic!`/`unimplemented!`/`assert!` paths for unusual
     // files (e.g. Fuji SuperCCD with an active area, non-3x3 colour matrices
@@ -428,7 +510,10 @@ fn develop_decoded_with(mut raw: rawler::RawImage, wb: RawWhiteBalance, xtrans: 
 
 /// A copy of `raw` without its sensor data.
 fn without_data(raw: &mut rawler::RawImage) -> rawler::RawImage {
-    let data = std::mem::replace(&mut raw.data, rawler::rawimage::RawImageData::Integer(Vec::new()));
+    let data = std::mem::replace(
+        &mut raw.data,
+        rawler::rawimage::RawImageData::Integer(Vec::new()),
+    );
     let meta = raw.clone();
     raw.data = data;
     meta
@@ -440,13 +525,19 @@ fn without_data(raw: &mut rawler::RawImage) -> rawler::RawImage {
 /// develop a different frame, so the profile cannot be placed with confidence.
 /// Reads metadata only.
 #[cfg(all(target_os = "macos", feature = "apple-raw"))]
-pub(crate) fn lens_placement(path: &Path, profile: &lens::Profile, size: (usize, usize)) -> Option<Option<lens::Area>> {
+pub(crate) fn lens_placement(
+    path: &Path,
+    profile: &lens::Profile,
+    size: (usize, usize),
+) -> Option<Option<lens::Area>> {
     let src = rawler::rawsource::RawSource::new(path).ok()?;
     let params = rawler::decoders::RawDecodeParams::default();
     // A dummy decode reads the geometry without the sensor data; rawler
     // panics on some malformed files.
     let raw = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        rawler::get_decoder(&src).and_then(|d| d.raw_image(&src, &params, true)).ok()
+        rawler::get_decoder(&src)
+            .and_then(|d| d.raw_image(&src, &params, true))
+            .ok()
     }))
     .ok()
     .flatten()?;
@@ -454,7 +545,11 @@ pub(crate) fn lens_placement(path: &Path, profile: &lens::Profile, size: (usize,
         let area = lens_area(&raw)?;
         return (area.developed == size).then_some(Some(area.area));
     }
-    let developed = raw.crop_area.or(raw.active_area).map(|r| r.d).unwrap_or_else(|| raw.dim());
+    let developed = raw
+        .crop_area
+        .or(raw.active_area)
+        .map(|r| r.d)
+        .unwrap_or_else(|| raw.dim());
     ((developed.w, developed.h) == size).then_some(None)
 }
 
@@ -502,25 +597,47 @@ const RAW_DESATURATE_FROM: f32 = 0.85;
 /// where a clipped channel would show as false (typically magenta) colour,
 /// is a pixel blended toward the neutral of the same luminance: not at all
 /// below [`RAW_DESATURATE_FROM`] of the white level, fully at it.
-fn calibrate(raw: &rawler::RawImage, intermediate: rawler::imgop::develop::Intermediate) -> rawler::imgop::develop::Intermediate {
+fn calibrate(
+    raw: &rawler::RawImage,
+    intermediate: rawler::imgop::develop::Intermediate,
+) -> rawler::imgop::develop::Intermediate {
     use rawler::imgop::develop::Intermediate;
     use rawler::imgop::matrix::{multiply, normalize, pseudo_inverse};
     use rawler::imgop::xyz::{Illuminant, SRGB_TO_XYZ_D65};
     use rawler::imgop::{chromatic_adaption::adapt_bradford, xyz::Illuminant as I};
     let (illuminant, matrix) = raw
-        .color_matrix_find_first([I::D65, I::A, I::B, I::C, I::D50, I::D55, I::D75, I::Daylight, I::Flash])
-        .unwrap_or((Illuminant::D65, vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]));
+        .color_matrix_find_first([
+            I::D65,
+            I::A,
+            I::B,
+            I::C,
+            I::D50,
+            I::D55,
+            I::D75,
+            I::Daylight,
+            I::Flash,
+        ])
+        .unwrap_or((
+            Illuminant::D65,
+            vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+        ));
     let matrix = if illuminant == Illuminant::D65 || matrix.len() != 9 {
         matrix
     } else {
         let m: [[f32; 3]; 3] = std::array::from_fn(|i| std::array::from_fn(|j| matrix[i * 3 + j]));
-        adapt_bradford(&illuminant, &Illuminant::D65, &m).as_flattened().to_vec()
+        adapt_bradford(&illuminant, &Illuminant::D65, &m)
+            .as_flattened()
+            .to_vec()
     };
     let mut xyz2cam = [[0.0f32; 3]; 4];
     for (i, row) in matrix.chunks_exact(3).take(4).enumerate() {
         xyz2cam[i].copy_from_slice(row);
     }
-    let wb = if raw.wb_coeffs[0].is_nan() { [1.0; 4] } else { raw.wb_coeffs };
+    let wb = if raw.wb_coeffs[0].is_nan() {
+        [1.0; 4]
+    } else {
+        raw.wb_coeffs
+    };
     let cam2rgb = pseudo_inverse(normalize(multiply(&xyz2cam, &SRGB_TO_XYZ_D65)));
     let luma = [0.2126f32, 0.7152, 0.0722];
     let develop = |cam: &[f32]| -> [f32; 3] {
@@ -546,7 +663,11 @@ fn calibrate(raw: &rawler::RawImage, intermediate: rawler::imgop::develop::Inter
         }
         Intermediate::FourColor(pixels) => {
             let data = pixels.data.par_iter().map(|p| develop(p)).collect();
-            Intermediate::ThreeColor(rawler::pixarray::Color2D::new_with(data, pixels.width, pixels.height))
+            Intermediate::ThreeColor(rawler::pixarray::Color2D::new_with(
+                data,
+                pixels.width,
+                pixels.height,
+            ))
         }
         mono @ Intermediate::Monochrome(_) => mono,
     }

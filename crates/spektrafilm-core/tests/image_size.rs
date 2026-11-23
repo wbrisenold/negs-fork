@@ -1,9 +1,14 @@
 //! Image Size resizes the source before the film: grain and halation form at
 //! the working size, and physical (µm) effects keep their size on the film.
-use spektrafilm_core::{image_size, params::RuntimeParams, pipeline::Pipeline, profile, stages::filming};
+use spektrafilm_core::{
+    image_size, params::RuntimeParams, pipeline::Pipeline, profile, stages::filming,
+};
 use spektrafilm_gpu::cpu_backend::CpuBackend;
 use spektrafilm_io::{crop::Crop, resize};
-use spektrafilm_math::{image::ImageBuf, precision::{from_f64, to_f64}};
+use spektrafilm_math::{
+    image::ImageBuf,
+    precision::{from_f64, to_f64},
+};
 use std::path::{Path, PathBuf};
 
 fn data() -> PathBuf {
@@ -45,7 +50,12 @@ fn scene(width: u32, height: u32) -> ImageBuf {
 
 fn mean_abs_difference(a: &ImageBuf, b: &ImageBuf) -> f64 {
     assert_eq!((a.width, a.height), (b.width, b.height));
-    a.data.iter().zip(&b.data).map(|(&x, &y)| (to_f64(x) - to_f64(y)).abs()).sum::<f64>() / a.data.len() as f64
+    a.data
+        .iter()
+        .zip(&b.data)
+        .map(|(&x, &y)| (to_f64(x) - to_f64(y)).abs())
+        .sum::<f64>()
+        / a.data.len() as f64
 }
 
 #[test]
@@ -55,7 +65,13 @@ fn early_enlargement_develops_grain_and_halation_at_the_working_size() {
     params.film_render.grain.active = true;
     params.film_render.halation.active = true;
     params.io.photo_long_side_px = Some(96);
-    let crop = Crop { x: 0.0, y: 0.0, width: 1.0, height: 1.0, angle: 0.0 };
+    let crop = Crop {
+        x: 0.0,
+        y: 0.0,
+        width: 1.0,
+        height: 1.0,
+        angle: 0.0,
+    };
 
     // The pipeline's own resize, for the full frame...
     let early = pipeline(params.clone()).process(source.clone(), &CpuBackend);
@@ -64,10 +80,13 @@ fn early_enlargement_develops_grain_and_halation_at_the_working_size() {
     // metering the source as they do.
     let mut prepared_params = params.clone();
     let metering = filming::metering_preview(&source);
-    let (prepared, size) = image_size::prepare(source.clone(), &mut prepared_params, Some(&crop)).unwrap();
+    let (prepared, size) =
+        image_size::prepare(source.clone(), &mut prepared_params, Some(&crop)).unwrap();
     assert_eq!(size.working, (96, 64));
     assert_eq!(prepared_params.io.photo_long_side_px, None);
-    let explicit = pipeline(prepared_params).with_metering_preview(metering).process(prepared, &CpuBackend);
+    let explicit = pipeline(prepared_params)
+        .with_metering_preview(metering)
+        .process(prepared, &CpuBackend);
     assert_eq!(early.data, explicit.data);
 
     // Negative control: developing first and enlarging the print afterwards
@@ -75,17 +94,25 @@ fn early_enlargement_develops_grain_and_halation_at_the_working_size() {
     params.io.photo_long_side_px = None;
     let late = resize::catmull_rom(&pipeline(params).process(source, &CpuBackend), (96, 64));
     let difference = mean_abs_difference(&early, &late);
-    assert!(difference > 0.01, "late enlargement should differ: {difference}");
+    assert!(
+        difference > 0.01,
+        "late enlargement should differ: {difference}"
+    );
 }
 
 /// The 10–90% width, in pixels, of the edge across the middle row.
 fn edge_width(image: &ImageBuf) -> f64 {
     let y = image.height / 2;
-    let row: Vec<f64> = (0..image.width).map(|x| to_f64(image.get(x, y)[1])).collect();
+    let row: Vec<f64> = (0..image.width)
+        .map(|x| to_f64(image.get(x, y)[1]))
+        .collect();
     let (dark, bright) = (row[0], row[row.len() - 1]);
     let at = |fraction: f64| {
         let level = dark + (bright - dark) * fraction;
-        let i = row.iter().position(|&v| (v - level) * (bright - dark).signum() >= 0.0).unwrap();
+        let i = row
+            .iter()
+            .position(|&v| (v - level) * (bright - dark).signum() >= 0.0)
+            .unwrap();
         // Interpolate between the samples either side of the level.
         let (a, b) = (row[i - 1], row[i]);
         (i - 1) as f64 + (level - a) / (b - a)
@@ -119,7 +146,10 @@ fn physical_blur_keeps_its_size_on_the_film() {
     params.io.photo_long_side_px = Some(width * 2);
     let doubled = edge_width(&pipeline(params).process(source, &CpuBackend));
     let ratio = doubled / original;
-    assert!((1.85..=2.15).contains(&ratio), "{original} px → {doubled} px ({ratio}×)");
+    assert!(
+        (1.85..=2.15).contains(&ratio),
+        "{original} px → {doubled} px ({ratio}×)"
+    );
 }
 
 /// Auto exposure meters the full source frame, as upstream meters the frame

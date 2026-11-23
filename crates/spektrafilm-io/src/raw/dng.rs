@@ -15,11 +15,19 @@ pub fn is_dng(bytes: &[u8]) -> bool {
         };
         let u16_at = |at: usize| -> Option<u16> {
             let b = bytes.get(at..at.checked_add(2)?)?.try_into().ok()?;
-            Some(if little { u16::from_le_bytes(b) } else { u16::from_be_bytes(b) })
+            Some(if little {
+                u16::from_le_bytes(b)
+            } else {
+                u16::from_be_bytes(b)
+            })
         };
         let u32_at = |at: usize| -> Option<u32> {
             let b = bytes.get(at..at.checked_add(4)?)?.try_into().ok()?;
-            Some(if little { u32::from_le_bytes(b) } else { u32::from_be_bytes(b) })
+            Some(if little {
+                u32::from_le_bytes(b)
+            } else {
+                u32::from_be_bytes(b)
+            })
         };
         if u16_at(2)? != 42 {
             return None; // DNG uses TIFF 6.0, not BigTIFF.
@@ -30,7 +38,11 @@ pub fn is_dng(bytes: &[u8]) -> bool {
         let entries = bytes.get(start..start.checked_add(count.checked_mul(12)?)?)?;
         Some(entries.chunks_exact(12).any(|e| {
             let tag = [e[0], e[1]];
-            (if little { u16::from_le_bytes(tag) } else { u16::from_be_bytes(tag) }) == 50706
+            (if little {
+                u16::from_le_bytes(tag)
+            } else {
+                u16::from_be_bytes(tag)
+            }) == 50706
         }))
     }
     identify(bytes).unwrap_or(false)
@@ -42,8 +54,20 @@ mod tests {
 
     fn directory(little: bool, tag: u16) -> Vec<u8> {
         let mut bytes = if little { b"II" } else { b"MM" }.to_vec();
-        let u16b = |v: u16| if little { v.to_le_bytes() } else { v.to_be_bytes() };
-        let u32b = |v: u32| if little { v.to_le_bytes() } else { v.to_be_bytes() };
+        let u16b = |v: u16| {
+            if little {
+                v.to_le_bytes()
+            } else {
+                v.to_be_bytes()
+            }
+        };
+        let u32b = |v: u32| {
+            if little {
+                v.to_le_bytes()
+            } else {
+                v.to_be_bytes()
+            }
+        };
         bytes.extend(u16b(42));
         bytes.extend(u32b(8));
         bytes.extend(u16b(1));
@@ -64,7 +88,10 @@ mod tests {
         assert!(!is_dng(b"not a TIFF\x12\xc6"));
         let mut raster = directory(true, 256);
         raster.extend([0x12, 0xc6]);
-        assert!(!is_dng(&raster), "a signature outside IFD0 is not a DNG tag");
+        assert!(
+            !is_dng(&raster),
+            "a signature outside IFD0 is not a DNG tag"
+        );
     }
 
     #[test]

@@ -106,7 +106,11 @@ fn run() -> Result<bool> {
     let mut failures: Vec<String> = Vec::new();
     let expected = w * h * 3;
     if a.len() != expected || b.len() != expected {
-        failures.push(format!("size: {} and {} values, expected {expected}", a.len(), b.len()));
+        failures.push(format!(
+            "size: {} and {} values, expected {expected}",
+            a.len(),
+            b.len()
+        ));
         print(&args.profile, stats, &gates, failures);
         return Ok(false);
     }
@@ -122,7 +126,17 @@ fn run() -> Result<bool> {
     colour(&a, &b, w, &mut stats);
     codes(&a, &b, args.f32_scalar, &mut stats);
     if let (Some(ta), Some(tb)) = (&args.tiff_a, &args.tiff_b) {
-        tiffs(ta, tb, &a, &b, w, h, args.f32_scalar, &mut stats, &mut failures)?;
+        tiffs(
+            ta,
+            tb,
+            &a,
+            &b,
+            w,
+            h,
+            args.f32_scalar,
+            &mut stats,
+            &mut failures,
+        )?;
     }
     check_limits(&gates, &stats, &mut failures);
 
@@ -131,7 +145,12 @@ fn run() -> Result<bool> {
     Ok(pass)
 }
 
-fn print(profile: &str, stats: Map<String, Value>, gates: &Map<String, Value>, failures: Vec<String>) {
+fn print(
+    profile: &str,
+    stats: Map<String, Value>,
+    gates: &Map<String, Value>,
+    failures: Vec<String>,
+) {
     let out = json!({
         "profile": profile,
         "pass": failures.is_empty(),
@@ -145,7 +164,10 @@ fn print(profile: &str, stats: Map<String, Value>, gates: &Map<String, Value>, f
 fn read_f64(path: &str) -> Result<Vec<f64>> {
     let bytes = std::fs::read(path).with_context(|| format!("reading {path}"))?;
     if bytes.len() % 8 != 0 {
-        bail!("{path}: {} bytes is not a whole number of f64s", bytes.len());
+        bail!(
+            "{path}: {} bytes is not a whole number of f64s",
+            bytes.len()
+        );
     }
     Ok(bytes
         .chunks_exact(8)
@@ -230,10 +252,11 @@ fn colour(a: &[f64], b: &[f64], w: usize, stats: &mut Map<String, Value>) {
             }
         })
         .collect();
-    let (max_i, max) = de
-        .iter()
-        .enumerate()
-        .fold((0, 0.0f64), |acc, (i, &v)| if v > acc.1 { (i, v) } else { acc });
+    let (max_i, max) =
+        de.iter().enumerate().fold(
+            (0, 0.0f64),
+            |acc, (i, &v)| if v > acc.1 { (i, v) } else { acc },
+        );
     let n = de.len() as f64;
     let mean = de.iter().sum::<f64>() / n;
     let gt = |t: f64| de.iter().filter(|&&v| v > t).count() as f64 / n;
@@ -243,7 +266,10 @@ fn colour(a: &[f64], b: &[f64], w: usize, stats: &mut Map<String, Value>) {
     stats.insert("de00_p99".into(), json!(percentile(&de, 99.0)));
     stats.insert("de00_p999".into(), json!(percentile(&de, 99.9)));
     stats.insert("de00_max".into(), json!(max));
-    stats.insert("de00_max_at".into(), json!({"x": max_i % w, "y": max_i / w}));
+    stats.insert(
+        "de00_max_at".into(),
+        json!({"x": max_i % w, "y": max_i / w}),
+    );
     stats.insert("frac_de00_gt_0_5".into(), json!(gt05));
     stats.insert("frac_de00_gt_1".into(), json!(gt1));
     stats.insert("frac_de00_gt_2".into(), json!(gt2));
@@ -261,20 +287,40 @@ fn percentile(sorted: &[f64], p: f64) -> f64 {
 fn lab(rgb: &[f64]) -> [f64; 3] {
     // colour-science's sRGB normalised primary matrix and D65 (x 0.3127, y 0.3290).
     const M: [[f64; 3]; 3] = [
-        [0.412_390_799_265_959_5, 0.357_584_339_383_878, 0.180_480_788_401_834_3],
-        [0.212_639_005_871_510_36, 0.715_168_678_767_756, 0.072_192_315_360_733_71],
-        [0.019_330_818_715_591_82, 0.119_194_779_794_625_98, 0.950_532_152_249_660_7],
+        [
+            0.412_390_799_265_959_5,
+            0.357_584_339_383_878,
+            0.180_480_788_401_834_3,
+        ],
+        [
+            0.212_639_005_871_510_36,
+            0.715_168_678_767_756,
+            0.072_192_315_360_733_71,
+        ],
+        [
+            0.019_330_818_715_591_82,
+            0.119_194_779_794_625_98,
+            0.950_532_152_249_660_7,
+        ],
     ];
     const WHITE: [f64; 3] = [0.3127 / 0.3290, 1.0, (1.0 - 0.3127 - 0.3290) / 0.3290];
     let lin = |c: f64| {
         let c = c.clamp(0.0, 1.0);
-        if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
     };
     let l = [lin(rgb[0]), lin(rgb[1]), lin(rgb[2])];
     let f = |t: f64| {
         const E: f64 = 216.0 / 24389.0;
         const K: f64 = 24389.0 / 27.0;
-        if t > E { t.cbrt() } else { (K * t + 16.0) / 116.0 }
+        if t > E {
+            t.cbrt()
+        } else {
+            (K * t + 16.0) / 116.0
+        }
     };
     let xyz: Vec<f64> = (0..3)
         .map(|r| (M[r][0] * l[0] + M[r][1] * l[1] + M[r][2] * l[2]) / WHITE[r])
@@ -326,7 +372,8 @@ fn ciede2000(p: [f64; 3], q: [f64; 3]) -> f64 {
     } else {
         (h1p + h2p - 360.0) / 2.0
     };
-    let t = 1.0 - 0.17 * rad(hp_bar - 30.0).cos() + 0.24 * rad(2.0 * hp_bar).cos()
+    let t = 1.0 - 0.17 * rad(hp_bar - 30.0).cos()
+        + 0.24 * rad(2.0 * hp_bar).cos()
         + 0.32 * rad(3.0 * hp_bar + 6.0).cos()
         - 0.20 * rad(4.0 * hp_bar - 63.0).cos();
     let d_theta = 30.0 * (-((hp_bar - 275.0) / 25.0).powi(2)).exp();
@@ -335,7 +382,9 @@ fn ciede2000(p: [f64; 3], q: [f64; 3]) -> f64 {
     let sc = 1.0 + 0.045 * cp_bar;
     let sh = 1.0 + 0.015 * cp_bar * t;
     let rt = -rad(2.0 * d_theta).sin() * rc;
-    ((dlp / sl).powi(2) + (dcp / sc).powi(2) + (dhp_big / sh).powi(2)
+    ((dlp / sl).powi(2)
+        + (dcp / sc).powi(2)
+        + (dhp_big / sh).powi(2)
         + rt * (dcp / sc) * (dhp_big / sh))
         .sqrt()
 }
@@ -401,9 +450,14 @@ fn tiffs(
             .zip(raw)
             .filter(|&(&p, &v)| p as u32 != quantize(v, 65535.0, f32_scalar))
             .count();
-        stats.insert(format!("tiff_{name}_vs_own_dump_mismatches"), json!(mismatched));
+        stats.insert(
+            format!("tiff_{name}_vs_own_dump_mismatches"),
+            json!(mismatched),
+        );
         if mismatched > 0 {
-            failures.push(format!("TIFF {name}: {mismatched} codes differ from its own dump"));
+            failures.push(format!(
+                "TIFF {name}: {mismatched} codes differ from its own dump"
+            ));
         }
         pixels.push(px);
     }
@@ -418,12 +472,18 @@ fn tiffs(
 }
 
 /// Upper limits on statistics: a gate key `<stat>` caps stats[`<stat>`].
-fn check_limits(gates: &Map<String, Value>, stats: &Map<String, Value>, failures: &mut Vec<String>) {
+fn check_limits(
+    gates: &Map<String, Value>,
+    stats: &Map<String, Value>,
+    failures: &mut Vec<String>,
+) {
     for (key, limit) in gates {
         if matches!(key.as_str(), "value_abs" | "value_rel" | "description") {
             continue;
         }
-        let Some(limit) = limit.as_f64() else { continue };
+        let Some(limit) = limit.as_f64() else {
+            continue;
+        };
         match stats.get(key).and_then(Value::as_f64) {
             Some(v) if v > limit => failures.push(format!("{key} {v:.4e} > {limit:.4e}")),
             Some(_) => {}

@@ -111,7 +111,9 @@ impl PrepParams {
             return Err("Invalid Prep exposure_ev; expected a finite value from -6 to 6".into());
         }
         if !self.global_tone.is_finite() || !(-100.0..=100.0).contains(&self.global_tone) {
-            return Err("Invalid Prep global_tone; expected a finite value from -100 to 100".into());
+            return Err(
+                "Invalid Prep global_tone; expected a finite value from -100 to 100".into(),
+            );
         }
         for (name, value, min) in [
             ("highlights", self.highlights, -180.),

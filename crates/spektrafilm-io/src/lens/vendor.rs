@@ -28,8 +28,26 @@ fn values(ifd: &IFD, tag: u16) -> Option<Vec<f64>> {
         Value::Short(v) => v.iter().map(|&x| x as f64).collect(),
         Value::SLong(v) => v.iter().map(|&x| x as f64).collect(),
         Value::Long(v) => v.iter().map(|&x| x as f64).collect(),
-        Value::SRational(v) => v.iter().map(|r| if r.d == 0 { 0.0 } else { r.n as f64 / r.d as f64 }).collect(),
-        Value::Rational(v) => v.iter().map(|r| if r.d == 0 { 0.0 } else { r.n as f64 / r.d as f64 }).collect(),
+        Value::SRational(v) => v
+            .iter()
+            .map(|r| {
+                if r.d == 0 {
+                    0.0
+                } else {
+                    r.n as f64 / r.d as f64
+                }
+            })
+            .collect(),
+        Value::Rational(v) => v
+            .iter()
+            .map(|r| {
+                if r.d == 0 {
+                    0.0
+                } else {
+                    r.n as f64 / r.d as f64
+                }
+            })
+            .collect(),
         Value::Float(v) => v.iter().map(|&x| x as f64).collect(),
         _ => return None,
     };
@@ -46,7 +64,10 @@ pub(super) fn sony(src: &RawSource) -> Option<Profile> {
     let dist = values(ifd, 0x7037)?;
     let ca = values(ifd, 0x7035)?;
     let vig = values(ifd, 0x7032)?;
-    sony_radial(&dist, &ca, &vig).map(|radial| Profile { source: Source::Sony, model: Model::Radial(radial) })
+    sony_radial(&dist, &ca, &vig).map(|radial| Profile {
+        source: Source::Sony,
+        model: Model::Radial(radial),
+    })
 }
 
 pub(super) fn sony_radial(dist: &[f64], ca: &[f64], vig: &[f64]) -> Option<Radial> {
@@ -60,7 +81,9 @@ pub(super) fn sony_radial(dist: &[f64], ca: &[f64], vig: &[f64]) -> Option<Radia
     {
         return None;
     }
-    let knots: Vec<f64> = (0..nc).map(|i| (i as f64 + 0.5) / (nc - 1) as f64).collect();
+    let knots: Vec<f64> = (0..nc)
+        .map(|i| (i as f64 + 0.5) / (nc - 1) as f64)
+        .collect();
     let mut cor = [vec![0.0; nc], vec![0.0; nc], vec![0.0; nc]];
     let mut v = vec![0.0; nc];
     for i in 0..nc {
@@ -70,7 +93,12 @@ pub(super) fn sony_radial(dist: &[f64], ca: &[f64], vig: &[f64]) -> Option<Radia
         cor[2][i] = d * (ca[nc + i + 1] * 2f64.powi(-21) + 1.0);
         v[i] = 2f64.powf(0.5 - 2f64.powf(vig[i + 1] * 2f64.powi(-13) - 1.0));
     }
-    Some(Radial { knots_dist: knots.clone(), cor, knots_vig: knots, vig: v })
+    Some(Radial {
+        knots_dist: knots.clone(),
+        cor,
+        knots_vig: knots,
+        vig: v,
+    })
 }
 
 /// Fujifilm RAF: `GeometricDistortionParams` (0xf00b),
@@ -87,7 +115,10 @@ pub(super) fn fujifilm(src: &RawSource) -> Option<Profile> {
     let dist = values(ifd, 0xf00b)?;
     let ca = values(ifd, 0xf00f)?;
     let vig = values(ifd, 0xf010)?;
-    fuji_radial(&dist, &ca, &vig).map(|radial| Profile { source: Source::Fujifilm, model: Model::Radial(radial) })
+    fuji_radial(&dist, &ca, &vig).map(|radial| Profile {
+        source: Source::Fujifilm,
+        model: Model::Radial(radial),
+    })
 }
 
 /// Per-knot data in darktable's order: knots, distortion (percent), red and
@@ -113,7 +144,11 @@ fn fuji_knots(dist: &[f64], ca: &[f64], vig: &[f64]) -> Option<Vec<[f64; 5]>> {
                 if k != kc || k != vig[i + 1] {
                     return None;
                 }
-                let (r, b) = if i == 0 { (0.0, 0.0) } else { (ca[i + 10], ca[i + 20]) };
+                let (r, b) = if i == 0 {
+                    (0.0, 0.0)
+                } else {
+                    (ca[i + 10], ca[i + 20])
+                };
                 out.push([k, dist[i + 12], r, b, vig[i + 12]]);
             }
         }
@@ -147,7 +182,11 @@ pub(super) fn fuji_radial(dist: &[f64], ca: &[f64], vig: &[f64]) -> Option<Radia
     // The distortion curve is a function of the source radius; resample it as
     // a function of the corrected radius.
     let mut knots_dist = vec![0.0; MAXKNOTS];
-    let mut cor = [vec![0.0; MAXKNOTS], vec![0.0; MAXKNOTS], vec![0.0; MAXKNOTS]];
+    let mut cor = [
+        vec![0.0; MAXKNOTS],
+        vec![0.0; MAXKNOTS],
+        vec![0.0; MAXKNOTS],
+    ];
     for i in 0..MAXKNOTS {
         let rin = i as f64 / (MAXKNOTS - 1) as f64;
         let m = spline(&knots_in, &cor_in, rin);
@@ -156,7 +195,12 @@ pub(super) fn fuji_radial(dist: &[f64], ca: &[f64], vig: &[f64]) -> Option<Radia
         cor[1][i] = m;
         cor[2][i] = m * (spline(&knots_in, &ca_b_in, rin) + 1.0);
     }
-    Some(Radial { knots_dist, cor, knots_vig, vig: v })
+    Some(Radial {
+        knots_dist,
+        cor,
+        knots_vig,
+        vig: v,
+    })
 }
 
 /// Panasonic RW2/RWL: the 32-byte `DistortionInfo` (0x0119) in IFD0, sixteen
@@ -171,21 +215,29 @@ pub(super) fn panasonic(src: &RawSource) -> Option<Profile> {
         Value::Undefined(b) | Value::Byte(b) => b.clone(),
         _ => return None,
     };
-    panasonic_radial(&bytes).map(|radial| Profile { source: Source::Panasonic, model: Model::Radial(radial) })
+    panasonic_radial(&bytes).map(|radial| Profile {
+        source: Source::Panasonic,
+        model: Model::Radial(radial),
+    })
 }
 
 pub(super) fn panasonic_radial(bytes: &[u8]) -> Option<Radial> {
     if bytes.len() != 32 {
         return None;
     }
-    let v: Vec<f64> = bytes.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]]) as f64).collect();
+    let v: Vec<f64> = bytes
+        .chunks_exact(2)
+        .map(|b| i16::from_le_bytes([b[0], b[1]]) as f64)
+        .collect();
     // Low nibble of entry 7: 1 when the camera corrects distortion.
     if (v[7] as i16) & 0x0f != 1 {
         return None;
     }
     let scale = 1.0 / (1.0 + v[5] / 32768.0);
     let (a, b, c) = (v[8] / 32768.0, v[4] / 32768.0, v[11] / 32768.0);
-    let knots: Vec<f64> = (0..MAXKNOTS).map(|i| i as f64 / (MAXKNOTS - 1) as f64).collect();
+    let knots: Vec<f64> = (0..MAXKNOTS)
+        .map(|i| i as f64 / (MAXKNOTS - 1) as f64)
+        .collect();
     let cor: Vec<f64> = knots
         .iter()
         .map(|&r| {
@@ -201,7 +253,12 @@ pub(super) fn panasonic_radial(bytes: &[u8]) -> Option<Radial> {
             if r > 0.0 { rd / r } else { 1.0 }
         })
         .collect();
-    Some(Radial { knots_dist: knots.clone(), cor: [cor.clone(), cor.clone(), cor], knots_vig: knots, vig: vec![1.0; MAXKNOTS] })
+    Some(Radial {
+        knots_dist: knots.clone(),
+        cor: [cor.clone(), cor.clone(), cor],
+        knots_vig: knots,
+        vig: vec![1.0; MAXKNOTS],
+    })
 }
 
 /// A minimal TIFF directory reader for maker notes, whose offsets are
@@ -214,11 +271,19 @@ struct Dir<'a> {
 impl Dir<'_> {
     fn u16(&self, at: usize) -> Option<u16> {
         let b: [u8; 2] = self.buf.get(at..at + 2)?.try_into().ok()?;
-        Some(if self.little { u16::from_le_bytes(b) } else { u16::from_be_bytes(b) })
+        Some(if self.little {
+            u16::from_le_bytes(b)
+        } else {
+            u16::from_be_bytes(b)
+        })
     }
     fn u32(&self, at: usize) -> Option<u32> {
         let b: [u8; 4] = self.buf.get(at..at + 4)?.try_into().ok()?;
-        Some(if self.little { u32::from_le_bytes(b) } else { u32::from_be_bytes(b) })
+        Some(if self.little {
+            u32::from_le_bytes(b)
+        } else {
+            u32::from_be_bytes(b)
+        })
     }
     /// The entry `tag` of the directory at `at`: (type, count, value bytes),
     /// with out-of-line values found relative to `base`.
@@ -253,7 +318,11 @@ impl Dir<'_> {
             data.chunks_exact(4)
                 .map(|b| {
                     let b: [u8; 4] = b.try_into().unwrap();
-                    (if self.little { f32::from_le_bytes(b) } else { f32::from_be_bytes(b) }) as f64
+                    (if self.little {
+                        f32::from_le_bytes(b)
+                    } else {
+                        f32::from_be_bytes(b)
+                    }) as f64
                 })
                 .collect()
         })
@@ -278,13 +347,23 @@ pub(super) fn olympus(src: &RawSource) -> Option<Profile> {
     } else {
         return None;
     };
-    let notes = Dir { buf, little: note.get(header - 4..header - 2)? == b"II" };
+    let notes = Dir {
+        buf,
+        little: note.get(header - 4..header - 2)? == b"II",
+    };
     let (_, _, processing) = notes.entry(start + header, start, 0x2040)?;
-    let processing = start + notes.u32(processing.as_ptr() as usize - buf.as_ptr() as usize)? as usize;
-    let dist = notes.entry(processing, start, 0x150a).and_then(|e| notes.floats(e));
-    let ca = notes.entry(processing, start, 0x150c).and_then(|e| notes.floats(e));
-    olympus_radial(dist.as_deref(), ca.as_deref())
-        .map(|radial| Profile { source: Source::Olympus, model: Model::Radial(radial) })
+    let processing =
+        start + notes.u32(processing.as_ptr() as usize - buf.as_ptr() as usize)? as usize;
+    let dist = notes
+        .entry(processing, start, 0x150a)
+        .and_then(|e| notes.floats(e));
+    let ca = notes
+        .entry(processing, start, 0x150c)
+        .and_then(|e| notes.floats(e));
+    olympus_radial(dist.as_deref(), ca.as_deref()).map(|radial| Profile {
+        source: Source::Olympus,
+        model: Model::Radial(radial),
+    })
 }
 
 fn index_of(dir: &Dir, at: usize, tag: u16) -> Option<usize> {
@@ -300,8 +379,14 @@ pub(super) fn olympus_radial(dist: Option<&[f64]>, ca: Option<&[f64]>) -> Option
         return None;
     }
     let (drs, dk2, dk4, dk6) = dist.map_or((1.0, 0.0, 0.0, 0.0), |d| (d[3], d[0], d[1], d[2]));
-    let knots: Vec<f64> = (0..MAXKNOTS).map(|i| i as f64 / (MAXKNOTS - 1) as f64).collect();
-    let mut cor = [vec![1.0; MAXKNOTS], vec![1.0; MAXKNOTS], vec![1.0; MAXKNOTS]];
+    let knots: Vec<f64> = (0..MAXKNOTS)
+        .map(|i| i as f64 / (MAXKNOTS - 1) as f64)
+        .collect();
+    let mut cor = [
+        vec![1.0; MAXKNOTS],
+        vec![1.0; MAXKNOTS],
+        vec![1.0; MAXKNOTS],
+    ];
     for (i, &r) in knots.iter().enumerate() {
         // Rin = Rout drs (1 + dk2 (Rout drs)² + dk4 (Rout drs)⁴ + dk6 (Rout drs)⁶)
         let rs2 = (r * drs).powi(2);
@@ -319,5 +404,10 @@ pub(super) fn olympus_radial(dist: Option<&[f64]>, ca: Option<&[f64]>) -> Option
             cor[2][i] += rd * (c[3] + rd2 * (c[4] + rd2 * c[5])) / r;
         }
     }
-    Some(Radial { knots_dist: knots.clone(), cor, knots_vig: knots, vig: vec![1.0; MAXKNOTS] })
+    Some(Radial {
+        knots_dist: knots.clone(),
+        cor,
+        knots_vig: knots,
+        vig: vec![1.0; MAXKNOTS],
+    })
 }

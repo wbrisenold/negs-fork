@@ -22,7 +22,8 @@ unsafe impl GlobalAlloc for Counting {
         unsafe { System.dealloc(p, l) }
     }
     unsafe fn realloc(&self, p: *mut u8, l: Layout, n: usize) -> *mut u8 {
-        let now = LIVE.fetch_add(n as isize - l.size() as isize, Ordering::Relaxed) + n as isize - l.size() as isize;
+        let now = LIVE.fetch_add(n as isize - l.size() as isize, Ordering::Relaxed) + n as isize
+            - l.size() as isize;
         PEAK.fetch_max(now, Ordering::Relaxed);
         unsafe { System.realloc(p, l, n) }
     }
@@ -58,7 +59,14 @@ fn main() {
     let paper = "kodak_portra_endura";
     let mut films: Vec<String> = std::fs::read_dir(data.join("profiles"))
         .unwrap()
-        .map(|e| e.unwrap().path().file_stem().unwrap().to_string_lossy().into_owned())
+        .map(|e| {
+            e.unwrap()
+                .path()
+                .file_stem()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        })
         .collect();
     films.sort();
     let params = RuntimeParams::default();
@@ -78,8 +86,14 @@ fn main() {
     let spectra_bytes = LIVE.load(Ordering::Relaxed) - before;
     drop(spectra);
 
-    let (mut builds, mut loads, mut clones, mut with_params, mut retained, mut peaks) =
-        (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut builds, mut loads, mut clones, mut with_params, mut retained, mut peaks) = (
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
     let mut kept = Vec::new();
     for film in &films {
         let (mut b, mut l, mut c, mut w) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
@@ -137,7 +151,16 @@ fn split(data: &Path, film: &str) {
     let m = spectral_service::upsampling_method(&params.settings.rgb_to_raw_method).unwrap();
     let lut = spectral_service::load_method_lut(data, m).unwrap();
     let f = profile::load_profile_by_name(data, film).unwrap();
-    let sens: Vec<[f64; 3]> = f.log_sensitivity_f64().iter().map(|r| r.map(|v| { let x = 10f64.powf(v); if x.is_nan() { 0.0 } else { x } })).collect();
+    let sens: Vec<[f64; 3]> = f
+        .log_sensitivity_f64()
+        .iter()
+        .map(|r| {
+            r.map(|v| {
+                let x = 10f64.powf(v);
+                if x.is_nan() { 0.0 } else { x }
+            })
+        })
+        .collect();
     let mut t_neutral = Vec::new();
     let mut t_lut = Vec::new();
     for _ in 0..7 {
@@ -145,17 +168,31 @@ fn split(data: &Path, film: &str) {
         let neutral = spectral_service::neutral_spectrum(&lut, (0.3127, 0.3290));
         t_neutral.push(ms(t.elapsed()));
         let t = Instant::now();
-        std::hint::black_box(spectral_service::compute_tc_lut_with_window(&lut, &sens, &f.data.hanatos2025_adaptation_window_params, &neutral));
+        std::hint::black_box(spectral_service::compute_tc_lut_with_window(
+            &lut,
+            &sens,
+            &f.data.hanatos2025_adaptation_window_params,
+            &neutral,
+        ));
         t_lut.push(ms(t.elapsed()));
     }
     let tc = spectral_service::compute_tc_lut(&lut, &sens);
-    let gamut = spektrafilm_core::input_gamut::InputGamutCompress::from_params(&params.io.input_gamut_compress).unwrap();
+    let gamut = spektrafilm_core::input_gamut::InputGamutCompress::from_params(
+        &params.io.input_gamut_compress,
+    )
+    .unwrap();
     let mut t_remap = Vec::new();
     for _ in 0..7 {
         let t = Instant::now();
         std::hint::black_box(gamut.remap(&tc, [0.3324, 0.3474]));
         t_remap.push(ms(t.elapsed()));
     }
-    println!("{}", serde_json::json!({"active": gamut.is_active(), "remap_ms_min": min(&t_remap), "remap_ms_median": median(&t_remap)}));
-    println!("{}", serde_json::json!({"split": film, "neutral_ms": min(&t_neutral), "tc_lut_window_ms": min(&t_lut)}));
+    println!(
+        "{}",
+        serde_json::json!({"active": gamut.is_active(), "remap_ms_min": min(&t_remap), "remap_ms_median": median(&t_remap)})
+    );
+    println!(
+        "{}",
+        serde_json::json!({"split": film, "neutral_ms": min(&t_neutral), "tc_lut_window_ms": min(&t_lut)})
+    );
 }

@@ -937,9 +937,9 @@ impl Pipeline {
         let render_look = render_params.io.effective_render_look();
         let referent_color_only = matches!(
             render_look,
-            crate::params::RenderLook::ReferentColorOnly | crate::params::RenderLook::ReferentColorHncs
-        )
-            && render_params.io.input_scene_referred;
+            crate::params::RenderLook::ReferentColorOnly
+                | crate::params::RenderLook::ReferentColorHncs
+        ) && render_params.io.input_scene_referred;
         let referent_output = matches!(
             render_look,
             crate::params::RenderLook::ReferentOutput
@@ -970,7 +970,10 @@ impl Pipeline {
             let ev = autoexposure_ev
                 + render_params.camera.exposure_compensation_ev as f64
                 + render_params.prep.exposure_ev as f64
-                + color_ref.filming_exposure_correction.max(f64::MIN_POSITIVE).log2();
+                + color_ref
+                    .filming_exposure_correction
+                    .max(f64::MIN_POSITIVE)
+                    .log2();
             image = crate::referent::apply_color_only(&image, &lut, ev);
         }
         static CPU: spektrafilm_gpu::cpu_backend::CpuBackend =
@@ -992,7 +995,13 @@ impl Pipeline {
             let run =
                 |params: &spektrafilm_gpu::FilmChainParams<'_>| backend.try_run_film_chain(params);
             match self.try_gpu_resident(
-                &image, None, self.film_cache.is_some(), backend, &color_ref, autoexposure_ev, run,
+                &image,
+                None,
+                self.film_cache.is_some(),
+                backend,
+                &color_ref,
+                autoexposure_ev,
+                run,
             ) {
                 Ok(Some(out)) => {
                     tracing::info!("pipeline: gpu-resident fast path complete");
@@ -1079,10 +1088,7 @@ impl Pipeline {
                 &lut,
                 &render_params.io.output_color_space,
             );
-            stages::scanning::encode_output(
-                &mut result,
-                &render_params.io.output_color_space,
-            );
+            stages::scanning::encode_output(&mut result, &render_params.io.output_color_space);
         }
         Ok((result, backend.name()))
     }
@@ -1130,7 +1136,10 @@ impl Pipeline {
                         &lut,
                         &render_params.io.output_color_space,
                     );
-                    stages::scanning::encode_output(&mut scan, &render_params.io.output_color_space);
+                    stages::scanning::encode_output(
+                        &mut scan,
+                        &render_params.io.output_color_space,
+                    );
                 }
             }
             if matches!(
@@ -1146,16 +1155,21 @@ impl Pipeline {
                     crate::params::RenderLook::ReferentOutputHncsTone
                         | crate::params::RenderLook::ReferentOutputHncsSmoothTone
                 ) {
-                        true
-                    } else {
-                        render_params.io.output_cctf_encoding
-                    };
+                    true
+                } else {
+                    render_params.io.output_cctf_encoding
+                };
                 if matches!(
                     render_look,
                     crate::params::RenderLook::HasselbladHncsSmooth
                         | crate::params::RenderLook::ReferentOutputHncsSmoothTone
                 ) {
-                    crate::hncs::apply(&mut scan, &render_params.io.output_color_space, encoded, &render_params.post.hncs);
+                    crate::hncs::apply(
+                        &mut scan,
+                        &render_params.io.output_color_space,
+                        encoded,
+                        &render_params.post.hncs,
+                    );
                 } else {
                     crate::hncs::apply_reference(
                         &mut scan,
@@ -1169,16 +1183,19 @@ impl Pipeline {
         };
         let image = if matches!(
             render_params.io.effective_render_look(),
-            crate::params::RenderLook::ReferentColorOnly | crate::params::RenderLook::ReferentColorHncs
-        )
-            && render_params.io.input_scene_referred
+            crate::params::RenderLook::ReferentColorOnly
+                | crate::params::RenderLook::ReferentColorHncs
+        ) && render_params.io.input_scene_referred
         {
             if let Ok(lut) = crate::referent::load_cube(std::path::Path::new(
                 &render_params.io.referent_logc3_path,
             )) {
                 let ev = render_params.camera.exposure_compensation_ev as f64
                     + render_params.prep.exposure_ev as f64
-                    + color_ref.filming_exposure_correction.max(f64::MIN_POSITIVE).log2();
+                    + color_ref
+                        .filming_exposure_correction
+                        .max(f64::MIN_POSITIVE)
+                        .log2();
                 crate::referent::apply_color_only(&image, &lut, ev)
             } else {
                 image
@@ -1196,7 +1213,8 @@ impl Pipeline {
             color_ref.filming_exposure_correction,
             0.0,
         );
-        let filmed = stages::filming::develop(log_film.clone(), &self.film, &render_params, backend);
+        let filmed =
+            stages::filming::develop(log_film.clone(), &self.film, &render_params, backend);
         if render_params.io.scan_film {
             let scan = stages::scanning::process(
                 filmed,
@@ -1362,8 +1380,12 @@ impl Pipeline {
         let post = &self.params.post;
         // The resident display shader cannot sample this per-pixel mask. Leave
         // all post work to the coordinate-aware CPU pass while a matte is active.
-        if !post.background_mask_png_base64.is_empty() || !post.background_masks.is_empty()
-            || !post.color_density.is_identity() { return None; }
+        if !post.background_mask_png_base64.is_empty()
+            || !post.background_masks.is_empty()
+            || !post.color_density.is_identity()
+        {
+            return None;
+        }
         (!post.is_identity()).then(|| {
             crate::post::PostProcess::new(
                 post,
@@ -1410,8 +1432,16 @@ impl Pipeline {
             self.preflash_raw,
         );
         let autoexposure_ev = self.frame_autoexposure_ev(image);
-        self.try_gpu_resident(image, image_key, film_cache, backend, &color_ref, autoexposure_ev, run)
-            .ok()?
+        self.try_gpu_resident(
+            image,
+            image_key,
+            film_cache,
+            backend,
+            &color_ref,
+            autoexposure_ev,
+            run,
+        )
+        .ok()?
     }
 
     /// Resize the working image to the requested size, mirroring Python's
@@ -1491,7 +1521,13 @@ impl Pipeline {
             name.push(0);
             if prep_active {
                 name.extend(autoexposure_ev.to_bits().to_le_bytes());
-                name.extend(self.params.camera.exposure_compensation_ev.to_bits().to_le_bytes());
+                name.extend(
+                    self.params
+                        .camera
+                        .exposure_compensation_ev
+                        .to_bits()
+                        .to_le_bytes(),
+                );
                 name.extend(format!("{:?}", self.params.prep).as_bytes());
             }
             spektrafilm_gpu::FilmCacheSlot { slot, image: name }

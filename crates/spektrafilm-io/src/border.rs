@@ -411,7 +411,9 @@ fn overlay_nine_patch(out: &mut ImageBuf, mut texture: RgbaImage, pad: u32, enco
                 // Interpolated as sRGB values, as for an sRGB image, then
                 // converted to the image's space.
                 let tex = encoding.from_srgb([0, 1, 2].map(|c| {
-                    taps.iter().map(|&(i, k)| color[texels[i + c] as usize] * k).sum::<f32>()
+                    taps.iter()
+                        .map(|&(i, k)| color[texels[i + c] as usize] * k)
+                        .sum::<f32>()
                 }));
                 for (value, tex) in pixel.iter_mut().zip(tex) {
                     *value = from_f32(tex * alpha + to_f32(*value) * (1.0 - alpha));
@@ -538,22 +540,59 @@ mod tests {
     #[test]
     fn border_colours_are_converted_to_the_output_space() {
         use spektrafilm_math::colorspace::{RgbColourspace, SRGB, mat3_vec_f64};
-        let options = BorderOptions { width: Some(0.1), color: "#204060".parse().unwrap(), ..Default::default() };
-        let srgb_lin = [0x20, 0x40, 0x60].map(|v| to_f32(srgb_decode(from_f32(v as f32 / 255.0))) as f64);
+        let options = BorderOptions {
+            width: Some(0.1),
+            color: "#204060".parse().unwrap(),
+            ..Default::default()
+        };
+        let srgb_lin =
+            [0x20, 0x40, 0x60].map(|v| to_f32(srgb_decode(from_f32(v as f32 / 255.0))) as f64);
         let srgb_xyz = mat3_vec_f64(&SRGB.rgb_to_xyz, srgb_lin);
         for encoded in [true, false] {
             let encoding = Encoding::new("Display P3", encoded);
-            let out = add_border(&photo(200, 100), BorderStyle::Solid, &options, "", encoding, &data_dir()).unwrap();
+            let out = add_border(
+                &photo(200, 100),
+                BorderStyle::Solid,
+                &options,
+                "",
+                encoding,
+                &data_dir(),
+            )
+            .unwrap();
             let lin = out.get(0, 0).map(|v| encoding.decode(v));
             let xyz = mat3_vec_f64(&RgbColourspace::output("Display P3").rgb_to_xyz, lin);
             for c in 0..3 {
-                assert!((xyz[c] - srgb_xyz[c]).abs() < 1e-5, "{xyz:?} vs {srgb_xyz:?}");
+                assert!(
+                    (xyz[c] - srgb_xyz[c]).abs() < 1e-5,
+                    "{xyz:?} vs {srgb_xyz:?}"
+                );
             }
-            assert_eq!(out.get(20, 70), [from_f32(0.5); 3], "the photograph is untouched");
+            assert_eq!(
+                out.get(20, 70),
+                [from_f32(0.5); 3],
+                "the photograph is untouched"
+            );
         }
-        let white = BorderOptions { width: Some(0.1), ..Default::default() };
-        let out = add_border(&photo(200, 100), BorderStyle::Solid, &white, "", Encoding::new("ProPhoto RGB", true), &data_dir()).unwrap();
-        assert!(out.get(0, 0).iter().all(|&v| (to_f32(v) - 1.0).abs() < 2e-4), "{:?}", out.get(0, 0));
+        let white = BorderOptions {
+            width: Some(0.1),
+            ..Default::default()
+        };
+        let out = add_border(
+            &photo(200, 100),
+            BorderStyle::Solid,
+            &white,
+            "",
+            Encoding::new("ProPhoto RGB", true),
+            &data_dir(),
+        )
+        .unwrap();
+        assert!(
+            out.get(0, 0)
+                .iter()
+                .all(|&v| (to_f32(v) - 1.0).abs() < 2e-4),
+            "{:?}",
+            out.get(0, 0)
+        );
     }
 
     #[test]

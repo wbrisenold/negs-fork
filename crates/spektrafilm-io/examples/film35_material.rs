@@ -36,10 +36,14 @@ const DUST_FULL: f32 = 0.6;
 
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
-    let scan = args.next().context("usage: film35_material SCAN.jpg [DATA_DIR] [FIRST_PERF]")?;
+    let scan = args
+        .next()
+        .context("usage: film35_material SCAN.jpg [DATA_DIR] [FIRST_PERF]")?;
     let data = args.next().unwrap_or_else(|| "data".into());
     let first_perf: Option<usize> = args.next().map(|s| s.parse()).transpose()?;
-    let rgb = image::open(&scan).with_context(|| format!("opening {scan}"))?.to_rgb8();
+    let rgb = image::open(&scan)
+        .with_context(|| format!("opening {scan}"))?
+        .to_rgb8();
     let geometry = Registration::find(&rgb)?;
     eprintln!("{geometry:#?}");
 
@@ -132,7 +136,9 @@ impl Registration {
                 v.push((y - top - slope * x) * cos);
             }
             let span = |s: &[f32]| {
-                let (lo, hi) = s.iter().fold((f32::MAX, f32::MIN), |(a, b), &c| (a.min(c), b.max(c)));
+                let (lo, hi) = s
+                    .iter()
+                    .fold((f32::MAX, f32::MIN), |(a, b), &c| (a.min(c), b.max(c)));
                 (lo, hi)
             };
             found.push((span(&u), span(&v)));
@@ -155,7 +161,9 @@ impl Registration {
         let (offset, pitch) = fit_line(&points)?;
         let along = pitch / PERF_PITCH;
         let n = points.last().unwrap().0 as usize + 1;
-        let perfs = (0..n).map(|i| (offset + pitch * i as f32) / along).collect();
+        let perfs = (0..n)
+            .map(|i| (offset + pitch * i as f32) / along)
+            .collect();
         let mean = |f: &dyn Fn(&(f32, (f32, f32), (f32, f32))) -> f32| {
             let all: Vec<f32> = rows.iter().flatten().map(f).collect();
             all.iter().sum::<f32>() / all.len() as f32
@@ -194,7 +202,9 @@ impl Registration {
 fn fit_line(points: &[(f32, f32)]) -> Result<(f32, f32)> {
     let fit = |p: &[(f32, f32)]| {
         let n = p.len() as f64;
-        let (sx, sy) = p.iter().fold((0.0, 0.0), |(a, b), &(x, y)| (a + x as f64, b + y as f64));
+        let (sx, sy) = p
+            .iter()
+            .fold((0.0, 0.0), |(a, b), &(x, y)| (a + x as f64, b + y as f64));
         let (mx, my) = (sx / n, sy / n);
         let (sxx, sxy) = p.iter().fold((0.0, 0.0), |(a, b), &(x, y)| {
             let dx = x as f64 - mx;
@@ -332,7 +342,8 @@ fn extract(rgb: &RgbImage, geometry: &Registration, u0: f32) -> GrayAlphaImage {
         let (x0, y0) = (x.floor() as i64, y.floor() as i64);
         let (fx, fy) = (x - x0 as f32, y - y0 as f32);
         let at = |x: i64, y: i64, c: usize| {
-            rgb.get_pixel(x.clamp(0, sw - 1) as u32, y.clamp(0, sh - 1) as u32).0[c] as f32
+            rgb.get_pixel(x.clamp(0, sw - 1) as u32, y.clamp(0, sh - 1) as u32)
+                .0[c] as f32
         };
         std::array::from_fn(|c| {
             let top = at(x0, y0, c) * (1.0 - fx) + at(x0 + 1, y0, c) * fx;
@@ -359,7 +370,10 @@ fn extract(rgb: &RgbImage, geometry: &Registration, u0: f32) -> GrayAlphaImage {
             let in_row = |top: f32| (v - top).abs() <= ph / 2.0 + pad;
             let row = in_row(geometry.perf_edge + ph / 2.0)
                 || in_row(FILM_WIDTH - geometry.perf_edge - ph / 2.0);
-            (row && du.abs() <= pw / 2.0 + pad) || v < 0.1 || v > FILM_WIDTH - 0.1 || scan[k].iter().all(|&c| c > 235.0)
+            (row && du.abs() <= pw / 2.0 + pad)
+                || v < 0.1
+                || v > FILM_WIDTH - 0.1
+                || scan[k].iter().all(|&c| c > 235.0)
         })
         .collect();
 
@@ -377,11 +391,18 @@ fn extract(rgb: &RgbImage, geometry: &Registration, u0: f32) -> GrayAlphaImage {
     });
     let density: Vec<f32> = scan
         .iter()
-        .map(|s| (0..3).map(|c| (base[c] / s[c].max(1.0)).ln()).fold(f32::MIN, f32::max))
+        .map(|s| {
+            (0..3)
+                .map(|c| (base[c] / s[c].max(1.0)).ln())
+                .fold(f32::MIN, f32::max)
+        })
         .collect();
 
     // Marks: dense spots over a local base that ignores them.
-    let weight: Vec<f32> = perf_mask.iter().map(|&p| if p { 0.0 } else { 1.0 }).collect();
+    let weight: Vec<f32> = perf_mask
+        .iter()
+        .map(|&p| if p { 0.0 } else { 1.0 })
+        .collect();
     let local = masked_blur(&density, &weight, w, h, 0.3 * m);
     let marks: Vec<bool> = (0..w * h)
         .map(|k| !perf_mask[k] && density[k] - local[k] > MARK)
@@ -409,7 +430,13 @@ fn extract(rgb: &RgbImage, geometry: &Registration, u0: f32) -> GrayAlphaImage {
 
     // The base without any marks, and the marks over it.
     let clean: Vec<f32> = (0..w * h)
-        .map(|k| if perf_mask[k] || print[k] || dust[k] { 0.0 } else { 1.0 })
+        .map(|k| {
+            if perf_mask[k] || print[k] || dust[k] {
+                0.0
+            } else {
+                1.0
+            }
+        })
         .collect();
     let fine = masked_blur(&density, &clean, w, h, 0.05 * m);
     let slow = masked_blur(&density, &clean, w, h, 0.4 * m);

@@ -149,7 +149,11 @@ pub fn apply(image: &mut ImageBuf, profile: &Profile, area: Option<Area>) {
     if profile.warps() {
         // DNG warps are applied as written, cropping in only to avoid empty
         // borders; darktable's vendor curves assume a fitted scale.
-        let least = if matches!(profile.model, Model::Dng(_)) { 1.0 } else { 0.8 };
+        let least = if matches!(profile.model, Model::Dng(_)) {
+            1.0
+        } else {
+            0.8
+        };
         let zoom = fill_zoom(&lens, w as f64, h as f64, least);
         image.data = resample(&image.data, w, h, &lens, zoom);
     }
@@ -158,7 +162,12 @@ pub fn apply(image: &mut ImageBuf, profile: &Profile, area: Option<Area>) {
 /// A profile placed on an image of known size.
 enum Prepared<'a> {
     Dng(dng::Placed<'a>),
-    Radial { radial: &'a Radial, cx: f64, cy: f64, norm: f64 },
+    Radial {
+        radial: &'a Radial,
+        cx: f64,
+        cy: f64,
+        norm: f64,
+    },
 }
 
 impl<'a> Prepared<'a> {
@@ -178,7 +187,12 @@ impl<'a> Prepared<'a> {
     fn gain(&self, x: f64, y: f64) -> f64 {
         match self {
             Self::Dng(d) => d.gain(x, y),
-            Self::Radial { radial, cx, cy, norm } => {
+            Self::Radial {
+                radial,
+                cx,
+                cy,
+                norm,
+            } => {
                 let (dx, dy) = (x - cx, y - cy);
                 let r = (dx * dx + dy * dy).sqrt() / norm;
                 1.0 / spline(&radial.knots_vig, &radial.vig, r).max(1e-4)
@@ -190,7 +204,9 @@ impl<'a> Prepared<'a> {
     fn splits_planes(&self) -> bool {
         match self {
             Self::Dng(d) => d.splits_planes(),
-            Self::Radial { radial, .. } => radial.cor[0] != radial.cor[1] || radial.cor[2] != radial.cor[1],
+            Self::Radial { radial, .. } => {
+                radial.cor[0] != radial.cor[1] || radial.cor[2] != radial.cor[1]
+            }
         }
     }
 
@@ -199,9 +215,18 @@ impl<'a> Prepared<'a> {
     fn source(&self, plane: usize, x: f64, y: f64) -> (f64, f64) {
         match self {
             Self::Dng(d) => d.source(plane, x, y),
-            Self::Radial { radial, cx, cy, norm } => {
+            Self::Radial {
+                radial,
+                cx,
+                cy,
+                norm,
+            } => {
                 let (dx, dy) = (x - cx, y - cy);
-                let dr = spline(&radial.knots_dist, &radial.cor[plane], (dx * dx + dy * dy).sqrt() / norm);
+                let dr = spline(
+                    &radial.knots_dist,
+                    &radial.cor[plane],
+                    (dx * dx + dy * dy).sqrt() / norm,
+                );
                 (cx + dr * dx, cy + dr * dy)
             }
         }
@@ -217,7 +242,11 @@ fn spline(xi: &[f64], yi: &[f64], x: f64) -> f64 {
     for i in 1..xi.len() {
         if x >= xi[i - 1] && x <= xi[i] {
             let span = xi[i] - xi[i - 1];
-            return if span > 0.0 { yi[i - 1] + (x - xi[i - 1]) * (yi[i] - yi[i - 1]) / span } else { yi[i] };
+            return if span > 0.0 {
+                yi[i - 1] + (x - xi[i - 1]) * (yi[i] - yi[i - 1]) / span
+            } else {
+                yi[i]
+            };
         }
     }
     yi[yi.len() - 1]
@@ -311,24 +340,26 @@ fn resample(data: &[Scalar], w: usize, h: usize, lens: &Prepared, zoom: f64) -> 
     let (cx, cy) = (w as f64 / 2.0, h as f64 / 2.0);
     let shared = !lens.splits_planes();
     let mut out = vec![from_f32(0.0); w * h * 3];
-    out.par_chunks_exact_mut(w * 3).enumerate().for_each(|(y, row)| {
-        let yq = cy + (y as f64 + 0.5 - cy) / zoom;
-        for (x, px) in row.chunks_exact_mut(3).enumerate() {
-            let xq = cx + (x as f64 + 0.5 - cx) / zoom;
-            if shared {
-                let (sx, sy) = lens.source(1, xq, yq);
-                let rgb = sample(data, w, h, sx, sy);
-                for (v, s) in px.iter_mut().zip(rgb) {
-                    *v = from_f32(s);
-                }
-            } else {
-                for (c, v) in px.iter_mut().enumerate() {
-                    let (sx, sy) = lens.source(c, xq, yq);
-                    *v = from_f32(sample(data, w, h, sx, sy)[c]);
+    out.par_chunks_exact_mut(w * 3)
+        .enumerate()
+        .for_each(|(y, row)| {
+            let yq = cy + (y as f64 + 0.5 - cy) / zoom;
+            for (x, px) in row.chunks_exact_mut(3).enumerate() {
+                let xq = cx + (x as f64 + 0.5 - cx) / zoom;
+                if shared {
+                    let (sx, sy) = lens.source(1, xq, yq);
+                    let rgb = sample(data, w, h, sx, sy);
+                    for (v, s) in px.iter_mut().zip(rgb) {
+                        *v = from_f32(s);
+                    }
+                } else {
+                    for (c, v) in px.iter_mut().enumerate() {
+                        let (sx, sy) = lens.source(c, xq, yq);
+                        *v = from_f32(sample(data, w, h, sx, sy)[c]);
+                    }
                 }
             }
-        }
-    });
+        });
     out
 }
 

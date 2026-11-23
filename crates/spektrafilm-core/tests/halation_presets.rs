@@ -34,7 +34,10 @@ struct ProfileCase {
 }
 
 fn fixture() -> Fixture {
-    serde_json::from_str(include_str!("fixtures/halation_presets_python_28bf883.json")).unwrap()
+    serde_json::from_str(include_str!(
+        "fixtures/halation_presets_python_28bf883.json"
+    ))
+    .unwrap()
 }
 
 fn data_dir() -> PathBuf {
@@ -72,21 +75,43 @@ fn every_shipped_profile_digests_like_python() {
         .unwrap()
         .filter_map(|entry| {
             let path = entry.unwrap().path();
-            (path.extension()? == "json").then(|| path.file_stem().unwrap().to_string_lossy().into_owned())
+            (path.extension()? == "json")
+                .then(|| path.file_stem().unwrap().to_string_lossy().into_owned())
         })
         .collect();
     shipped.sort();
-    let frozen: Vec<&str> = fixture.profiles.iter().map(|case| case.stock.as_str()).collect();
-    assert_eq!(frozen, shipped, "refreeze the fixture after adding or removing profiles");
+    let frozen: Vec<&str> = fixture
+        .profiles
+        .iter()
+        .map(|case| case.stock.as_str())
+        .collect();
+    assert_eq!(
+        frozen, shipped,
+        "refreeze the fixture after adding or removing profiles"
+    );
     for case in &fixture.profiles {
         let film = profile::load_profile_by_name(&data, &case.stock).unwrap();
-        assert_eq!((film.info.usage.as_str(), film.info.antihalation.as_str()),
-                   (case.usage.as_str(), case.antihalation.as_str()), "{}", case.stock);
+        assert_eq!(
+            (film.info.usage.as_str(), film.info.antihalation.as_str()),
+            (case.usage.as_str(), case.antihalation.as_str()),
+            "{}",
+            case.stock
+        );
         let film = profile::resolve_for_render(film, None);
         let mut params = RuntimeParams::default();
         pipeline::apply_film_specific_params(&film, &mut params);
         let h = &params.film_render.halation;
-        assert_eq!(h.first_sigma_um(), lanes(case.halation_first_sigma_um, case.is_bw), "{}", case.stock);
-        assert_eq!(h.strength(), lanes(case.halation_strength, case.is_bw), "{}", case.stock);
+        assert_eq!(
+            h.first_sigma_um(),
+            lanes(case.halation_first_sigma_um, case.is_bw),
+            "{}",
+            case.stock
+        );
+        assert_eq!(
+            h.strength(),
+            lanes(case.halation_strength, case.is_bw),
+            "{}",
+            case.stock
+        );
     }
 }
