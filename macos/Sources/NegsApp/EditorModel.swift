@@ -623,7 +623,7 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
     @ObservationIgnored private var matchEngine: (helper: URL, data: URL, stamp: String)?
     /// The photograph the helper decoded alone (for a match, or before the
     /// first frame), and its size from that decode.
-    @ObservationIgnored private var decodedFor: (generation: Int, size: CGSize)?
+    @ObservationIgnored private var decodedFor: (frame: FrameID, size: CGSize)?
     /// What the canvas shows before the first frame: this generation's
     /// placeholder, at the photograph's size; `kept` when it's the
     /// photograph's kept last develop.
@@ -647,6 +647,7 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
     #if DEBUG
     /// Each render sent to the helper, for tests.
     @ObservationIgnored private(set) var renderLog: [RenderStep] = []
+    @ObservationIgnored private(set) var decodedFrameLog: [FrameID] = []
     /// Runs as each render starts, before it looks at anything, for tests.
     @ObservationIgnored var willRender: (() -> Void)?
     func killHelperForTesting() { engine?.killHelperForTesting() }
@@ -4087,12 +4088,15 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
         // develop or its restored frame shows: those go straight to export size.
         let firstFrame = image == nil
         let showsFinishedFrame = showingCachedPreview || firstFrame && placeholderFor.map { $0.generation == generation && $0.kept } == true
-        if firstFrame, !showsFinishedFrame, !interacting, decodedFor?.generation != generation {
+        if firstFrame, !showsFinishedFrame, !interacting, decodedFor?.frame != frame {
             rendering = true
+#if DEBUG
+            decodedFrameLog.append(frame)
+#endif
             let decoded = try? await engine.request(decodeOnlyCommand(source: source, generation: generation, state: snapshot, engine: engine)).1
             rendering = false
             // A failed decode leaves its error to the render.
-            if generation == sourceGeneration { decodedFor = (generation, decoded.map { CGSize(width: $0["source_width"].double, height: $0["source_height"].double) } ?? .zero) }
+            if frame == currentFrame { decodedFor = (frame, decoded.map { CGSize(width: $0["source_width"].double, height: $0["source_height"].double) } ?? .zero) }
             guard !closing else { return }
             guard revision == currentRevision, generation == sourceGeneration else { return scheduleRender() }
         }
@@ -4113,7 +4117,7 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
         let firstFrameScale: CGFloat? = {
             guard image == nil else { return nil }
             if rawSource {
-                let size = decodedFor?.generation == generation ? decodedFor?.size : nil
+                let size = decodedFor?.frame == frame ? decodedFor?.size : nil
                 return Self.rawPreviewScale(requested: nil, photoSize: size)
             }
             guard !showingCachedPreview else { return nil }
@@ -4127,7 +4131,7 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
         // become full 12 MP develops. Full-resolution work remains for export.
         let requestedScale = canvasScale.screenPixelsPerPhotoPixel ?? firstFrameScale
         let screenScale = rawSource
-            ? Self.rawPreviewScale(requested: requestedScale, photoSize: sourceSize == .zero ? decodedFor?.size : sourceSize)
+            ? Self.rawPreviewScale(requested: requestedScale, photoSize: sourceSize == .zero && decodedFor?.frame == frame ? decodedFor?.size : sourceSize)
             : requestedScale
         let step = Self.renderStep(
             interacting: interacting, screenScale: screenScale,
@@ -4147,7 +4151,7 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
         // scale on the follow-up render decodes and develops the full negative
         // on the editor queue; export is the full-resolution path.
         let interactiveScale = step.interactiveScale ?? (rawSource
-            ? Self.rawPreviewScale(requested: nil, photoSize: sourceSize == .zero ? decodedFor?.size : sourceSize)
+            ? Self.rawPreviewScale(requested: nil, photoSize: sourceSize == .zero && decodedFor?.frame == frame ? decodedFor?.size : sourceSize)
             : nil)
         if let interactiveScale { command["interactive_scale"] = .number(Double(interactiveScale)) }
         rendering = true
@@ -5218,7 +5222,7 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
                 try stillWanted()
                 let raw = decoded["raw"].bool
                 let size = CGSize(width: decoded["source_width"].double, height: decoded["source_height"].double)
-                self?.decodedFor = (generation, size)
+                if frame == self?.currentFrame { self?.decodedFor = (frame, size) }
                 if askDeclared, let self, self.matchReference?.generation == generation {
                     self.matchReference?.declared = decoded["preview_colour_space"]
                 }

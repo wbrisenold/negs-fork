@@ -416,6 +416,30 @@ final class QuickFrameStepTests: XCTestCase {
         XCTAssertFalse(model.holdingFrameForMatch)
     }
 
+    /// An edit arriving during the first decode cannot borrow that decode's
+    /// dimensions and pipeline state. The current edit gets its own decode.
+    func testFirstFrameDecodeBelongsToTheEditItRenders() async throws {
+        let model = EditorModel()
+        models.append(model)
+        model.canvasScale.fixed = 0.25
+        await model.start(paths: paths(), restoration: Task { nil })
+        var editScheduled = false
+        model.willRender = { [unowned model] in
+            guard !editScheduled else { return }
+            editScheduled = true
+            Task { @MainActor in
+                while model.decodedFrameLog.isEmpty { await Task.yield() }
+                model.chooseFilm("kodak_ektar_100")
+            }
+        }
+        model.open(try testPhoto())
+        try await settled(model)
+        let current = model.currentFrame
+        XCTAssertTrue(model.decodedFrameLog.contains(current), "The first frame must use a decode for its current edit")
+        XCTAssertEqual(model.film, "kodak_ektar_100")
+        XCTAssertEqual(model.shownFrame?.frame, current)
+    }
+
     /// Matching turned on while a quick frame shows, before its settled
     /// render starts (at exposure 0 that's no new edit): the settled render
     /// waits for the solve, so the old exposure never renders at export size.
