@@ -69,6 +69,26 @@ enum InspectorTab: String, CaseIterable {
         case .output: "square.and.arrow.up"
         }
     }
+
+    /// Reading and keyboard order shared by the visible tab row and focus loop.
+    static let focusOrder = allCases
+
+    /// The task tabs use Command-Option-number, leaving the existing menu
+    /// routes (including Command-Option-I/P) unchanged.
+    var shortcutKey: String { String(ordinal) }
+
+    private var ordinal: Int { Self.focusOrder.firstIndex(of: self)! + 1 }
+    var shortcutModifiers: EventModifiers { [.command, .option] }
+    var accessibilityName: String { title }
+    var accessibilityHint: String { "Show \(title) adjustments (Command-Option-\(shortcutKey))" }
+    func accessibilityLabel(editCount: Int) -> String {
+        editCount > 0 ? "\(title), \(editCount) \(editCount == 1 ? "edit" : "edits")" : title
+    }
+    func accessibilityValue(isSelected: Bool, editCount: Int) -> String {
+        let state = isSelected ? "Selected" : "Not selected"
+        guard editCount > 0 else { return state }
+        return "\(state), \(editCount) \(editCount == 1 ? "edit" : "edits")"
+    }
 }
 
 let prepToneControls: [Adjustment] = [
@@ -903,8 +923,9 @@ struct TabRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 2) {
-            ForEach(InspectorTab.allCases, id: \.self) { item in
+            ForEach(InspectorTab.focusOrder, id: \.self) { item in
                 TabWord(title: item.title, symbol: item.symbol, chosen: tab == item, count: counts[item] ?? 0,
+                        tab: item,
                         edits: edits.map { make in { dismiss in make(item, dismiss) } }) { tab = item }
             }
         }
@@ -924,6 +945,7 @@ struct TabWord: View {
     var count = 0
     /// The edit list opened from the small marker when this tab has changes.
     var edits: ((@escaping () -> Void) -> AnyView)? = nil
+    var tab: InspectorTab? = nil
     let choose: () -> Void
     @State private var hovered = false
     @State private var listShown = false
@@ -979,7 +1001,11 @@ struct TabWord: View {
             .buttonStyle(InkPressStyle())
             .onHover { hovered = $0 }
             .inkFocus(activate: choose)
-            .accessibilityLabel(count > 0 ? "\(title), \(count) \(count == 1 ? "edit" : "edits")" : title)
+            .modifier(TaskTabKeyboardShortcut(tab: tab))
+            .accessibilityLabel(tab?.accessibilityLabel(editCount: count) ?? (count > 0 ? "\(title), \(count) \(count == 1 ? "edit" : "edits")" : title))
+            .accessibilityValue(tab?.accessibilityValue(isSelected: chosen, editCount: count))
+            .accessibilityHint(tab?.accessibilityHint ?? "")
+            .help(tab?.accessibilityHint ?? "")
             .accessibilityAddTraits(chosen ? [.isSelected, .isButton] : .isButton)
             .frame(maxWidth: .infinity)
             if count > 0 {
@@ -1000,6 +1026,18 @@ struct TabWord: View {
                 .accessibilityLabel("\(count) \(count == 1 ? "edit" : "edits") on \(title)")
         } else {
             mark.accessibilityHidden(true)
+        }
+    }
+}
+
+private struct TaskTabKeyboardShortcut: ViewModifier {
+    let tab: InspectorTab?
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if let tab {
+            content.keyboardShortcut(KeyEquivalent(tab.shortcutKey), modifiers: tab.shortcutModifiers)
+        } else {
+            content
         }
     }
 }
