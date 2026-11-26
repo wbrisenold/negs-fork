@@ -230,6 +230,9 @@ struct LibraryWorkspaceView: View {
                             Text("Scanning \(library.refreshProgress) / \(library.refreshTotal) sources")
                                 .font(Theme.ui(10)).foregroundStyle(Theme.dim).monospacedDigit()
                                 .help("Folder scans run in the background; the Library remains available while they finish.")
+                        } else if library.refreshTotal > 0 && library.error == nil {
+                            Text("Scan complete · \(library.refreshTotal) sources")
+                                .font(Theme.ui(10)).foregroundStyle(Theme.dim).monospacedDigit()
                         }
                     }
                 }

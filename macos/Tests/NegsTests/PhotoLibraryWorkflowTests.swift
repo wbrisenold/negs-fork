@@ -130,4 +130,58 @@ import XCTest
         XCTAssertEqual((object?["folders"] as? [[String: Any]])?.count, 2)
         XCTAssertNotNil(library.error)
     }
+
+    func testReimportingSourceDoesNotDuplicateLibraryEntries() async throws {
+        let fixture = try await fixture()
+        defer { fixture.clean() }
+        let source = fixture.root.appendingPathComponent("source")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        try Data("photo".utf8).write(to: source.appendingPathComponent("same.png"))
+
+        await fixture.library.importFolders([source])
+        await fixture.library.importFolders([source.standardizedFileURL])
+
+        XCTAssertEqual(fixture.library.photos.filter { $0.file.url.lastPathComponent == "same.png" }.count, 1)
+        XCTAssertEqual(fixture.library.refreshProgress, fixture.library.refreshTotal)
+    }
+
+    func testPartialFolderFailureKeepsSuccessfulAndCataloguedPhotosAndCanRetry() async throws {
+        let fixture = try await fixture()
+        defer { fixture.clean() }
+        let library = fixture.library
+        let goodSource = fixture.root.appendingPathComponent("good")
+        try FileManager.default.createDirectory(at: goodSource, withIntermediateDirectories: true)
+        try Data("new".utf8).write(to: goodSource.appendingPathComponent("new.png"))
+        let badSource = fixture.root.appendingPathComponent("offline")
+        let initialCount = library.photos.count
+
+        await library.importFolders([goodSource, badSource])
+
+        XCTAssertEqual(library.photos.count, initialCount + 1)
+        XCTAssertTrue(library.photos.contains { $0.file.url.lastPathComponent == "new.png" && !$0.missing })
+        XCTAssertTrue(library.photos.contains { $0.file.url.lastPathComponent == "a.png" })
+        XCTAssertNotNil(library.error)
+
+        try FileManager.default.createDirectory(at: badSource, withIntermediateDirectories: true)
+        try Data("restored".utf8).write(to: badSource.appendingPathComponent("a.png"))
+        await library.refresh()
+
+        XCTAssertNil(library.error)
+        XCTAssertEqual(library.photos.filter { $0.file.url.lastPathComponent == "a.png" }.count, 1)
+        XCTAssertFalse(library.photos.first { $0.file.url.lastPathComponent == "a.png" }?.missing ?? true)
+    }
+
+    func testSuccessfulScanMarksPreviouslyCataloguedMissingFile() async throws {
+        let fixture = try await fixture()
+        defer { fixture.clean() }
+        let library = fixture.library
+        let source = fixture.root.appendingPathComponent("offline")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        try Data("present".utf8).write(to: source.appendingPathComponent("a.png"))
+        await library.refresh()
+
+        XCTAssertTrue(library.photos.contains { $0.file.url.lastPathComponent == "b.png" && $0.missing })
+        XCTAssertEqual(library.refreshProgress, library.refreshTotal)
+        XCTAssertNil(library.error)
+    }
 }

@@ -1071,6 +1071,8 @@ private struct LibraryProjectDocument: Codable, Sendable {
             persist()
         } else if !sources.isEmpty {
             error = refreshError(for: scans)
+        } else {
+            error = nil
         }
         if let selectedPhotoURL, !photos.contains(where: { $0.file.url == selectedPhotoURL }) {
             self.selectedPhotoURL = nil
