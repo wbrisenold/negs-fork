@@ -23,6 +23,7 @@ CONSTANTS MaxGen,    \* photographs opened
           MaxEdits   \* user actions other than opening
 
 NoFrame == [rev |-> -1, gen |-> -1]
+(* `image` carries the model's shownFrame: render kind, revision and generation. *)
 NoImage == [kind |-> "none", rev |-> -1, gen |-> -1]
 NoHeld  == [rev |-> -1, gen |-> -1, img |-> NoImage]
 RIdle   == [pc |-> "idle", rev |-> -1, gen |-> -1, step |-> "none", first |-> FALSE, finished |-> FALSE]
@@ -100,7 +101,7 @@ BeginRequest(st, first, finished, q) ==
     LET frame       == Frame(st)
         phShown     == st.phFor.gen = st.gen /\ ~st.phFor.kept
         scale       == ~first \/ phShown
-        sized       == ~first \/ st.decodedFor = st.gen
+        sized       == ~first \/ st.decodedFor = frame
         step        == IF st.interacting THEN (IF q /\ scale THEN "drag" ELSE "settled")
                        ELSE IF q /\ scale /\ sized /\ ~finished /\ st.quickStep # frame THEN "quick"
                        ELSE "settled"
@@ -133,7 +134,7 @@ RunRender(st, q) ==
     LET first    == st1.image.kind = "none"
         finished == st1.showingCached \/ (first /\ st1.phFor.gen = st1.gen /\ st1.phFor.kept)
     IN
-    IF first /\ ~finished /\ ~st1.interacting /\ st1.decodedFor # st1.gen
+    IF first /\ ~finished /\ ~st1.interacting /\ st1.decodedFor # Frame(st1)
     THEN [st1 EXCEPT !.rendering = TRUE,
                      !.r = [pc |-> "decoding", rev |-> st1.rev, gen |-> st1.gen, step |-> "none",
                             first |-> first, finished |-> finished]]
@@ -217,7 +218,7 @@ RenderTask ==
 DecodeDone ==
     /\ s.r.pc = "decoding"
     /\ LET r   == s.r
-           st1 == [s EXCEPT !.decodedFor = IF r.gen = s.gen THEN r.gen ELSE @, !.rendering = FALSE, !.r = RIdle]
+           st1 == [s EXCEPT !.decodedFor = IF Frame(s) = Frame(r) THEN Frame(r) ELSE @, !.rendering = FALSE, !.r = RIdle]
            \* FIX 1: matching turned on during the decode is solved first too.
            solveFirst == /\ ~st1.interacting /\ ~st1.cropping /\ MatchPending(st1)
                          /\ st1.matchDecodeFailed # Frame(st1)
@@ -281,7 +282,7 @@ MatchStart ==
 MatchDecodeDone ==
     /\ s.m.pc = "decoding"
     /\ \/ s' = MatchFinish([s EXCEPT !.matchDecodeFailed = s.m.frame])
-       \/ s' = [s EXCEPT !.decodedFor = s.m.gen, !.m.pc = "solving"]
+       \/ s' = [s EXCEPT !.decodedFor = IF Frame(s) = s.m.frame THEN s.m.frame ELSE @, !.m.pc = "solving"]
 
 MatchSolveDone ==
     /\ s.m.pc = "solving"
@@ -317,7 +318,7 @@ Init ==
          matchOn |-> FALSE, inputsVer |-> 0, solvedVer |-> -1, failGen |-> -1, failedVer |-> -1,
          image |-> NoImage, ph |-> "none", phFor |-> [gen |-> -1, kept |-> FALSE],
          previewCurrent |-> FALSE, failed |-> FALSE, showingCached |-> FALSE, interactiveShown |-> FALSE,
-         quickStep |-> NoFrame, decodedFor |-> -1, matchDecodeFailed |-> NoFrame, held |-> NoHeld,
+         quickStep |-> NoFrame, decodedFor |-> NoFrame, matchDecodeFailed |-> NoFrame, held |-> NoHeld,
          pending |-> FALSE, rendering |-> FALSE,
          r |-> RIdle, m |-> MIdle, early |-> EIdle,
          sentStaleSettled |-> FALSE]
@@ -359,6 +360,24 @@ NoPlaceholderOverFrame == s.image.kind # "none" => s.ph = "none"
 (* the settled render of the current edit.                                  *)
 PreviewCurrentIsTrue ==
     s.previewCurrent => /\ s.image.kind = "settled" /\ s.image.rev = s.rev /\ s.image.gen = s.gen
+
+(* `FrameStatus.current` in EditorModel: the shown frame is the settled     *)
+(* frame for this exact revision and photograph. Quick and drag frames are *)
+(* shown frames, but they do not make the requested FrameID current.       *)
+FrameStatusCurrent(st) ==
+    st.previewCurrent /\ st.image.kind = "settled" /\ st.image.rev = st.rev /\ st.image.gen = st.gen
+
+FrameStatus(st) ==
+    IF st.gen = 0 THEN "empty"
+    ELSE IF st.failed THEN "failed"
+    ELSE IF st.rendering THEN "rendering"
+    ELSE IF FrameStatusCurrent(st) THEN "current"
+    ELSE "pending"
+
+FrameStatusCurrentIsSettled ==
+    FrameStatus(s) = "current" =>
+        /\ s.image.kind = "settled" /\ s.image.rev = s.rev /\ s.image.gen = s.gen
+
 
 (* A held frame is this photograph's. *)
 HeldIsThisPhoto == s.held # NoHeld => s.held.gen = s.gen

@@ -25,8 +25,14 @@ Safety, in every reachable state:
 
 - `ImageOfThisPhoto`: the canvas never shows another photograph's frame.
 - `NoPlaceholderOverFrame`: a developed frame is never covered by a placeholder.
-- `PreviewCurrentIsTrue`: `previewCurrent` (Save, Export, thumbnails) means the
-  frame on the canvas is the settled render of the current edit.
+- `PreviewCurrentIsTrue`: the model's settled-current predicate (the condition
+  behind `FrameStatus.current` in `EditorModel`) means the shown frame is the
+  settled render for the current edit.
+- `FrameStatusCurrentIsSettled`: the observable `FrameStatus.current` state is
+  available only for the settled frame whose revision and generation match
+  `currentFrame`; quick and drag frames do not count as current. The TLA
+  `FrameStatus` function follows the Swift status precedence: empty, failed,
+  rendering, then current or pending.
 - `HeldIsThisPhoto`, `HeldHasSolve`: a frame held for the match belongs to this
   photograph, and a running solve will show it.
 - `NoSettledRenderOfStaleMatch`: the old exposure is never rendered at export
@@ -64,4 +70,8 @@ SIGPIPE (`Engine.swift`).
 The model is only as good as its match with the code. When changing
 `render()`, `reconcileBrightnessMatch()`, `endInteraction()`, `endCrop()`, the
 held frame or the early frames, change the matching action here and run the
-check. A new `await` is a new action.
+check. The decode cache is keyed by the complete `FrameID` (revision and
+generation), like `EditorModel.decodedFor`; a decode that finishes after an
+edit must not size the next revision's first render. In the model,
+`Frame(st)` is Swift's `currentFrame`, while the image record is `shownFrame`
+(its kind is the render step). A new `await` is a new action.
