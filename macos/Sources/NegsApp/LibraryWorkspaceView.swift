@@ -117,11 +117,7 @@ struct LibraryWorkspaceView: View {
                         ForEach(library.projects) { project in
                             NavigationRow(title: project.name, symbol: "briefcase",
                                           count: library.count(for: project), selected: library.selectedProjectID == project.id) {
-                                library.selectedProjectID = project.id
-                                library.selectedFolderID = nil
-                                library.selectedAlbumID = nil
-                                library.selectedSmartCollectionID = nil
-                                library.filter = .all
+                                _ = LibraryWorkflow.perform(.openProject(project.id), in: library)
                             }
                             .help("Open this project and its groups. Original files stay in place.")
                             .contextMenu {
@@ -147,19 +143,13 @@ struct LibraryWorkspaceView: View {
                                       count: library.count(for: project),
                                       selected: library.selectedFolderID == nil && library.selectedAlbumID == nil
                                         && library.selectedSmartCollectionID == nil && library.filter == .all) {
-                            library.selectedFolderID = nil
-                            library.selectedAlbumID = nil
-                            library.selectedSmartCollectionID = nil
-                            library.filter = .all
+                            _ = LibraryWorkflow.perform(.openReview(.all), in: library)
                         }
                         ForEach(LibraryFilter.allCases.filter { $0 != .all && ($0 != .missing || hasLocationScope) }) { filter in
                             NavigationRow(title: filter.title, symbol: filter.symbol, count: library.count(for: filter),
                                           selected: library.selectedFolderID == nil && library.selectedAlbumID == nil
                                             && library.selectedSmartCollectionID == nil && library.filter == filter) {
-                                library.selectedFolderID = nil
-                                library.selectedAlbumID = nil
-                                library.selectedSmartCollectionID = nil
-                                library.filter = filter
+                                _ = LibraryWorkflow.perform(.openReview(filter), in: library)
                             }
                         }
                     }
@@ -172,10 +162,7 @@ struct LibraryWorkspaceView: View {
                         ForEach(library.categories(for: project.id)) { category in
                             NavigationRow(title: category.name, symbol: "square.grid.2x2",
                                           count: library.count(for: category), selected: library.selectedAlbumID == category.id) {
-                                library.selectedFolderID = nil
-                                library.selectedAlbumID = category.id
-                                library.selectedSmartCollectionID = nil
-                                library.filter = .all
+                                _ = LibraryWorkflow.perform(.openGroup(category.id), in: library)
                             }
                             .contextMenu { categoryActions(category) }
                         }
@@ -198,6 +185,7 @@ struct LibraryWorkspaceView: View {
 
     private func content(visiblePhotos: [LibraryPhoto], topPickURLs: Set<URL>, topPickLabel: String) -> some View {
         let displayedPhotos = displayedPhotos(from: visiblePhotos, topPicks: topPickURLs)
+        let workflowState = LibraryWorkflow.visibleState(in: library, displaying: displayedPhotos)
         let editablePhotos = displayedPhotos.filter { !$0.missing }
         let selectedURLs = library.gridSelection.selected.union(library.selectedPhotoURL.map { Set([$0]) } ?? [])
         let selectedPhotos = displayedPhotos.filter { selectedURLs.contains($0.file.url) }
@@ -207,16 +195,16 @@ struct LibraryWorkspaceView: View {
         let editTargets = selectedURLs.isEmpty ? editablePhotos : selectedReady
         let unqueuedSelectionCount = selectedReady.filter { !$0.selectedForExport }.count
         let offlineCount = displayedPhotos.count - editablePhotos.count
-        let projectIsEmpty = library.selectedProjectID.flatMap { id in library.projects.first { $0.id == id } }
-            .map { $0.folderIDs.isEmpty && $0.photoPaths.isEmpty } ?? true
+        let projectIsEmpty = workflowState.emptyState?.nextStep == .addPhotos
         return VStack(spacing: 0) {
             HStack(spacing: StudioStyle.Space.compact) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(currentScopeLabel).font(Theme.metadata(10)).tracking(1.0).foregroundStyle(Theme.dim)
+                    Text(workflowState.scopeLabel).font(Theme.metadata(10)).tracking(1.0).foregroundStyle(Theme.dim)
                     HStack(spacing: 7) {
-                        Text(currentTitle).font(Theme.text(18, weight: 600)).foregroundStyle(Theme.paper)
+                        Text(workflowState.title).font(Theme.text(18, weight: 600)).foregroundStyle(Theme.paper)
                             .lineLimit(1).truncationMode(.tail)
-                        Text("\(displayedPhotos.count) photos").font(Theme.metadata(10.5)).foregroundStyle(Theme.dim)
+                        Text("\(workflowState.photoCount) photos · \(workflowState.selectedCount) selected")
+                            .font(Theme.metadata(10.5)).foregroundStyle(Theme.dim).monospacedDigit()
                             .lineLimit(1).fixedSize(horizontal: true, vertical: false)
                             .help(library.selectedProjectID != nil
                                   ? "Project membership and library changes are saved automatically on this Mac."
@@ -540,62 +528,21 @@ struct LibraryWorkspaceView: View {
             }
             if !library.loaded || library.refreshing && library.photos.isEmpty {
                 ProgressView("Loading Library…").frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if displayedPhotos.isEmpty {
-                VStack(spacing: 12) {
-                    if projectIsEmpty {
-                        VStack(spacing: 10) {
-                            Image(systemName: "briefcase")
-                                .font(.system(size: 25, weight: .regular))
-                                .foregroundStyle(Theme.accent)
-                                .accessibilityHidden(true)
-                            Text("Project Ready")
-                                .font(Theme.text(17, weight: 600)).foregroundStyle(Theme.paper)
-                            Text("Add photos to this project. Originals stay where they are.")
-                                .font(Theme.ui(12)).foregroundStyle(Theme.dim)
-                                .multilineTextAlignment(.center)
-                            HStack(spacing: 8) {
-                                Button("Add Photos…", systemImage: "photo.badge.plus", action: importFolders)
-                                    .buttonStyle(OutlinedButtonStyle(prominent: true))
-                                Button("Select Photos…", action: { showingProjectPhotoPicker = true })
-                                    .buttonStyle(OutlinedButtonStyle())
-                            }
-                            .padding(.top, 3)
-                        }
-                        .padding(24)
-                    } else if !library.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        ContentUnavailableView("No Photos Match", systemImage: "magnifyingglass",
-                                               description: Text("Try another name or clear the search to see the photographs in this view."))
-                        Button("Clear Search", systemImage: "xmark.circle") {
-                            librarySearchInput = ""
-                            library.searchText = ""
-                        }
-                        .buttonStyle(OutlinedButtonStyle(prominent: true))
-                    } else if !visiblePhotos.isEmpty || library.filter != .all || !library.cullFilters.isEmpty {
-                        ContentUnavailableView("Filters Hide Every Photo", systemImage: "line.3.horizontal.decrease.circle",
-                                               description: Text("Clear the active Library and culling filters to show this view’s photographs."))
-                        Button("Clear Filters", systemImage: "xmark.circle") {
-                            library.filter = .all
-                            library.selectedSmartCollectionID = nil
-                            library.cullFilters.removeAll()
-                        }
-                        .buttonStyle(OutlinedButtonStyle(prominent: true))
-                    } else {
-                        ContentUnavailableView(projectIsEmpty ? "Set Up Your Project" : "No Photos Available",
-                                               systemImage: projectIsEmpty ? "photo.badge.plus" : "photo.on.rectangle.angled",
-                                               description: Text(projectIsEmpty
-                                                ? "Add photos to this project. Your originals stay where they are."
-                                                : "No photographs are currently available. Refresh this project’s sources to check for changes."))
-                        if projectIsEmpty {
-                            Button("Add Photos…", systemImage: "photo.badge.plus", action: importFolders)
-                                .buttonStyle(OutlinedButtonStyle(prominent: true))
-                        } else {
-                            Button("Refresh Project Photos", systemImage: "arrow.clockwise") {
-                                Task { await library.refresh() }
-                            }
-                            .buttonStyle(OutlinedButtonStyle(prominent: true))
-                        }
-                    }
+            } else if let emptyState = workflowState.emptyState {
+                VStack(spacing: 9) {
+                    Image(systemName: emptyState.nextStep == .addPhotos || emptyState.nextStep == .createProject
+                          ? "photo.badge.plus" : "square.stack.3d.up")
+                        .font(.system(size: 24, weight: .regular)).foregroundStyle(Theme.accent)
+                        .accessibilityHidden(true)
+                    Text(emptyState.title).font(Theme.text(16, weight: 600)).foregroundStyle(Theme.paper)
+                    Text(emptyState.explanation).font(Theme.ui(11)).foregroundStyle(Theme.dim)
+                        .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                    workflowNextStepButton(for: emptyState.nextStep)
+                        .padding(.top, 3)
                 }
+                .frame(maxWidth: 390)
+                .padding(24)
+                .studioWorkspaceCard()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
@@ -627,6 +574,47 @@ struct LibraryWorkspaceView: View {
         Task { @MainActor in
             await Task.yield()
             librarySearchFocused = true
+        }
+    }
+
+    @ViewBuilder private func workflowNextStepButton(for step: LibraryWorkflowNextStep) -> some View {
+        switch step {
+        case .createProject:
+            Button("Create Project…", systemImage: "briefcase", action: {
+                projectName = ""
+                showingProjectSheet = true
+            })
+            .buttonStyle(StudioActionButtonStyle(kind: .primary))
+        case .addPhotos:
+            HStack(spacing: 8) {
+                Button("Add Photos…", systemImage: "photo.badge.plus", action: importFolders)
+                    .buttonStyle(StudioActionButtonStyle(kind: .primary))
+                Button("Select Photos…", action: { showingProjectPhotoPicker = true })
+                    .buttonStyle(StudioActionButtonStyle(kind: .secondary))
+            }
+        case .browseProjectPhotos:
+            Button("View All Photos", systemImage: "square.grid.2x2") {
+                _ = LibraryWorkflow.perform(.openReview(.all), in: library)
+            }
+            .buttonStyle(StudioActionButtonStyle(kind: .primary))
+        case .clearSearch:
+            Button("Clear Search", systemImage: "xmark.circle") {
+                librarySearchInput = ""
+                library.searchText = ""
+            }
+            .buttonStyle(StudioActionButtonStyle(kind: .primary))
+        case .clearFilters:
+            Button("Clear Filters", systemImage: "xmark.circle") {
+                library.filter = .all
+                library.selectedSmartCollectionID = nil
+                library.cullFilters.removeAll()
+            }
+            .buttonStyle(StudioActionButtonStyle(kind: .primary))
+        case .refreshSources:
+            Button("Refresh Project Photos", systemImage: "arrow.clockwise") {
+                Task { await library.refresh() }
+            }
+            .buttonStyle(StudioActionButtonStyle(kind: .primary))
         }
     }
 
@@ -816,14 +804,6 @@ struct LibraryWorkspaceView: View {
         }.padding(20).background(Theme.panel).preferredColorScheme(.dark)
     }
 
-    private var currentTitle: String {
-        if let album = library.albums.first(where: { $0.id == library.selectedAlbumID }) { return album.name }
-        if let collection = library.smartCollections.first(where: { $0.id == library.selectedSmartCollectionID }) { return collection.name }
-        if let folder = library.folders.first(where: { $0.id == library.selectedFolderID }) { return folder.name }
-        if let project = library.projects.first(where: { $0.id == library.selectedProjectID }) { return project.name }
-        return library.filter.title
-    }
-
     private var projectRenameDescription: String {
         guard let id = projectToRename,
               let path = library.projects.first(where: { $0.id == id })?.projectFilePath,
@@ -831,14 +811,6 @@ struct LibraryWorkspaceView: View {
             return "This project has not been saved as a .negproject file yet. Its new name will be used when you export it."
         }
         return "Its saved .negproject file will also be renamed in the same location."
-    }
-
-    private var currentScopeLabel: String {
-        if library.selectedAlbumID != nil { return "PROJECT · GROUP" }
-        if library.selectedFolderID != nil { return "PROJECT · ALL PHOTOS" }
-        if library.selectedProjectID != nil { return "PROJECT · ALL PHOTOS" }
-        if library.selectedSmartCollectionID != nil { return "SMART COLLECTION" }
-        return "LIBRARY"
     }
 
     private func sidebarSection<Content: View>(_ title: String, subtitle: String? = nil, actionTitle: String? = nil,
@@ -1013,6 +985,7 @@ private struct NavigationRow: View {
     let count: Int
     let selected: Bool
     let action: () -> Void
+    @FocusState private var keyboardFocused: Bool
 
     var body: some View {
         Button(action: action) {
@@ -1034,9 +1007,15 @@ private struct NavigationRow: View {
                     }
                 }
             }
+            .overlay {
+                if keyboardFocused {
+                    RoundedRectangle(cornerRadius: 3).strokeBorder(Theme.accent.opacity(0.85), lineWidth: 1)
+                }
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(WordActionStyle())
+        .focused($keyboardFocused)
         .foregroundStyle(selected ? Theme.accent : Theme.label)
     }
 }
