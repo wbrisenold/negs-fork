@@ -72,7 +72,6 @@ struct TabEdit: Identifiable, Equatable {
         } else {
             for inputPath in inputPaths { path("Input " + words(inputPath), inputPath) }
         }
-        path("Rendering", "io.render_look")
         for control in prepColorControls { append(control, group: nil, model, &out) }
         path("Color correction saturation", "prep.color_correction_saturation")
         if model.isModified("prep.color_correction_offset") {
@@ -86,9 +85,6 @@ struct TabEdit: Identifiable, Equatable {
         for field in ["master", "red", "yellow", "green", "cyan", "blue", "magenta"] {
             path("Color density · \(words(field))", "post.color_density.\(field)")
         }
-        out += labEdits(.scan, model)
-        path("Local contrast", "post.hncs.clahe_strength")
-        path("Skin protection", "post.hncs.skin_protection")
         return out
     }
 
@@ -155,6 +151,15 @@ struct TabEdit: Identifiable, Equatable {
 
     private static func outputEdits(_ model: EditorModel) -> [TabEdit] {
         var out: [TabEdit] = []
+        func path(_ title: String, _ path: String) {
+            if model.isModified(path) { out.append(TabEdit(title: title, value: display(model.value(path), path), target: .param(path))) }
+        }
+        path("Rendering", "io.render_look")
+        path("Referent LUT", "io.referent_logc3_path")
+        path("Referent transform", "io.referent_logc3_enabled")
+        path("Local contrast", "post.hncs.clahe_strength")
+        path("Skin protection", "post.hncs.skin_protection")
+        out += labEdits(.scan, model)
         if model.isModified(ImageSize.targetPath) {
             out.append(TabEdit(title: "Image size", value: "\(number(model.value(ImageSize.targetPath).double)) px", target: .param(ImageSize.targetPath)))
         }

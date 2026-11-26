@@ -17,6 +17,27 @@ import XCTest
         }
     }
 
+    func testFinalScanAndOutputEditsAreGroupedWithExport() {
+        let model = EditorModel()
+        model.set("io.render_look", .string("hasselblad_hncs"))
+        model.set("io.output_cctf_encoding", .bool(true))
+        model.set("prep.saturation", .number(18))
+
+        let colorEdits = InspectorEdits.edits(.color, model)
+        let exportEdits = InspectorEdits.edits(.output, model)
+        XCTAssertTrue(colorEdits.contains { $0.title == "Saturation" })
+        XCTAssertFalse(colorEdits.contains { $0.title == "Rendering" })
+        XCTAssertFalse(colorEdits.contains { $0.title == "Encode with the colour space’s curve" })
+        XCTAssertTrue(exportEdits.contains { $0.title == "Rendering" })
+        XCTAssertTrue(exportEdits.contains { $0.title == "Encode with the colour space’s curve" })
+        XCTAssertEqual(exportEdits.count, InspectorEdits.count(.output, model))
+
+        model.resetEdits(tab: .output)
+        XCTAssertFalse(model.isModified("io.render_look"))
+        XCTAssertFalse(model.isModified("io.output_cctf_encoding"))
+        XCTAssertTrue(model.isModified("prep.saturation"), "Resetting Export keeps the Color edit")
+    }
+
     func testResettingATabLeavesTheOthers() {
         let model = EditorModel()
         model.set("prep.contrast", .number(12))

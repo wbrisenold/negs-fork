@@ -711,8 +711,7 @@ extension AdjustmentInspector {
                 ["enabled", "x", "y", "radius", "intensity", "color.0", "color.1", "color.2"]
                     .map { "post.relight.lights.\(index).\($0)" }
             }
-        let colorPaths = ["prep.color_correction_saturation", "io.render_look",
-                          "post.hncs.clahe_strength", "post.hncs.skin_protection"]
+        let colorPaths = ["prep.color_correction_saturation"]
         let colorPathCount = colorPaths.filter { model.isModified($0) }.count
         let separationCount = separation.filter { model.isModified("post.color_separation.\($0)") }.count
         let densityCount = density.filter { model.isModified("post.color_density.\($0)") }.count
@@ -721,7 +720,7 @@ extension AdjustmentInspector {
         let correctionOffsetCount = model.isRaw && model.isModified("prep.color_correction_offset") ? 1 : 0
         let prepColorCount = prepColorControls.filter { isModified($0, model) }.count
         return whiteBalanceCount(model) + prepColorCount + colorPathCount + correctionOffsetCount
-            + separationCount + densityCount + skinShaperCount + relightCount + count(.scan, model)
+            + separationCount + densityCount + skinShaperCount + relightCount
     }
     static func maskCount(_ model: EditorModel) -> Int {
         let fields = ["exposure_ev", "temperature", "tint", "saturation"]
@@ -736,7 +735,10 @@ extension AdjustmentInspector {
         return total
     }
     static func outputTabCount(_ model: EditorModel) -> Int {
-        (model.isModified(ImageSize.targetPath) ? 1 : 0) + (model.border.enabled ? 1 : 0)
+        let finishPaths = ["io.render_look", "io.referent_logc3_enabled", "io.referent_logc3_path",
+                           "post.hncs.clahe_strength", "post.hncs.skin_protection"]
+        return (model.isModified(ImageSize.targetPath) ? 1 : 0) + (model.border.enabled ? 1 : 0)
+            + finishPaths.filter(model.isModified).count + count(.scan, model)
     }
     static func count(_ tab: InspectorTab, _ model: EditorModel) -> Int {
         switch tab {
@@ -1260,24 +1262,6 @@ struct AdjustmentInspector: View {
                     changed: model.isModified("post.skin_shaper.phighlighter"),
                     help: "Shows the selected hue and luminance range against a dim neutral image.")
         }
-        let outputChanged = InspectorEdits.outputCount(model) > 0
-        let outputShown = outputChanged || shows(section: .scan)
-        InkSection(title: "Scan & Color", edited: InspectorEdits.count(.scan, model) > 0) {
-            modules(.scan, ruledFirst: false)
-            if outputShown {
-                module("Output", help: ControlHelp.group("Output"), summary: model.previewSpace, edited: outputChanged,
-                       ruled: adjustmentGroups.contains { $0.section == .scan && shows($0) }) {
-                    ChoiceRow(title: "Colour space", items: SaveSettings.colorSpaces.map { .option($0, tag: $0) }, selection: model.previewSpace,
-                              changed: model.previewSpace != SaveSettings.colorSpaces[0],
-                              help: "The preview develops in this colour space, so it shows the colours an export in it can hold. Save and Export use it next, and switch it when you pick another.",
-                              choose: model.choosePreviewSpace)
-                    TickRow(title: "Encode with the colour space’s curve", isOn: model.toggle("io.output_cctf_encoding"),
-                            changed: model.isModified("io.output_cctf_encoding"), help: "Off writes linear values, for further processing.")
-                }
-            }
-            moreLine(.scan, loose: outputChanged ? [] : ["Output"])
-        }
-        outputTransform
         }
     }
 
@@ -1984,6 +1968,8 @@ struct AdjustmentInspector: View {
 
     /// Delivery sizing and framing stay together after the film workflow.
     @ViewBuilder private var output: some View {
+        scanOutput
+        outputTransform
         ImageSizeSection(model: model)
         InkSection(title: "Border", edited: model.border.enabled) {
             TickRow(title: "Add border", isOn: model.border(\.enabled), changed: model.border.enabled,
@@ -2002,6 +1988,27 @@ struct AdjustmentInspector: View {
                         help: "Adds the border to exported photographs and saved previews.")
             }
             .inkDisabled(!model.border.enabled)
+        }
+    }
+
+    /// Final scan encoding and output look belong with the rendered file.
+    @ViewBuilder private var scanOutput: some View {
+        let outputChanged = InspectorEdits.outputCount(model) > 0
+        let outputShown = outputChanged || shows(section: .scan)
+        InkSection(title: "Scan & Color", edited: InspectorEdits.count(.scan, model) > 0) {
+            modules(.scan, ruledFirst: false)
+            if outputShown {
+                module("Output", help: ControlHelp.group("Output"), summary: model.previewSpace, edited: outputChanged,
+                       ruled: adjustmentGroups.contains { $0.section == .scan && shows($0) }) {
+                    ChoiceRow(title: "Colour space", items: SaveSettings.colorSpaces.map { .option($0, tag: $0) }, selection: model.previewSpace,
+                              changed: model.previewSpace != SaveSettings.colorSpaces[0],
+                              help: "The preview develops in this colour space, so it shows the colours an export in it can hold. Save and Export use it next, and switch it when you pick another.",
+                              choose: model.choosePreviewSpace)
+                    TickRow(title: "Encode with the colour space’s curve", isOn: model.toggle("io.output_cctf_encoding"),
+                            changed: model.isModified("io.output_cctf_encoding"), help: "Off writes linear values, for further processing.")
+                }
+            }
+            moreLine(.scan, loose: outputChanged ? [] : ["Output"])
         }
     }
 
