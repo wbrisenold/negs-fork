@@ -45,7 +45,7 @@ jobs:
           cargo test --locked --release --target x86_64-apple-darwin -p spektrafilm-core --lib interactive_preview_at_editor_quality_keeps_expected_detail
           swift test --package-path macos \
             --scratch-path target/macos-app/swift-x86_64-apple-macosx14.0 \
-            -c release --triple x86_64-apple-macosx14.0 \
+            -c debug --triple x86_64-apple-macosx14.0 \
             --filter QuickFrameTests/testRawPreviewQualityScaleIs38PercentAndNeverUpscales
       - name: Build, package, and run the app regression gate
         run: bash scripts/package_macos_app.sh
