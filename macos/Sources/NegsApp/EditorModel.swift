@@ -5564,9 +5564,13 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
         return !closing && !brightnessMatchPending && !matchingBrightness && !(brightnessMatchActive && !previewCurrent)
     }
 
-    private func savePreview(to url: URL, size: ExportSize = .full, save: SaveSettings = SaveSettings()) async {
+    func savePreview(to url: URL, size: ExportSize = .full, save: SaveSettings = SaveSettings()) async {
         let generation = sourceGeneration
-        guard await settleBrightnessMatch(), generation == sourceGeneration, canSave, let source, let engine else { return }
+        guard await settleBrightnessMatch() else {
+            error = "Couldn’t save because brightness matching or its preview did not finish. Try again when the preview is ready."
+            return
+        }
+        guard generation == sourceGeneration, canSave, let source, let engine else { return }
         guard !Self.sameFile(url, source) else {
             error = "Choose a different filename to preserve the original photograph."; return
         }

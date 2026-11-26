@@ -108,6 +108,25 @@ import XCTest
         XCTAssertEqual(NSImage(contentsOf: destination)?.representations.first?.pixelsWide, 96)
     }
 
+    func testSavePreviewReportsWhenBrightnessMatchCannotSettle() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths().helper.path) else { throw XCTSkip("Build the release helper first") }
+        let model = EditorModel()
+        await model.start(paths: paths())
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        model.open(fixture)
+        try await waitUntil { model.previewCurrent || model.error != nil }
+        XCTAssertNil(model.error)
+
+        // Closing while a save is requested makes its settle prerequisite fail immediately.
+        model.shutdown()
+        let destination = FileManager.default.temporaryDirectory.appendingPathComponent("must-not-save.png")
+        await model.savePreview(to: destination)
+
+        XCTAssertEqual(model.error, "Couldn’t save because brightness matching or its preview did not finish. Try again when the preview is ready.")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+    }
+
     /// Export the selected Develop frame, including a real crop and edit, rather
     /// than a previously settled frame. The artifact and visible frame must agree.
     func testFastExportMatchesSelectedDevelopFrameAndCrop() async throws {
