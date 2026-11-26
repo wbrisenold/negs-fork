@@ -10,7 +10,7 @@ APP_BUNDLE=""
 CANONICAL_APP_BUNDLE=""
 PYTHON="${PYTHON:-python3}"
 RELEASE_DIR="${RELEASE_DIR:-dist/releases}"
-MACOS_ARCHS="${MACOS_ARCHS:-arm64 x86_64}"
+MACOS_ARCHS="${MACOS_ARCHS:-x86_64}"
 CLEAN_BUILD_CACHE="${CLEAN_BUILD_CACHE:-1}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -53,11 +53,10 @@ release_name="$("$PYTHON" scripts/macos_release.py --field name)"
 # Keep the binary deployment target consistent with Info.plist.
 export MACOSX_DEPLOYMENT_TARGET=14.0
 
-# Every package installed at the canonical path is universal. The separate
-# cached debug runner is the fast Intel-only path for iterative UI work.
+# The supported workstation and canonical package target is Intel macOS.
 read -r -a requested_archs <<< "$MACOS_ARCHS"
-if [[ " ${requested_archs[*]} " != " arm64 x86_64 " && " ${requested_archs[*]} " != " x86_64 arm64 " ]]; then
-    echo "Release packaging must include both macOS architectures: arm64 and x86_64." >&2
+if [[ ${#requested_archs[@]} -ne 1 || "${requested_archs[0]}" != "x86_64" ]]; then
+    echo "Negs macOS packaging supports the Intel x86_64 architecture only." >&2
     exit 2
 fi
 rust_targets=()
@@ -75,10 +74,10 @@ for arch in "${requested_archs[@]}"; do
             rust_targets+=(--target x86_64-apple-darwin)
             swift_triples+=(x86_64-apple-macosx14.0)
             ;;
-        *) echo "Unsupported MACOS_ARCHS entry: $arch (use arm64 and/or x86_64)" >&2; exit 2 ;;
+        *) echo "Unsupported MACOS_ARCHS entry: $arch (use x86_64)" >&2; exit 2 ;;
     esac
 done
-[[ ${#requested_archs[@]} -gt 0 ]] || { echo "MACOS_ARCHS must include arm64 and/or x86_64" >&2; exit 2; }
+[[ ${#requested_archs[@]} -gt 0 ]] || { echo "MACOS_ARCHS must include x86_64" >&2; exit 2; }
 if [[ ${#requested_archs[@]} -eq 1 ]]; then
     case "${requested_archs[0]}" in
         arm64) arch_label=arm64 ;;

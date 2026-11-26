@@ -14,33 +14,40 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  universal-package:
-    name: Build and verify universal Negs app
+  intel-package:
+    name: Build, test, and package Intel Negs app
     if: github.ref_name == 'studio-port-upstream-sync'
-    runs-on: macos-15
+    runs-on: macos-15-intel
     env:
-      MACOS_ARCHS: arm64 x86_64
+      MACOS_ARCHS: x86_64
       BUILD_TARGET_DIR: target/macos-app
       CLEAN_BUILD_CACHE: "1"
+      CARGO_TARGET_X86_64_APPLE_DARWIN_RUNNER: arch -x86_64
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.93.1
         with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          targets: x86_64-apple-darwin
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Record source and toolchains
         run: |
           echo "Source: $GITHUB_SHA ($GITHUB_REF_NAME)"
+          test "$(uname -m)" = x86_64
           uname -m
           rustc -vV
           swift --version
+      - name: Run Intel preview regression gates
+        run: |
+          cargo test --locked --release --target x86_64-apple-darwin -p spektrafilm-core --lib metering_preview_keeps_area_reduction_on_large_raw_frames
+          cargo test --locked --release --target x86_64-apple-darwin -p spektrafilm-core --lib interactive_preview_at_editor_quality_keeps_expected_detail
+          swift test --package-path macos --filter QuickFrameTests/testRawPreviewQualityScaleIs38PercentAndNeverUpscales
       - name: Build, package, and run the app regression gate
         run: bash scripts/package_macos_app.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: negs-macos-universal-${{ github.sha }}
+          name: negs-macos-intel-${{ github.sha }}
           path: |
             dist/releases/*.zip
             dist/releases/*.dmg

@@ -30,7 +30,7 @@
 
 - Read [`docs/macos-app-build.md`](docs/macos-app-build.md) before building or opening Negs. It defines the only supported source branch, build commands, canonical app path, promotion checks, and GitHub artifact gate.
 - Run `rtk scripts/run_cached_debug_app.sh` for iterative Intel UI work. It builds, verifies, promotes, and opens only `dist/negs-macos/Negs.app`.
-- Use `CLEAN_BUILD_CACHE=0 rtk bash scripts/package_macos_app.sh` for the universal release package. The package gate verifies feature strings, source revision, both architectures, signature, and the single canonical app bundle.
+- Use `MACOS_ARCHS=x86_64 CLEAN_BUILD_CACHE=0 rtk bash scripts/package_macos_app.sh` for the optimized Intel release package. The package gate verifies feature strings, source revision, Intel architecture, signature, and the single canonical app bundle.
 - Serialize local builds: run only one Cargo, SwiftPM, or packaging build at a time. Do not start a second build while one is running, including from another terminal or agent.
 - Reuse the established local outputs (`target/macos-app` for packaged app builds and SwiftPM scratch output under it); do not create dated, per-feature, or duplicate build directories. For this Intel workstation, use `MACOS_ARCHS=x86_64` and the default `BUILD_TARGET_DIR=target/macos-app`.
 - After a successful local package, `scripts/package_macos_app.sh` removes `target/macos-app`, the Intel test cache at `target/x86_64-apple-darwin`, and `target/debug`; the app and releases remain in `dist/`, and `target/release` is preserved. Set `CLEAN_BUILD_CACHE=0` to retain local caches when iterating.
