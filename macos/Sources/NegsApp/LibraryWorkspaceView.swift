@@ -317,6 +317,41 @@ struct LibraryWorkspaceView: View {
                 .background(Theme.warn.opacity(0.08))
                 Divider()
             }
+            if let importStatus = workflowState.importStatus {
+                HStack(spacing: StudioStyle.Space.standard) {
+                    if importStatus.phase == .importing {
+                        ProgressView(value: Double(importStatus.progress), total: Double(max(importStatus.total, 1)))
+                            .frame(width: 92)
+                            .accessibilityLabel("Import progress")
+                    } else {
+                        Image(systemName: importStatus.phase == .failed ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                            .foregroundStyle(importStatus.phase == .failed ? Theme.warn : StudioStyle.positive)
+                            .accessibilityHidden(true)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(importStatus.phase == .importing ? "Importing into \(importStatus.destinationName)" :
+                             importStatus.phase == .completed ? "Added \(importStatus.importedCount) photos to \(importStatus.destinationName)" :
+                             "Import to \(importStatus.destinationName) needs attention")
+                            .font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.label)
+                        if let message = importStatus.message {
+                            Text(message).font(Theme.ui(10)).foregroundStyle(Theme.dim).lineLimit(2)
+                        } else if importStatus.phase == .importing {
+                            Text("Scanning source folders…").font(Theme.ui(10)).foregroundStyle(Theme.dim)
+                        }
+                    }
+                    Spacer(minLength: 4)
+                    if importStatus.canRetry {
+                        Button("Retry Import") {
+                            Task { _ = await LibraryWorkflow.retryImport(in: library) }
+                        }
+                        .buttonStyle(StudioActionButtonStyle(kind: .secondary))
+                        .accessibilityLabel("Retry import into \(importStatus.destinationName)")
+                    }
+                }
+                .padding(.horizontal, StudioStyle.Space.section).padding(.vertical, StudioStyle.Space.compact)
+                .studioWorkspaceCard()
+                .padding(.horizontal, StudioStyle.Space.section).padding(.bottom, StudioStyle.Space.compact)
+            }
             HStack(spacing: 8) {
                 if !library.photos.isEmpty {
                 ScrollView(.horizontal) {
@@ -901,15 +936,18 @@ struct LibraryWorkspaceView: View {
     }
 
     @MainActor private func importFolders() {
+        guard let projectID = library.selectedProjectID,
+              let project = library.projects.first(where: { $0.id == projectID }) else { return }
         let panel = NSOpenPanel()
         panel.title = "Add Photos to Project"
         panel.prompt = "Add Photos"
+        panel.message = "Destination project: \(project.name). Original files stay where they are."
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = true
         panel.begin { response in
             guard response == .OK else { return }
-            Task { await library.importFolders(panel.urls) }
+            Task { _ = await LibraryWorkflow.perform(.importFolders(panel.urls, to: projectID), in: library) }
         }
     }
 
@@ -1048,7 +1086,7 @@ private struct ProjectPhotoPicker: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Add Photos to Project").font(.title3.weight(.semibold))
-                    Text(project?.name ?? "Project")
+                    Text("Destination: \(project?.name ?? "Project")")
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -1116,10 +1154,13 @@ private struct ProjectPhotoPicker: View {
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Add \(selectedURLs.count) Photos") {
-                    library.add(library.photos.filter { selectedURLs.contains($0.file.url) }, to: projectID)
-                    dismiss()
+                    let photos = library.photos.filter { selectedURLs.contains($0.file.url) }
+                    Task {
+                        _ = await LibraryWorkflow.perform(.addSelectedPhotos(photos, to: projectID), in: library)
+                        dismiss()
+                    }
                 }
-                .buttonStyle(PencilButtonStyle(height: 32))
+                .buttonStyle(StudioActionButtonStyle(kind: .primary))
                 .keyboardShortcut(.defaultAction)
                 .disabled(selectedURLs.isEmpty)
             }
