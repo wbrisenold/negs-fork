@@ -31,6 +31,31 @@ import XCTest
         XCTAssertTrue(model.savedVersions.isEmpty)
     }
 
+    func testUndoAndRedoShowTheSelectedSettledEdit() async throws {
+        let (model, root, _) = try await fixture()
+        defer { model.shutdown(); try? FileManager.default.removeItem(at: root) }
+        let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
+        let path = "prep.contrast"
+        let initial = model.value(path)
+
+        undo.beginUndoGrouping()
+        model.set(path, .number(18))
+        undo.endUndoGrouping()
+        try await waitUntil { model.frameStatus == .current(model.currentFrame) }
+        XCTAssertEqual(model.shownFrame?.frame, model.currentFrame)
+        XCTAssertEqual(model.value(path), .number(18))
+
+        undo.undo()
+        XCTAssertEqual(model.frameStatus, .pending(model.currentFrame))
+        try await waitUntil { model.frameStatus == .current(model.currentFrame) && model.value(path) == initial }
+        XCTAssertEqual(model.shownFrame?.frame, model.currentFrame, "Undo must show the frame for its selected history state")
+
+        undo.redo()
+        XCTAssertEqual(model.frameStatus, .pending(model.currentFrame))
+        try await waitUntil { model.frameStatus == .current(model.currentFrame) && model.value(path) == .number(18) }
+        XCTAssertEqual(model.shownFrame?.frame, model.currentFrame, "Redo must show the frame for its selected history state")
+    }
+
     func testExportRefusesOriginalAndEmptyBatchCreatesNoRun() async throws {
         let (model, root, photo) = try await fixture()
         defer { model.shutdown(); try? FileManager.default.removeItem(at: root) }
