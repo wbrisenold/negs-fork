@@ -2134,20 +2134,37 @@ private struct ColorCorrectionWheel: View {
 
     private func chromaWheel(side: CGFloat, radius: CGFloat, marker: CGPoint) -> some View {
         ZStack {
-            Circle()
-                .fill(AngularGradient(colors: [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .red], center: .center))
-                .overlay(Circle().fill(RadialGradient(colors: [.white, .clear], center: .center, startRadius: 0, endRadius: radius)))
-            ForEach([0.25, 0.5, 0.75, 1.0], id: \.self) { fraction in
-                Circle().stroke(.white.opacity(fraction == 1 ? 0.72 : 0.25), lineWidth: fraction == 1 ? 1.2 : 0.6)
-                    .scaleEffect(fraction)
-            }
-            Circle().fill(.white).frame(width: 11, height: 11)
-                .overlay(Circle().stroke(.black.opacity(0.8), lineWidth: 1.5))
-                .position(marker)
+            chromaField(radius: radius)
+            chromaRingGuides
+            chromaMarker(position: marker)
         }
         .frame(width: side, height: side)
         .contentShape(Circle())
-        .gesture(DragGesture(minimumDistance: 0)
+        .gesture(chromaWheelGesture(side: side, radius: radius))
+    }
+
+    private func chromaField(radius: CGFloat) -> some View {
+        Circle()
+            .fill(AngularGradient(colors: [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .red], center: .center))
+            .overlay(Circle().fill(RadialGradient(colors: [.white, .clear], center: .center, startRadius: 0, endRadius: radius)))
+    }
+
+    private var chromaRingGuides: some View {
+        ForEach([0.25, 0.5, 0.75, 1.0], id: \.self) { fraction in
+            Circle()
+                .stroke(.white.opacity(fraction == 1 ? 0.72 : 0.25), lineWidth: fraction == 1 ? 1.2 : 0.6)
+                .scaleEffect(fraction)
+        }
+    }
+
+    private func chromaMarker(position: CGPoint) -> some View {
+        Circle().fill(.white).frame(width: 11, height: 11)
+            .overlay(Circle().stroke(.black.opacity(0.8), lineWidth: 1.5))
+            .position(position)
+    }
+
+    private func chromaWheelGesture(side: CGFloat, radius: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 0)
             .onChanged { event in
                 if !eventStarted { eventStarted = true; model.beginInteraction() }
                 let dx = event.location.x - side / 2
@@ -2157,7 +2174,7 @@ private struct ColorCorrectionWheel: View {
                     model.set(path, .array([.number(Double(angle)), .number(strength)]))
                 }
             }
-            .onEnded { _ in eventStarted = false; model.endInteraction(action: "Color Correction") })
+            .onEnded { _ in eventStarted = false; model.endInteraction(action: "Color Correction") }
     }
 
     private var readout: some View {
