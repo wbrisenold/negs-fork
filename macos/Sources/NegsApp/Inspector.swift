@@ -16,6 +16,21 @@ enum Adjustment: Identifiable {
     /// How the enlarger's magenta and yellow shifts move each other: help.
     case filterLink(String)
 
+    /// Why an adjustment is unavailable in the current workflow. The value
+    /// remains in the edit state; availability only controls interaction.
+    func unavailableReason(filmIsBW: Bool, scanningFilm: Bool) -> String? {
+        switch self {
+        case .stockSlider(_, _, _, _, _, let bwTitle) where filmIsBW && bwTitle == nil:
+            return "This grain channel is only available with color film."
+        case .silverRetention where scanningFilm:
+            return "Silver retention applies to a negative, not a scan of film."
+        case .silverRetention where filmIsBW:
+            return "Silver retention is unavailable with black-and-white film."
+        default:
+            return nil
+        }
+    }
+
     var id: String {
         switch self {
         case .slider(_, let path, _, _), .toggle(_, let path), .choice(_, let path, _): return path
@@ -212,24 +227,33 @@ struct AdjustmentControl: View {
         case .slider(let title, let path, let range, let step):
             SliderRow(model: model, title: title, path: path, range: range, step: step)
         case .stockSlider(let title, let path, let index, let range, let step, let bwTitle):
-            if !model.filmIsBW || bwTitle != nil {
+            let reason = adjustment.unavailableReason(filmIsBW: model.filmIsBW, scanningFilm: model.value("io.scan_film").bool)
+            VStack(alignment: .leading, spacing: 0) {
                 LabeledSlider(title: model.filmIsBW ? bwTitle ?? title : title,
                               value: model.stockNumber(path, index, range: range, step: step), range: range, step: step,
                               defaultValue: model.stockDefault(path, index), modified: model.isStockModified(path, index),
                               reset: { model.resetStock(path, index) },
                               editing: { $0 ? model.beginInteraction() : model.endInteraction() },
-                              help: ControlHelp.text(path))
+                              help: reason ?? ControlHelp.text(path))
+                    .disabled(reason != nil)
+                    .opacity(reason == nil ? 1 : Theme.disabledOpacity)
+                if let reason { UnavailableAdjustmentNote(reason: reason) }
             }
         case .silverRetention:
             let path = "film_render.silver_retention"
-            LabeledSlider(title: "Silver retention",
-                          value: Binding(get: { model.value(path).double * 80 },
-                                         set: { model.set(path, .number(min(max($0, 0), 80) / 80)) }),
-                          range: 0...80, step: 1, defaultValue: 0, modified: model.isModified(path),
-                          reset: { model.resetValue(path) },
-                          editing: { $0 ? model.beginInteraction() : model.endInteraction() },
-                          help: ControlHelp.text(path))
-                .disabled(model.filmIsBW || model.value("io.scan_film").bool)
+            let reason = adjustment.unavailableReason(filmIsBW: model.filmIsBW, scanningFilm: model.value("io.scan_film").bool)
+            VStack(alignment: .leading, spacing: 0) {
+                LabeledSlider(title: "Silver retention",
+                              value: Binding(get: { model.value(path).double * 80 },
+                                             set: { model.set(path, .number(min(max($0, 0), 80) / 80)) }),
+                              range: 0...80, step: 1, defaultValue: 0, modified: model.isModified(path),
+                              reset: { model.resetValue(path) },
+                              editing: { $0 ? model.beginInteraction() : model.endInteraction() },
+                              help: reason ?? ControlHelp.text(path))
+                    .disabled(reason != nil)
+                    .opacity(reason == nil ? 1 : Theme.disabledOpacity)
+                if let reason { UnavailableAdjustmentNote(reason: reason) }
+            }
         case .balancePrint(let title, let help):
             HStack {
                 Spacer()
@@ -254,6 +278,20 @@ struct AdjustmentControl: View {
             ChoiceRow(title: "Shifts move", items: FilterLink.allCases.map { .option($0.title, tag: $0.rawValue) },
                       selection: model.filterLink.rawValue, help: help) { model.filterLink = FilterLink(rawValue: $0) ?? .separate }
         }
+    }
+}
+
+private struct UnavailableAdjustmentNote: View {
+    let reason: String
+
+    var body: some View {
+        Text(reason)
+            .font(Theme.ui(10))
+            .foregroundStyle(Theme.dim)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, Theme.Size.gutter)
+            .padding(.bottom, 4)
+            .accessibilityLabel("Unavailable. \(reason)")
     }
 }
 
