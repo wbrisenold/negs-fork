@@ -1,3 +1,5 @@
+import AppKit
+import SwiftUI
 import XCTest
 @testable import NegsApp
 
@@ -56,5 +58,54 @@ import XCTest
         model.resetEdits([.param("prep.contrast")], action: "Reset Contrast")
         XCTAssertFalse(model.isModified("prep.contrast"))
         XCTAssertTrue(model.isModified("prep.shadows"))
+    }
+
+    func testControlsAcrossTabsChangeTheirBoundValuesAndTabSelectionPreservesPhoto() throws {
+        _ = NSApplication.shared
+        let model = EditorModel()
+        let photo = FileManager.default.temporaryDirectory.appendingPathComponent("inspector-tab-photo.png")
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 2, pixelsHigh: 2,
+            bitsPerSample: 8, samplesPerPixel: 3, hasAlpha: false, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 6, bitsPerPixel: 24))
+        memset(bitmap.bitmapData!, 120, bitmap.bytesPerRow * bitmap.pixelsHigh)
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: photo)
+        defer { try? FileManager.default.removeItem(at: photo) }
+        model.open(photo)
+
+        func changeSlider(_ control: Adjustment, to value: Double, file: StaticString = #filePath, line: UInt = #line) throws {
+            let host = NSHostingView(rootView: AdjustmentControl(model: model, adjustment: control))
+            _ = host.fittingSize
+            func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+            let slider = try XCTUnwrap(descendants(host).compactMap { $0 as? InkSliderView }.first, file: file, line: line)
+            slider.onChange(value)
+        }
+
+        var selected = InspectorTab.exposure
+        let tabBinding = Binding(get: { selected }, set: { selected = $0 })
+        let tabs = InspectorTabs(model: model, tab: tabBinding)
+        _ = NSHostingView(rootView: tabs).fittingSize
+
+        tabBinding.wrappedValue = .exposure
+        try changeSlider(.slider("Contrast", "prep.contrast", -100...100, 1), to: 24)
+        XCTAssertEqual(model.value("prep.contrast").double, 24)
+
+        tabBinding.wrappedValue = .color
+        try changeSlider(.slider("Saturation", "prep.saturation", -100...100, 1), to: 31)
+        XCTAssertEqual(model.value("prep.saturation").double, 31)
+
+        tabBinding.wrappedValue = .output
+        let outputToggle = TickRow(title: "Encode with the colour space’s curve",
+                                   isOn: model.toggle("io.output_cctf_encoding"))
+        _ = NSHostingView(rootView: outputToggle).fittingSize
+        outputToggle.isOn.wrappedValue = true
+        XCTAssertTrue(model.value("io.output_cctf_encoding").bool)
+
+        XCTAssertEqual(model.source, photo)
+        XCTAssertEqual(model.value("prep.contrast").double, 24)
+        XCTAssertEqual(model.value("prep.saturation").double, 31)
+        XCTAssertTrue(model.value("io.output_cctf_encoding").bool)
+        XCTAssertGreaterThan(InspectorEdits.count(.exposure, model), 0)
+        XCTAssertGreaterThan(InspectorEdits.count(.color, model), 0)
+        XCTAssertGreaterThan(InspectorEdits.count(.output, model), 0)
     }
 }
