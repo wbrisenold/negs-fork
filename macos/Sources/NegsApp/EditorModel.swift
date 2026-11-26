@@ -5556,17 +5556,17 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
 
     /// A pending brightness match changes the exposure: Save and Export
     /// wait for it and its preview, so they write what the inspector shows.
-    private func settleBrightnessMatch() async {
+    private func settleBrightnessMatch() async -> Bool {
         let deadline = Date().addingTimeInterval(30)
         while !closing, Date() < deadline, brightnessMatchPending || matchingBrightness || !previewCurrent && brightnessMatchActive {
             try? await Task.sleep(for: .milliseconds(20))
         }
+        return !closing && !brightnessMatchPending && !matchingBrightness && !(brightnessMatchActive && !previewCurrent)
     }
 
     private func savePreview(to url: URL, size: ExportSize = .full, save: SaveSettings = SaveSettings()) async {
         let generation = sourceGeneration
-        await settleBrightnessMatch()
-        guard generation == sourceGeneration, canSave, let source, let engine else { return }
+        guard await settleBrightnessMatch(), generation == sourceGeneration, canSave, let source, let engine else { return }
         guard !Self.sameFile(url, source) else {
             error = "Choose a different filename to preserve the original photograph."; return
         }
@@ -5583,10 +5583,12 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
     /// write a sibling temporary file and rename it, so a failure leaves an
     /// existing file untouched. False if the preview could not be saved.
     /// Another colour space than the preview's develops again in it.
-    private func exportPreview(to url: URL, size: ExportSize, save: SaveSettings) async -> Bool {
+    private func exportPreview(to url: URL, size: ExportSize, save: SaveSettings,
+                               state selectedState: EditState, generation: Int) async -> Bool {
         // Fast export is allowed while `exporting` reserves the action, but
         // all other save requirements still apply.
-        guard previewCurrent, image != nil, !rendering, !saving, !cropping,
+        guard generation == sourceGeneration, state == selectedState,
+              previewCurrent, image != nil, !rendering, !saving, !cropping,
               renderAtExportSize, save.spaceName == previewSpace, let engine else { return false }
         saving = true
         defer { saving = false }
@@ -5615,32 +5617,78 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
         guard !Self.sameFile(url, source) else {
             error = "Choose a different filename to preserve the original photograph."; return
         }
+        // Freeze the photograph and selected Develop edit before any await.
+        // A pending brightness match may resolve as part of this request; in
+        // that case its result is folded into this snapshot only when its
+        // inputs still describe the selected edit.
         let generation = sourceGeneration
+        let requestedSource = source
+        let requestedState = state
+        let matchWasPending = brightnessMatchPending || matchingBrightness || brightnessMatchActive
+        let requestedSourceSize = sourceSize
+        let requestedImageSize = imageSize
+        let requestedPhotoSize = photoSize
+        let requestedSummary = currentSummary
+        let requestedLowMemoryExport = lowMemoryExport
         exporting = true
         exportCancellable = false
         exportStarted = Date()
-        let megapixels = max(0.1, Double(max(sourceSize.width * sourceSize.height,
-                                             imageSize.width * imageSize.height)) / 1_000_000)
+        let megapixels = max(0.1, Double(max(requestedSourceSize.width * requestedSourceSize.height,
+                                             requestedImageSize.width * requestedImageSize.height)) / 1_000_000)
         let rawInput = isRaw
         exportExpectedDuration = nil
         defer {
             exporting = false; exportCancellable = false; exportJob = nil
             exportExpectedDuration = nil
         }
-        await settleBrightnessMatch()
-        guard !closing, !saving, sourceGeneration == generation else { return }
+        let sidecarWrite = flushSidecar()
+        if let sidecarWrite { await sidecarWrite.value }
+        guard !closing, !saving else { return }
+        if matchWasPending {
+            guard sourceGeneration == generation else {
+                error = "Export stopped because the photograph changed before its brightness match finished."
+                return
+            }
+            guard await settleBrightnessMatch() else {
+                error = "Export stopped because the selected photograph's brightness match did not finish."
+                return
+            }
+            guard sourceGeneration == generation else {
+                error = "Export stopped because the photograph changed before its brightness match finished."
+                return
+            }
+        }
+        let settledState = state
+        var exportState = requestedState
+        var selectedWithMatch = requestedState
+        selectedWithMatch.params["prep.exposure_ev"] = settledState.params["prep.exposure_ev"]
+        selectedWithMatch.brightnessMatch = settledState.brightnessMatch
+        if matchWasPending {
+            guard requestedState.brightnessMatch != nil,
+                  settledState.brightnessMatch?.inputs == matchInputs(requestedState),
+                  settledState.brightnessMatch?.ev != nil, selectedWithMatch == settledState else {
+                error = "Export stopped because the selected edit changed while its brightness match was pending."
+                return
+            }
+            exportState = settledState
+        }
+        if exportState != requestedState, state == settledState, let matchWrite = flushSidecar() {
+            await matchWrite.value
+            guard !closing, sourceGeneration == generation, source == requestedSource else { return }
+        }
         exportStarted = Date()
         let cachedPreview = exportEngine == .fast && renderAtExportSize
         let cachedPreviewMegapixels = image.map { max(0.1, Double($0.width * $0.height) / 1_000_000) } ?? megapixels
         let timingMegapixels = cachedPreview ? cachedPreviewMegapixels : megapixels
         exportExpectedDuration = ExportTiming.estimate(engine: exportEngine, raw: rawInput,
                                                        megapixels: timingMegapixels, cachedPreview: cachedPreview)
-        var exportState = state
-        exportState.params["settings.serial_grain"] = .bool(lowMemoryExport)
-        let exportBorder = state.border.exported(for: photoSize)
-        let rating = currentSummary.flatMap(ExportRating.value)
+        let selectedEditState = exportState
+        exportState.params["settings.serial_grain"] = .bool(requestedLowMemoryExport)
+        let exportBorder = exportState.border.exported(for: requestedPhotoSize)
+        let rating = requestedSummary.flatMap(ExportRating.value)
         // An edit made meanwhile makes the save fail; develop the photograph then.
-        if exportEngine == .fast, await exportPreview(to: url, size: size, save: save) {
+        if exportEngine == .fast, await exportPreview(to: url, size: size, save: save,
+                                                       state: selectedEditState, generation: generation) {
             let elapsed = Date().timeIntervalSince(exportStarted)
             ExportTiming.record(engine: .fast, raw: rawInput, megapixels: timingMegapixels,
                                 duration: elapsed, cachedPreview: true)
@@ -5652,7 +5700,7 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
         }
         let job = ExportJob(); exportJob = job; exportCancellable = true
         do {
-            let outcome = try await job.run(paths: engine.paths, scratch: engine.scratch, source: source, destination: url, state: exportState,
+            let outcome = try await job.run(paths: engine.paths, scratch: engine.scratch, source: requestedSource, destination: url, state: exportState,
                                             crop: exportState.crop.cropped ? exportState.crop : nil, border: exportBorder, size: size, save: save,
                                             engine: exportEngine, rating: rating)
             let elapsed = Date().timeIntervalSince(exportStarted)
