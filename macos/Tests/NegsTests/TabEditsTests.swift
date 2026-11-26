@@ -6,6 +6,36 @@ import XCTest
 /// The list under a tab's count lists what the count counts, and Reset on the
 /// tab clears both in one undo step.
 @MainActor final class TabEditsTests: XCTestCase {
+    func testUnavailableAdjustmentsExplainWorkflowAndRestoreSavedEdits() {
+        let redGrain = Adjustment.stockSlider("Red granularity", "film_render.grain.rms_granularity", 0, 0...80, 0.1, bw: "Granularity")
+        let greenGrain = Adjustment.stockSlider("Green granularity", "film_render.grain.rms_granularity", 1, 0...80, 0.1, bw: nil)
+        let silver = Adjustment.silverRetention
+
+        XCTAssertNil(redGrain.unavailableReason(filmIsBW: true, scanningFilm: false))
+        XCTAssertEqual(greenGrain.unavailableReason(filmIsBW: true, scanningFilm: false), "This grain channel is only available with color film.")
+        XCTAssertNil(greenGrain.unavailableReason(filmIsBW: false, scanningFilm: false))
+        XCTAssertEqual(silver.unavailableReason(filmIsBW: true, scanningFilm: false), "Silver retention is unavailable with black-and-white film.")
+        XCTAssertEqual(silver.unavailableReason(filmIsBW: false, scanningFilm: true), "Silver retention applies to a negative, not a scan of film.")
+        XCTAssertNil(silver.unavailableReason(filmIsBW: false, scanningFilm: false))
+
+        let model = EditorModel()
+        model.set("film_render.grain.rms_granularity", .array([.number(42), .number(17), .number(23)]))
+        model.set("film_render.silver_retention", .number(0.35))
+        XCTAssertTrue(model.isStockModified("film_render.grain.rms_granularity", 1))
+        XCTAssertTrue(model.isModified("film_render.silver_retention"))
+
+        // A workflow switch changes availability only; returning restores the
+        // same parameter values and edited indicators.
+        model.set("io.scan_film", .bool(true))
+        XCTAssertNotNil(silver.unavailableReason(filmIsBW: false, scanningFilm: model.value("io.scan_film").bool))
+        model.set("io.scan_film", .bool(false))
+        XCTAssertNil(silver.unavailableReason(filmIsBW: false, scanningFilm: model.value("io.scan_film").bool))
+        XCTAssertEqual(model.value("film_render.grain.rms_granularity").array[1], .number(17))
+        XCTAssertTrue(model.isStockModified("film_render.grain.rms_granularity", 1))
+        XCTAssertEqual(model.value("film_render.silver_retention").double, 0.35)
+        XCTAssertTrue(model.isModified("film_render.silver_retention"))
+    }
+
     func testTheListHasAsManyEditsAsTheCount() {
         let model = EditorModel()
         for tab in InspectorTab.allCases {
