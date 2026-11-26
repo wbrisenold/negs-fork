@@ -212,6 +212,54 @@ private let paths = EnginePaths(helper: root.appendingPathComponent("target/rele
 
     // MARK: Regressions
 
+    func testUndoRedoSaveReopenAndEditedThumbnailUseTheSelectedEdit() async throws {
+        let (model, photos) = try await openFolder(2)
+        let first = photos[0]
+        let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
+
+        func waitUntil(_ predicate: () -> Bool) async throws {
+            let deadline = Date().addingTimeInterval(30)
+            while !predicate(), Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+            XCTAssertTrue(predicate(), "Timed out waiting for the selected edit to settle")
+        }
+        func waitForSelectedFrame(_ contrast: JSONValue) async throws {
+            try await waitUntil { model.frameStatus == .current(model.currentFrame) && model.value("prep.contrast") == contrast }
+            XCTAssertEqual(model.shownFrame?.frame, model.currentFrame)
+        }
+
+        try await waitUntil { model.previewCurrent && model.thumbnailStamp != nil }
+        let initialContrast = model.value("prep.contrast")
+        undo.beginUndoGrouping()
+        model.set("prep.contrast", .number(18))
+        undo.endUndoGrouping()
+        try await waitForSelectedFrame(.number(18))
+
+        undo.undo()
+        try await waitForSelectedFrame(initialContrast)
+        undo.redo()
+        try await waitForSelectedFrame(.number(18))
+
+        let selected = EditorModel.userEdits(model.state)
+        await model.flushSidecars()
+        XCTAssertEqual(try Self.savedEdits(first, model: model), selected, "The sidecar must contain the selected redo state")
+
+        let previousThumbnailVersion = model.thumbnailVersions[first] ?? 0
+        model.open(photos[1])
+        try await waitUntil { (model.thumbnailVersions[first] ?? 0) > previousThumbnailVersion }
+        let file = try XCTUnwrap(model.library.items.first { $0.url == first })
+        let thumbnail = try XCTUnwrap(model.editedThumbnail(for: first))
+        XCTAssertEqual(thumbnail.look, model.library.looks[first], "The thumbnail key follows the saved sidecar look")
+        let key = try XCTUnwrap(thumbnail.store.key(for: file, look: thumbnail.look))
+        XCTAssertNotNil(thumbnail.store.image(key, maxPixels: Int(EditedThumbnailStore.longSide)), "The selected saved edit has a developed thumbnail")
+
+        model.shutdown()
+        let restored = try await makeModel(store: model.sidecars ?? SidecarStore(), bin: try temporaryFolder("relaunch-trash"), relaunch: true)
+        restored.open(first)
+        try await waitUntil { restored.frameStatus == .current(restored.currentFrame) && restored.value("prep.contrast") == .number(18) }
+        XCTAssertEqual(restored.shownFrame?.frame, restored.currentFrame)
+        XCTAssertEqual(try Self.savedEdits(first, model: restored), selected, "Reopening restores the same edit state")
+    }
+
     /// A photograph whose sidecar can't be written (its folder became
     /// read-only) keeps its saved edits; leaving it filed the preview of the
     /// unsaved ones as the saved edits' thumbnail and kept develop, so the
