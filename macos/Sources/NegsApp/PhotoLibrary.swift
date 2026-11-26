@@ -69,7 +69,7 @@ enum LibraryFlag: String, CaseIterable, Codable, Identifiable, Sendable {
     }
 }
 
-enum LibraryFilter: String, CaseIterable, Codable, Identifiable, Sendable {
+enum LibraryFilter: String, CaseIterable, Codable, Hashable, Identifiable, Sendable {
     case all, picked, clientPicks, rejected, unrated, fiveStar, exportQueued, missing
     var id: String { rawValue }
     var title: String {

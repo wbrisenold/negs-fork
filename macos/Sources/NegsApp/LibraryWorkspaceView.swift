@@ -224,20 +224,21 @@ struct LibraryWorkspaceView: View {
                 Spacer(minLength: 8)
                 if !library.photos.isEmpty {
                 TextField("Search Library", text: $librarySearchInput)
-                    .textFieldStyle(.roundedBorder).controlSize(.small).frame(width: 145)
+                    .textFieldStyle(.roundedBorder).controlSize(.small)
+                    .frame(minWidth: 88, idealWidth: 145, maxWidth: 165)
                     .focused($librarySearchFocused)
-                    .onSubmit { library.searchText = librarySearchInput }
+                    .onSubmit { _ = LibraryWorkflow.perform(.search(librarySearchInput), in: library) }
                     .task(id: librarySearchInput) {
                         guard librarySearchInput != library.searchText else { return }
                         try? await Task.sleep(nanoseconds: 180_000_000)
                         guard !Task.isCancelled else { return }
-                        library.searchText = librarySearchInput
+                        _ = LibraryWorkflow.perform(.search(librarySearchInput), in: library)
                     }
                     .overlay(alignment: .trailing) {
                         if !librarySearchInput.isEmpty {
                             Button {
                                 librarySearchInput = ""
-                                library.searchText = ""
+                                _ = LibraryWorkflow.perform(.clearSearch, in: library)
                             } label: {
                                 Image(systemName: "xmark.circle.fill")
                                     .foregroundStyle(.secondary)
@@ -255,7 +256,7 @@ struct LibraryWorkspaceView: View {
                 Menu {
                     ForEach(LibrarySort.allCases) { sort in
                         Button {
-                            library.sort = sort
+                            _ = LibraryWorkflow.perform(.setSort(sort), in: library)
                         } label: {
                             if library.sort == sort { Label(sort.title, systemImage: "checkmark") }
                             else { Text(sort.title) }
@@ -370,7 +371,7 @@ struct LibraryWorkspaceView: View {
                             .font(Theme.text(13, italic: true)).foregroundStyle(Theme.dim).padding(.horizontal, 8)
                         ForEach(addableCullFilters.filter { !cullFilters.contains($0) }, id: \.self) { filter in
                             Button {
-                                library.cullFilters.insert(filter)
+                                _ = LibraryWorkflow.perform(.toggleCullFilter(filter), in: library)
                                 showingFilterOptions = false
                             } label: {
                                 Label(filterTitle(filter, topPickLabel: topPickLabel), systemImage: filter.symbol)
@@ -380,8 +381,8 @@ struct LibraryWorkspaceView: View {
                         }
                         if !cullFilters.isEmpty {
                             Divider().padding(.vertical, 3)
-                            Button("Clear Filters") {
-                                library.cullFilters.removeAll()
+                            Button("Clear All Filters") {
+                                _ = LibraryWorkflow.perform(.clearAllFilters, in: library)
                                 showingFilterOptions = false
                             }
                             .buttonStyle(WordActionStyle()).padding(.horizontal, 8).padding(.vertical, 6)
@@ -392,13 +393,18 @@ struct LibraryWorkspaceView: View {
                 ForEach(CullFilterChip.allCases.filter { cullFilters.contains($0) }, id: \.self) { filter in
                     HStack(spacing: 4) {
                         Text(filterTitle(filter, topPickLabel: topPickLabel))
-                        Button { library.cullFilters.remove(filter) } label: {
+                        Button { _ = LibraryWorkflow.perform(.removeFilter(.cull(filter)), in: library) } label: {
                             Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                         }.buttonStyle(WordActionStyle()).help("Remove \(filterTitle(filter, topPickLabel: topPickLabel)) filter")
                     }
                     .font(Theme.ui(10, weight: .medium)).padding(.horizontal, 7).padding(.vertical, 4)
-                    .background(Theme.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 3))
-                    .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Theme.accent.opacity(0.32), lineWidth: 0.7))
+                    .studioWorkspaceCard(surface: Theme.accent.opacity(0.10))
+                }
+                LibraryCategoryFilterChips(activeFilters: workflowState.activeFilters) { filter in
+                    _ = LibraryWorkflow.perform(.removeFilter(filter), in: library)
+                } clearAll: {
+                    _ = LibraryWorkflow.perform(.clearAllFilters, in: library)
+                    librarySearchInput = ""
                 }
                 Button {
                     showingTopPickOptions = true
@@ -446,8 +452,7 @@ struct LibraryWorkspaceView: View {
                         Text("Ranks analyzed photos in the current Library view, then keeps this number or percentage. Project, search and group scope all apply.")
                             .font(.caption2).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
                         Button {
-                            if cullFilters.contains(.topPicks) { library.cullFilters.remove(.topPicks) }
-                            else { library.cullFilters.insert(.topPicks) }
+                            _ = LibraryWorkflow.perform(.toggleCullFilter(.topPicks), in: library)
                             showingTopPickOptions = false
                         } label: {
                             Text(cullFilters.contains(.topPicks) ? "Hide Top Picks" : "Show Top Picks")
@@ -465,11 +470,11 @@ struct LibraryWorkspaceView: View {
                     Text("\(editablePhotos.count) ready · \(offlineCount) offline")
                         .font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
                 }
-                if library.gridSelection.selected.count > 1 {
-                    Text("\(library.gridSelection.selected.count) selected")
+                if workflowState.selectedCount > 1 {
+                    Text("\(workflowState.selectedCount) selected")
                         .font(Theme.ui(10, weight: .medium)).foregroundStyle(Theme.dim).monospacedDigit()
                         .help("Bulk selection for the visible Library grid")
-                    Button("Clear Selection") { library.gridSelection.deselectAll() }
+                    Button("Clear Selection") { _ = LibraryWorkflow.perform(.clearSelection, in: library) }
                         .buttonStyle(OutlinedButtonStyle()).help("Keep the current photo selected")
                 }
                 if !selectedPhotos.isEmpty {
@@ -585,8 +590,12 @@ struct LibraryWorkspaceView: View {
                 }
                 .focusable()
                 .focused($libraryGridFocused)
-                .onKeyPress(.leftArrow) { moveLibrarySelection(by: -1); return .handled }
-                .onKeyPress(.rightArrow) { moveLibrarySelection(by: 1); return .handled }
+                .onKeyPress(.leftArrow) { press in
+                    moveLibrarySelection(by: -1, extending: press.modifiers.contains(.shift)); return .handled
+                }
+                .onKeyPress(.rightArrow) { press in
+                    moveLibrarySelection(by: 1, extending: press.modifiers.contains(.shift)); return .handled
+                }
                 .onKeyPress(characters: CharacterSet(charactersIn: "pxuPXU012345")) { press in
                     guard libraryGridFocused, let photo = library.selectedPhoto, !photo.missing else { return .ignored }
                     switch press.characters.lowercased() {
@@ -635,14 +644,13 @@ struct LibraryWorkspaceView: View {
         case .clearSearch:
             Button("Clear Search", systemImage: "xmark.circle") {
                 librarySearchInput = ""
-                library.searchText = ""
+                _ = LibraryWorkflow.perform(.clearSearch, in: library)
             }
             .buttonStyle(StudioActionButtonStyle(kind: .primary))
         case .clearFilters:
             Button("Clear Filters", systemImage: "xmark.circle") {
-                library.filter = .all
-                library.selectedSmartCollectionID = nil
-                library.cullFilters.removeAll()
+                _ = LibraryWorkflow.perform(.clearAllFilters, in: library)
+                librarySearchInput = ""
             }
             .buttonStyle(StudioActionButtonStyle(kind: .primary))
         case .refreshSources:
@@ -907,8 +915,9 @@ struct LibraryWorkspaceView: View {
                                  selected: library.gridSelection.selected.contains(photo.file.url) || photo.file.url == library.selectedPhotoURL,
                                  isTopPick: topPickURLs.contains(photo.file.url) && photo.cull?.hardReject != true,
                                  size: CGFloat(thumbnailSize)) {
-                    library.selectGridPhoto(photo.file.url, extending: NSEvent.modifierFlags.contains(.shift),
-                                            toggling: NSEvent.modifierFlags.contains(.command), in: order)
+                    let mode: LibrarySelectionMode = NSEvent.modifierFlags.contains(.shift) ? .range
+                        : NSEvent.modifierFlags.contains(.command) ? .additive : .single
+                    _ = LibraryWorkflow.perform(.select(photo.file.url, mode), in: library)
                     libraryGridFocused = true
                 } open: {
                     model.openLibraryPhoto(photo.file.url)
@@ -921,12 +930,12 @@ struct LibraryWorkspaceView: View {
         }
     }
 
-    private func moveLibrarySelection(by offset: Int) {
+    private func moveLibrarySelection(by offset: Int, extending: Bool = false) {
         let photos = displayedPhotos(from: library.visiblePhotos).filter { !$0.missing }
         guard !photos.isEmpty else { return }
         let current = photos.firstIndex { $0.file.url == library.selectedPhotoURL }
         let next = min(max((current ?? (offset > 0 ? -1 : photos.count)) + offset, 0), photos.count - 1)
-        library.selectGridPhoto(photos[next].file.url, in: photos.map(\.file.url))
+        _ = LibraryWorkflow.perform(.select(photos[next].file.url, extending ? .range : .single), in: library)
     }
 
     private func editFiltered(_ editablePhotos: [LibraryPhoto]) {
@@ -1005,6 +1014,43 @@ struct LibraryWorkspaceView: View {
         ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
     }
 
+}
+
+private struct LibraryCategoryFilterChips: View {
+    let activeFilters: Set<LibraryActiveFilter>
+    let remove: (LibraryActiveFilter) -> Void
+    let clearAll: () -> Void
+
+    init(activeFilters: Set<LibraryActiveFilter>, remove: @escaping (LibraryActiveFilter) -> Void,
+         clearAll: @escaping () -> Void) {
+        self.activeFilters = activeFilters
+        self.remove = remove
+        self.clearAll = clearAll
+    }
+
+    var body: some View {
+        ForEach(activeFilters.filter {
+            if case .category = $0 { return true }
+            return false
+        }.sorted { String(describing: $0) < String(describing: $1) }, id: \.self) { filter in
+            if case .category(let category) = filter {
+                HStack(spacing: 4) {
+                    Text(category.title)
+                    Button { remove(filter) } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(WordActionStyle()).help("Remove \(category.title) filter")
+                }
+                .font(Theme.ui(10, weight: .medium)).padding(.horizontal, 7).padding(.vertical, 4)
+                .studioWorkspaceCard(surface: Theme.accent.opacity(0.10))
+            }
+        }
+        if !activeFilters.isEmpty {
+            Button("Clear All", action: clearAll)
+                .buttonStyle(StudioActionButtonStyle(kind: .secondary))
+                .accessibilityLabel("Clear all active filters and search")
+        }
+    }
 }
 
 private struct WordActionStyle: ButtonStyle {

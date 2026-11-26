@@ -4,8 +4,28 @@ enum LibraryWorkflowIntent {
     case openProject(UUID)
     case openReview(LibraryFilter)
     case openGroup(UUID)
+    case search(String)
+    case clearSearch
+    case setFilter(LibraryFilter)
+    case removeFilter(LibraryActiveFilter)
+    case toggleCullFilter(CullFilterChip)
+    case clearAllFilters
+    case setSort(LibrarySort)
+    case select(URL, LibrarySelectionMode)
+    case clearSelection
     case importFolders([URL], to: UUID)
     case addSelectedPhotos([LibraryPhoto], to: UUID)
+}
+
+enum LibrarySelectionMode: Equatable {
+    case single
+    case range
+    case additive
+}
+
+enum LibraryActiveFilter: Hashable {
+    case category(LibraryFilter)
+    case cull(CullFilterChip)
 }
 
 enum LibraryImportPhase: Equatable {
@@ -53,6 +73,12 @@ struct LibraryWorkflowVisibleState: Equatable {
     let selectedCount: Int
     let emptyState: LibraryWorkflowEmptyState?
     let importStatus: LibraryImportStatus?
+    let visiblePhotoURLs: [URL]
+    let selectedPhotoURLs: [URL]
+    let focusedPhotoURL: URL?
+    let searchText: String
+    let activeFilters: Set<LibraryActiveFilter>
+    let sort: LibrarySort
 }
 
 /// The single app-level route for Library scope intents and their visible result.
@@ -64,7 +90,37 @@ struct LibraryWorkflowVisibleState: Equatable {
         case .openProject(let id): library.selectProject(id)
         case .openReview(let filter): library.selectReviewFilter(filter)
         case .openGroup(let id): library.selectGroup(id)
+        case .search(let query): library.searchText = query
+        case .clearSearch: library.searchText = ""
+        case .setFilter(let filter):
+            library.filter = filter
+            library.selectedSmartCollectionID = nil
+        case .removeFilter(let filter):
+            switch filter {
+            case .category: library.filter = .all; library.selectedSmartCollectionID = nil
+            case .cull(let value): library.cullFilters.remove(value)
+            }
+        case .toggleCullFilter(let filter):
+            if library.cullFilters.contains(filter) { library.cullFilters.remove(filter) }
+            else { library.cullFilters.insert(filter) }
+        case .clearAllFilters:
+            library.searchText = ""
+            library.filter = .all
+            library.selectedSmartCollectionID = nil
+            library.cullFilters.removeAll()
+        case .setSort(let sort): library.sort = sort
+        case .select(let url, let mode):
+            let order = library.filteredPhotos().map(\.file.url)
+            guard order.contains(url) else { break }
+            library.selectGridPhoto(url, extending: mode == .range, toggling: mode == .additive, in: order)
+        case .clearSelection: library.gridSelection.deselectAll()
         case .importFolders, .addSelectedPhotos: break
+        }
+
+        switch intent {
+        case .search, .clearSearch, .setFilter, .removeFilter, .toggleCullFilter, .clearAllFilters, .setSort:
+            library.pruneGridSelection(to: library.filteredPhotos().map(\.file.url))
+        default: break
         }
 
         // Selection and photo-specific details belong to the previous scope.
@@ -129,6 +185,10 @@ struct LibraryWorkflowVisibleState: Equatable {
             )
         }
 
+        var activeFilters = Set<LibraryActiveFilter>()
+        let activeCategory = library.smartCollections.first { $0.id == library.selectedSmartCollectionID }?.filter ?? library.filter
+        if activeCategory != .all { activeFilters.insert(.category(activeCategory)) }
+        activeFilters.formUnion(library.cullFilters.map(LibraryActiveFilter.cull))
         return LibraryWorkflowVisibleState(
             scopeLabel: scopeLabel,
             title: title,
@@ -136,7 +196,15 @@ struct LibraryWorkflowVisibleState: Equatable {
             photoCount: photos.count,
             selectedCount: library.selectedCount(in: photos),
             emptyState: emptyState,
-            importStatus: library.importStatus
+            importStatus: library.importStatus,
+            visiblePhotoURLs: photos.map(\.file.url),
+            selectedPhotoURLs: photos.filter { photo in
+                library.gridSelection.selected.contains(photo.file.url) || library.selectedPhotoURL == photo.file.url
+            }.map(\.file.url),
+            focusedPhotoURL: library.selectedPhotoURL,
+            searchText: library.searchText,
+            activeFilters: activeFilters,
+            sort: library.sort
         )
     }
 

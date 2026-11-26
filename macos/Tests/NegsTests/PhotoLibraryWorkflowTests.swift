@@ -51,7 +51,8 @@ import XCTest
         try JSONEncoder().encode(catalog).write(to: store)
         let library = PhotoLibrary(storeURL: store)
         await library.load()
-        return Fixture(library: library, root: root, photos: records, folderID: folderID, binID: binID, projectID: projectID)
+        let scopedBinID = library.albums.first { $0.name == "Review" }?.id ?? binID
+        return Fixture(library: library, root: root, photos: records, folderID: folderID, binID: scopedBinID, projectID: projectID)
     }
 
     func testCacheHitsRetainObservationDependencies() async throws {
@@ -148,6 +149,58 @@ import XCTest
         XCTAssertEqual(emptyProject.emptyState?.nextStep, .addPhotos)
         XCTAssertNil(library.selectedPhotoURL)
         XCTAssertTrue(library.gridSelection.selected.isEmpty)
+    }
+
+    func testBrowseActionsStayInScopeAndExposeRemovableFiltersAndFocusedSelection() async throws {
+        let fixture = try await fixture()
+        defer { fixture.clean() }
+        let library = fixture.library
+        library.removeFromBin([fixture.photos[0]], binID: fixture.binID)
+        _ = LibraryWorkflow.perform(.openGroup(fixture.binID), in: library)
+
+        let searched = LibraryWorkflow.perform(.search("png"), in: library)
+
+        XCTAssertEqual(searched.visiblePhotoURLs, [fixture.photos[1].file.url])
+        XCTAssertEqual(searched.searchText, "png")
+        XCTAssertEqual(searched.photoCount, 1)
+
+        let clearedSearch = LibraryWorkflow.perform(.clearSearch, in: library)
+        XCTAssertEqual(clearedSearch.photoCount, 1)
+        _ = LibraryWorkflow.perform(.openProject(fixture.projectID), in: library)
+        let filtered = LibraryWorkflow.perform(.setFilter(.fiveStar), in: library)
+        XCTAssertEqual(filtered.visiblePhotoURLs, [fixture.photos[1].file.url])
+        XCTAssertEqual(filtered.activeFilters, [.category(.fiveStar)])
+        _ = LibraryWorkflow.perform(.toggleCullFilter(.rejects), in: library)
+        let filterRemoved = LibraryWorkflow.perform(.removeFilter(.category(.fiveStar)), in: library)
+        XCTAssertEqual(filterRemoved.photoCount, 0)
+        XCTAssertEqual(filterRemoved.activeFilters, [.cull(.rejects)])
+        let allFiltersRemoved = LibraryWorkflow.perform(.removeFilter(.cull(.rejects)), in: library)
+        XCTAssertEqual(allFiltersRemoved.photoCount, 2)
+        XCTAssertTrue(allFiltersRemoved.activeFilters.isEmpty)
+
+        let single = LibraryWorkflow.perform(.select(fixture.photos[0].file.url, .single), in: library)
+        XCTAssertEqual(single.selectedPhotoURLs, [fixture.photos[0].file.url])
+        let additive = LibraryWorkflow.perform(.select(fixture.photos[1].file.url, .additive), in: library)
+        XCTAssertEqual(additive.selectedCount, 2)
+        XCTAssertEqual(Set(additive.selectedPhotoURLs), Set(fixture.photos.map(\.file.url)))
+        XCTAssertEqual(additive.focusedPhotoURL, fixture.photos[0].file.url)
+        let ranged = LibraryWorkflow.perform(.select(fixture.photos[1].file.url, .range), in: library)
+        XCTAssertEqual(ranged.selectedCount, 2)
+        XCTAssertEqual(Set(ranged.selectedPhotoURLs), Set(fixture.photos.map(\.file.url)))
+        XCTAssertEqual(ranged.focusedPhotoURL, fixture.photos[1].file.url)
+
+        let sorted = LibraryWorkflow.perform(.setSort(.oldest), in: library)
+        XCTAssertEqual(sorted.sort, .oldest)
+        XCTAssertEqual(sorted.visiblePhotoURLs, library.filteredPhotos().map(\.file.url))
+        let noMatches = LibraryWorkflow.perform(.search("no-such-photo"), in: library)
+        XCTAssertEqual(noMatches.emptyState?.nextStep, .clearSearch)
+        XCTAssertEqual(noMatches.searchText, "no-such-photo")
+        let reset = LibraryWorkflow.perform(.clearAllFilters, in: library)
+        XCTAssertEqual(reset.searchText, "")
+        XCTAssertEqual(reset.sort, .oldest)
+        XCTAssertEqual(reset.photoCount, 2)
+        XCTAssertEqual(reset.selectedCount, 0)
+        XCTAssertNil(reset.focusedPhotoURL)
     }
 
     func testFailedFolderImportStillPersistsItsReference() async throws {
