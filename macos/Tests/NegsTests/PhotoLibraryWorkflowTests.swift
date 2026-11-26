@@ -21,11 +21,6 @@ import XCTest
         var folderID: UUID
         var binID: UUID
         var projectID: UUID
-
-        func clean() {
-            library.flushPersistence()
-            try? FileManager.default.removeItem(at: root)
-        }
     }
 
     private func fixture() async throws -> Fixture {
@@ -52,12 +47,17 @@ import XCTest
         let library = PhotoLibrary(storeURL: store)
         await library.load()
         let scopedBinID = library.albums.first { $0.name == "Review" }?.id ?? binID
-        return Fixture(library: library, root: root, photos: records, folderID: folderID, binID: scopedBinID, projectID: projectID)
+        let fixture = Fixture(library: library, root: root, photos: records, folderID: folderID,
+                              binID: scopedBinID, projectID: projectID)
+        addTeardownBlock {
+            try? await library.flushPersistence()
+            try? FileManager.default.removeItem(at: root)
+        }
+        return fixture
     }
 
     func testCacheHitsRetainObservationDependencies() async throws {
         let fixture = try await fixture()
-        defer { fixture.clean() }
         let library = fixture.library
         library.selectedFolderID = fixture.folderID
         library.selectedPhotoURL = fixture.photos[0].file.url
@@ -79,7 +79,6 @@ import XCTest
 
     func testScopedFilterCountsMatchOfflinePhotoVisibility() async throws {
         let fixture = try await fixture()
-        defer { fixture.clean() }
         let library = fixture.library
         library.selectedProjectID = fixture.projectID
         for filter in LibraryFilter.allCases {
@@ -94,7 +93,6 @@ import XCTest
 
     func testCommandSelectionAndBinRemovalLeaveOriginalReferences() async throws {
         let fixture = try await fixture()
-        defer { fixture.clean() }
         let library = fixture.library
         let order = fixture.photos.map(\.file.url)
         library.selectGridPhoto(order[0], in: order)
@@ -112,7 +110,6 @@ import XCTest
 
     func testAnEmptyScopeClearsInspectorAndSelection() async throws {
         let fixture = try await fixture()
-        defer { fixture.clean() }
         let library = fixture.library
         let order = fixture.photos.map(\.file.url)
         library.selectGridPhoto(order[0], in: order)
@@ -123,13 +120,12 @@ import XCTest
 
     func testWorkflowScopeActionUpdatesVisibleGroupAndClearsStalePhotoFocus() async throws {
         let fixture = try await fixture()
-        defer { fixture.clean() }
         let library = fixture.library
         let focusedPhoto = fixture.photos[0].file.url
         library.selectedPhotoURL = focusedPhoto
         library.gridSelection.select(focusedPhoto)
 
-        let visible = LibraryWorkflow.perform(.openGroup(fixture.binID), in: library)
+        let visible = await LibraryWorkflow.perform(.openGroup(fixture.binID), in: library)
 
         XCTAssertEqual(visible.title, "Review")
         XCTAssertEqual(visible.projectTitle, "Client")
@@ -140,10 +136,10 @@ import XCTest
 
         library.createProject(named: "New Job")
         let emptyProjectID = try XCTUnwrap(library.projects.first { $0.name == "New Job" }?.id)
-        _ = LibraryWorkflow.perform(.openProject(fixture.projectID), in: library)
+        _ = await LibraryWorkflow.perform(.openProject(fixture.projectID), in: library)
         library.selectedPhotoURL = focusedPhoto
         library.gridSelection.select(focusedPhoto)
-        let emptyProject = LibraryWorkflow.perform(.openProject(emptyProjectID), in: library)
+        let emptyProject = await LibraryWorkflow.perform(.openProject(emptyProjectID), in: library)
         XCTAssertEqual(emptyProject.scopeLabel, "PROJECT · NEW JOB · ALL PHOTOS")
         XCTAssertEqual(emptyProject.photoCount, 0)
         XCTAssertEqual(emptyProject.emptyState?.nextStep, .addPhotos)
@@ -153,49 +149,48 @@ import XCTest
 
     func testBrowseActionsStayInScopeAndExposeRemovableFiltersAndFocusedSelection() async throws {
         let fixture = try await fixture()
-        defer { fixture.clean() }
         let library = fixture.library
         library.removeFromBin([fixture.photos[0]], binID: fixture.binID)
-        _ = LibraryWorkflow.perform(.openGroup(fixture.binID), in: library)
+        _ = await LibraryWorkflow.perform(.openGroup(fixture.binID), in: library)
 
-        let searched = LibraryWorkflow.perform(.search("png"), in: library)
+        let searched = await LibraryWorkflow.perform(.search("png"), in: library)
 
         XCTAssertEqual(searched.visiblePhotoURLs, [fixture.photos[1].file.url])
         XCTAssertEqual(searched.searchText, "png")
         XCTAssertEqual(searched.photoCount, 1)
 
-        let clearedSearch = LibraryWorkflow.perform(.clearSearch, in: library)
+        let clearedSearch = await LibraryWorkflow.perform(.clearSearch, in: library)
         XCTAssertEqual(clearedSearch.photoCount, 1)
-        _ = LibraryWorkflow.perform(.openProject(fixture.projectID), in: library)
-        let filtered = LibraryWorkflow.perform(.setFilter(.fiveStar), in: library)
+        _ = await LibraryWorkflow.perform(.openProject(fixture.projectID), in: library)
+        let filtered = await LibraryWorkflow.perform(.setFilter(.fiveStar), in: library)
         XCTAssertEqual(filtered.visiblePhotoURLs, [fixture.photos[1].file.url])
         XCTAssertEqual(filtered.activeFilters, [.category(.fiveStar)])
-        _ = LibraryWorkflow.perform(.toggleCullFilter(.rejects), in: library)
-        let filterRemoved = LibraryWorkflow.perform(.removeFilter(.category(.fiveStar)), in: library)
+        _ = await LibraryWorkflow.perform(.toggleCullFilter(.rejects), in: library)
+        let filterRemoved = await LibraryWorkflow.perform(.removeFilter(.category(.fiveStar)), in: library)
         XCTAssertEqual(filterRemoved.photoCount, 0)
         XCTAssertEqual(filterRemoved.activeFilters, [.cull(.rejects)])
-        let allFiltersRemoved = LibraryWorkflow.perform(.removeFilter(.cull(.rejects)), in: library)
+        let allFiltersRemoved = await LibraryWorkflow.perform(.removeFilter(.cull(.rejects)), in: library)
         XCTAssertEqual(allFiltersRemoved.photoCount, 2)
         XCTAssertTrue(allFiltersRemoved.activeFilters.isEmpty)
 
-        let single = LibraryWorkflow.perform(.select(fixture.photos[0].file.url, .single), in: library)
+        let single = await LibraryWorkflow.perform(.select(fixture.photos[0].file.url, .single), in: library)
         XCTAssertEqual(single.selectedPhotoURLs, [fixture.photos[0].file.url])
-        let additive = LibraryWorkflow.perform(.select(fixture.photos[1].file.url, .additive), in: library)
+        let additive = await LibraryWorkflow.perform(.select(fixture.photos[1].file.url, .additive), in: library)
         XCTAssertEqual(additive.selectedCount, 2)
         XCTAssertEqual(Set(additive.selectedPhotoURLs), Set(fixture.photos.map(\.file.url)))
         XCTAssertEqual(additive.focusedPhotoURL, fixture.photos[0].file.url)
-        let ranged = LibraryWorkflow.perform(.select(fixture.photos[1].file.url, .range), in: library)
+        let ranged = await LibraryWorkflow.perform(.select(fixture.photos[1].file.url, .range), in: library)
         XCTAssertEqual(ranged.selectedCount, 2)
         XCTAssertEqual(Set(ranged.selectedPhotoURLs), Set(fixture.photos.map(\.file.url)))
         XCTAssertEqual(ranged.focusedPhotoURL, fixture.photos[1].file.url)
 
-        let sorted = LibraryWorkflow.perform(.setSort(.oldest), in: library)
+        let sorted = await LibraryWorkflow.perform(.setSort(.oldest), in: library)
         XCTAssertEqual(sorted.sort, .oldest)
         XCTAssertEqual(sorted.visiblePhotoURLs, library.filteredPhotos().map(\.file.url))
-        let noMatches = LibraryWorkflow.perform(.search("no-such-photo"), in: library)
+        let noMatches = await LibraryWorkflow.perform(.search("no-such-photo"), in: library)
         XCTAssertEqual(noMatches.emptyState?.nextStep, .clearSearch)
         XCTAssertEqual(noMatches.searchText, "no-such-photo")
-        let reset = LibraryWorkflow.perform(.clearAllFilters, in: library)
+        let reset = await LibraryWorkflow.perform(.clearAllFilters, in: library)
         XCTAssertEqual(reset.searchText, "")
         XCTAssertEqual(reset.sort, .oldest)
         XCTAssertEqual(reset.photoCount, 2)
@@ -205,10 +200,9 @@ import XCTest
 
     func testFailedFolderImportStillPersistsItsReference() async throws {
         let fixture = try await fixture()
-        defer { fixture.clean() }
         let library = fixture.library
         await library.importFolders([fixture.root.appendingPathComponent("another-offline-folder")])
-        library.flushPersistence()
+        try await library.flushPersistence()
         let object = try JSONSerialization.jsonObject(with: Data(contentsOf: fixture.root.appendingPathComponent("catalog.json"))) as? [String: Any]
         XCTAssertEqual((object?["folders"] as? [[String: Any]])?.count, 2)
         XCTAssertNotNil(library.error)
@@ -216,7 +210,6 @@ import XCTest
 
     func testImportActionAddsPhotosToNamedProjectAndKeepsVisibleScope() async throws {
         let fixture = try await fixture()
-        defer { fixture.clean() }
         let library = fixture.library
         let sourceFolder = fixture.root.appendingPathComponent("selected-source")
         try FileManager.default.createDirectory(at: sourceFolder, withIntermediateDirectories: true)
@@ -233,7 +226,7 @@ import XCTest
 
         library.createProject(named: "Alternate Job")
         let alternateID = try XCTUnwrap(library.projects.first { $0.name == "Alternate Job" }?.id)
-        _ = LibraryWorkflow.perform(.openProject(fixture.projectID), in: library)
+        _ = await LibraryWorkflow.perform(.openProject(fixture.projectID), in: library)
         let photo = try XCTUnwrap(library.photos.first { $0.file.url.standardizedFileURL == sourceURL.standardizedFileURL })
 
         let outcome = await LibraryWorkflow.perform(.addSelectedPhotos([photo], to: alternateID), in: library)
@@ -248,7 +241,6 @@ import XCTest
 
     func testFailedFolderImportCanRetryIntoOriginalDestination() async throws {
         let fixture = try await fixture()
-        defer { fixture.clean() }
         let library = fixture.library
         let destinationID = try XCTUnwrap(library.projects.first?.id)
         let missingFolder = fixture.root.appendingPathComponent("camera-card")

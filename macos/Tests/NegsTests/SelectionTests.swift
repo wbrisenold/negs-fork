@@ -163,13 +163,13 @@ final class SelectionTests: XCTestCase {
     }
 
     func testTheSheetSaysWhatItShows() {
-        XCTAssertEqual(SheetWords.words(for: LibraryFilter()), [])
-        let filter = LibraryFilter(rating: .atLeast(3), flags: [.pick], editedOnly: true)
+        XCTAssertEqual(SheetWords.words(for: FolderLibraryFilter()), [])
+        let filter = FolderLibraryFilter(rating: .atLeast(3), flags: [.pick], editedOnly: true)
         XCTAssertEqual(SheetWords.words(for: filter), [SheetWords.Part(lead: "rated ", word: "★★★ or more"),
                                                        SheetWords.Part(lead: "", word: "picks"),
                                                        SheetWords.Part(lead: "", word: "edited")])
-        XCTAssertEqual(SheetWords.words(for: LibraryFilter(rating: .atLeast(5))), [SheetWords.Part(lead: "rated ", word: "★★★★★")])
-        XCTAssertEqual(SheetWords.words(for: LibraryFilter(rating: .unrated, flags: [.pick, .reject])),
+        XCTAssertEqual(SheetWords.words(for: FolderLibraryFilter(rating: .atLeast(5))), [SheetWords.Part(lead: "rated ", word: "★★★★★")])
+        XCTAssertEqual(SheetWords.words(for: FolderLibraryFilter(rating: .unrated, flags: [.pick, .reject])),
                        [SheetWords.Part(lead: "", word: "unrated"), SheetWords.Part(lead: "", word: "picks or rejected")])
         XCTAssertEqual(SheetWords.count(shown: 12, total: 12, selected: 1, filtered: false), "12 photographs · 1 selected")
         XCTAssertEqual(SheetWords.count(shown: 4, total: 12, selected: 1, filtered: true), "4 of 12 photographs")

@@ -22,9 +22,9 @@ import XCTest
         model.set("prep.contrast", .number(12))
         model.set("film_render.halation.strength", .number(2))
         let lab = InspectorEdits.count(.lab, model)
-        XCTAssertGreaterThan(InspectorEdits.count(.prep, model), 0)
-        model.resetEdits(tab: .prep)
-        XCTAssertEqual(InspectorEdits.count(.prep, model), 0)
+        XCTAssertGreaterThan(InspectorEdits.count(.exposure, model), 0)
+        model.resetEdits(tab: .exposure)
+        XCTAssertEqual(InspectorEdits.count(.exposure, model), 0)
         XCTAssertEqual(InspectorEdits.count(.lab, model), lab)
     }
 

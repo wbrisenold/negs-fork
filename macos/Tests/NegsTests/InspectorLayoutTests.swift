@@ -19,7 +19,7 @@ import XCTest
     func testTabWordsKeepTheirSizeWhenChosenOrEdited() {
         _ = NSApplication.shared
         func size(_ title: String, chosen: Bool, count: Int) -> CGSize {
-            NSHostingView(rootView: TabWord(title: title, chosen: chosen, count: count) {}).fittingSize
+            NSHostingView(rootView: TabWord(title: title, symbol: "circle", chosen: chosen, count: count, choose: {})).fittingSize
         }
         for tab in InspectorTab.allCases {
             let title = tab.rawValue, plain = size(title, chosen: false, count: 0)
@@ -43,14 +43,14 @@ import XCTest
     func testTabRowGapsAndBaselineAsDrawn() throws {
         _ = NSApplication.shared
         XCTAssertTrue(Theme.Fonts.load(), "Newsreader")
-        let states: [[InspectorTab: Int]] = [[:], [.prep: 1], [.lab: 1, .output: 1], [.prep: 3, .lab: 12, .output: 1]]
+        let states: [[InspectorTab: Int]] = [[:], [.exposure: 1], [.lab: 1, .output: 1], [.exposure: 3, .lab: 12, .output: 1]]
         for counts in states {
             var lefts: [[Int]] = []
             for chosen in InspectorTab.allCases {
                 let row = try TabRowPixels(counts: counts, chosen: chosen)
                 let label = "\(counts.map { "\($0.key.rawValue) \($0.value)" }.sorted()), \(chosen.rawValue) chosen"
-                XCTAssertEqual(row.words.count, 3, label)
-                guard row.words.count == 3 else { continue }
+                XCTAssertEqual(row.words.count, InspectorTab.allCases.count, label)
+                guard row.words.count == InspectorTab.allCases.count else { continue }
                 // Glyphs' own side bearings differ by up to a point.
                 let gaps = zip(row.words, row.words.dropFirst()).map { $1.title.lowerBound - $0.end }
                 XCTAssertLessThanOrEqual(abs(gaps[0] - gaps[1]), row.pixels(1.5), "\(label): gaps \(gaps)")

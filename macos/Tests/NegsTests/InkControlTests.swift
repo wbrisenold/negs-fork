@@ -298,7 +298,7 @@ import XCTest
 
         model.set("prep.highlights", .number(-40))
         model.set("prep.shadows", .number(20))
-        XCTAssertEqual(InspectorEdits.count(.prep, model), baseline[0] + 2)
+        XCTAssertEqual(InspectorEdits.count(.exposure, model), baseline[0] + 2)
 
         // Development time sits at the top of the Film and Print sections.
         let film = InspectorEdits.count(.film, model)

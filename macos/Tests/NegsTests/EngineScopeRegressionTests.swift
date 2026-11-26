@@ -10,7 +10,7 @@ final class EngineScopeRegressionTests: XCTestCase {
         let data = Data(repeating: 128, count: 512 * 256 * 4)
         let surface = try EditorModel.previewSurface(data, width: 512, height: 256, bgra: true)
         let scope = ImageScopes.of(surface, crop: CropSettings(), mode: .vectorscope)
-        XCTAssertEqual(scope.vectorscope.bins.max(), UInt16.max)
+        XCTAssertEqual(scope.vectorscope.bins.max(), UInt32.max as UInt32?)
         XCTAssertGreaterThan(scope.vectorscope.sampleCount, 0)
     }
 

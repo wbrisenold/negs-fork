@@ -10,6 +10,8 @@ final class ControlHelpTests: XCTestCase {
             switch control {
             case .slider(_, let path, _, _), .toggle(_, let path), .choice(_, let path, _), .stockSlider(_, let path, _, _, _, _):
                 if ControlHelp.text(path) == nil { missing.append(path) }
+            case .silverRetention:
+                if ControlHelp.text(control.id) == nil { missing.append(control.id) }
             case .balancePrint(_, let help), .filterLink(let help):
                 XCTAssertFalse(help.isEmpty)
             }

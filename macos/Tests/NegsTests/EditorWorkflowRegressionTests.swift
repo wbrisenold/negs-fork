@@ -4,11 +4,11 @@ import XCTest
 
 @MainActor final class EditorWorkflowRegressionTests: XCTestCase {
     func testRawScaleRejectsInvalidGeometryAndRequests() {
-        for request in [CGFloat.nan, .infinity, 0, -0.2] {
+        for request in [CGFloat.nan, CGFloat.infinity, 0, -0.2] {
             let scale = EditorModel.rawPreviewScale(requested: request)
             XCTAssertTrue(scale.isFinite && scale > 0 && scale <= 0.38)
         }
-        for size in [CGSize(width: .infinity, height: 200), CGSize(width: 200, height: .nan), .zero] {
+        for size in [CGSize(width: CGFloat.infinity, height: 200), CGSize(width: 200, height: CGFloat.nan), .zero] {
             XCTAssertEqual(EditorModel.rawPreviewScale(requested: nil, photoSize: size), 0.27)
         }
         XCTAssertEqual(EditorModel.rawPreviewScale(requested: 0.1, photoSize: CGSize(width: 6000, height: 4000)), 0.1)

@@ -417,7 +417,7 @@ final class LibraryFormatTests: XCTestCase {
         defer { watching.cancel() }
         try await waitUntil { model.library.summariesLoaded && model.library.files.count == 5 }
         model.advanceAfterRating = false
-        model.library.filter = LibraryFilter(flags: [.pick])
+        model.library.filter = FolderLibraryFilter(flags: [.pick])
 
         // The edit view: ← → pass over c, which isn't a pick.
         model.move(by: 1, extending: false)
@@ -446,7 +446,7 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertEqual(model.selection.current, d)
         XCTAssertEqual(model.shownPhotos.map(\.url), [d])
         // Several at once.
-        model.library.filter = LibraryFilter(flags: [.unflagged])
+        model.library.filter = FolderLibraryFilter(flags: [.unflagged])
         model.click(a)
         model.click(c, shift: true)
         XCTAssertEqual(model.ratingTargets, [a, b, c])
@@ -482,7 +482,7 @@ final class LibraryFormatTests: XCTestCase {
         defer { watching.cancel() }
         try await waitUntil { model.library.summariesLoaded && model.library.files.count == 3 }
         model.advanceAfterRating = false
-        model.library.filter = LibraryFilter(flags: [.pick])
+        model.library.filter = FolderLibraryFilter(flags: [.pick])
 
         // The edit view: a goes and b opens; b goes and the grid opens, empty.
         step { model.setFlag(nil) }
@@ -515,12 +515,12 @@ final class LibraryFormatTests: XCTestCase {
         undo.redo()
         XCTAssertEqual(model.mode, .grid)
         XCTAssertNil(model.selection.current)
-        model.library.filter = LibraryFilter(flags: [.unflagged])
+        model.library.filter = FolderLibraryFilter(flags: [.unflagged])
         XCTAssertEqual(model.selection.current, b)
         XCTAssertEqual(model.shownPhotos.map(\.url), photos)
 
         // The grid: b, the last pick again, goes; undo puts it back current.
-        model.library.filter = LibraryFilter(flags: [.pick])
+        model.library.filter = FolderLibraryFilter(flags: [.pick])
         undo.undo()
         XCTAssertEqual(model.library.summary(for: b).flag, .pick)
         model.showGrid()
@@ -612,7 +612,6 @@ final class LibraryFormatTests: XCTestCase {
         model.library.filter = FolderLibraryFilter()
 
         // Arrows: a row is two columns here; down onto a short row lands on its end.
-        model.gridColumns = 2
         model.click(a)
         model.move(by: 2, extending: false)
         XCTAssertEqual(model.selection.current, c)

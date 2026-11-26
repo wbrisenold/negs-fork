@@ -22,6 +22,7 @@ jobs:
       MACOS_ARCHS: x86_64
       BUILD_TARGET_DIR: target/macos-app
       CLEAN_BUILD_CACHE: "1"
+      CARGO_TARGET_DIR: target/macos-app
       CARGO_TARGET_X86_64_APPLE_DARWIN_RUNNER: arch -x86_64
     steps:
       - uses: actions/checkout@v4
@@ -42,7 +43,10 @@ jobs:
         run: |
           cargo test --locked --release --target x86_64-apple-darwin -p spektrafilm-core --lib metering_preview_keeps_area_reduction_on_large_raw_frames
           cargo test --locked --release --target x86_64-apple-darwin -p spektrafilm-core --lib interactive_preview_at_editor_quality_keeps_expected_detail
-          swift test --package-path macos --filter QuickFrameTests/testRawPreviewQualityScaleIs38PercentAndNeverUpscales
+          swift test --package-path macos \
+            --scratch-path target/macos-app/swift-x86_64-apple-macosx14.0 \
+            -c release --triple x86_64-apple-macosx14.0 \
+            --filter QuickFrameTests/testRawPreviewQualityScaleIs38PercentAndNeverUpscales
       - name: Build, package, and run the app regression gate
         run: bash scripts/package_macos_app.sh
       - uses: actions/upload-artifact@v4
