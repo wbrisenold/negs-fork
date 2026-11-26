@@ -2132,15 +2132,16 @@ private struct ColorCorrectionWheel: View {
         return AnyView(chromaWheel(side: side, radius: radius, marker: marker))
     }
 
-    private func chromaWheel(side: CGFloat, radius: CGFloat, marker: CGPoint) -> some View {
-        ZStack {
-            chromaField(radius: radius)
-            chromaRingGuides
-            chromaMarker(position: marker)
+    private func chromaWheel(side: CGFloat, radius: CGFloat, marker: CGPoint) -> AnyView {
+        let artwork = ZStack {
+            AnyView(chromaField(radius: radius))
+            AnyView(chromaRingGuides)
+            AnyView(chromaMarker(position: marker))
         }
         .frame(width: side, height: side)
         .contentShape(Circle())
         .gesture(chromaWheelGesture(side: side, radius: radius))
+        return AnyView(artwork)
     }
 
     private func chromaField(radius: CGFloat) -> some View {
