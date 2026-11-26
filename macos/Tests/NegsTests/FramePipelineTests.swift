@@ -108,6 +108,18 @@ import XCTest
 
     // MARK: Regressions
 
+    func testAnEditIsPendingUntilItsSettledFrameIsShown() async throws {
+        let model = try await makeModel(scale: 1, match: false)
+        model.open(try testPhotos()[2])
+        XCTAssertEqual(model.frameStatus, .pending(model.currentFrame))
+        try await waitUntil(timeout: 20) { model.frameStatus == .current(model.currentFrame) }
+
+        model.set("post.contrast", .number(12))
+        XCTAssertEqual(model.frameStatus, .pending(model.currentFrame))
+        try await waitUntil(timeout: 20) { model.frameStatus == .current(model.currentFrame) }
+        XCTAssertEqual(model.shownFrame?.frame, model.currentFrame)
+    }
+
     /// Model checker: a slider the match depends on, dragged where the
     /// canvas shows every pixel (no drag frames, so each frame is settled),
     /// left the match pending on release, so the exposure never followed and
