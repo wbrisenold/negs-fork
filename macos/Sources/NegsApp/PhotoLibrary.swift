@@ -887,8 +887,25 @@ private struct LibraryProjectDocument: Codable, Sendable {
     /// folder membership separately, so this keeps both views on the same set.
     func syncEditedPhoto(_ photoURL: URL) async {
         await load()
-        let folderURL = photoURL.deletingLastPathComponent().standardizedFileURL
         let photoPath = photoURL.standardizedFileURL.path
+        guard FileManager.default.isReadableFile(atPath: photoPath) else {
+            if let index = photos.firstIndex(where: { $0.file.url.standardizedFileURL.path == photoPath }) {
+                photos[index].missing = true
+                persist()
+            }
+            error = "\u{201c}\(photoURL.lastPathComponent)\u{201d} is unavailable. The rest of the Library is still available; restore the file or remove it from the project."
+            return
+        }
+
+        // Returning from Develop re-enters this synchronization path. Keep
+        // the photographer's project, group, review filter, search, and grid
+        // selection when the edited photograph still belongs to the current
+        // location; only choose a new location for an out-of-scope source.
+        if scopePhotos.contains(where: { $0.file.url.standardizedFileURL.path == photoPath }) {
+            return
+        }
+
+        let folderURL = photoURL.deletingLastPathComponent().standardizedFileURL
         if let folder = folders.first(where: {
             URL(fileURLWithPath: $0.path).standardizedFileURL == folderURL
         }), let owner = projects.first(where: { $0.folderIDs.contains(folder.id) }) {
