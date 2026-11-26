@@ -25,5 +25,5 @@ cmake -S "$SOURCE_DIR" -B "$BUILD_DIR" -G "Unix Makefiles" \
     -DDA_GGML_METAL=ON -DDA_GGML_LLAMAFILE=ON
 cmake --build "$BUILD_DIR" --target da3-cli --parallel "${DEPTH_BUILD_JOBS:-2}"
 test -x "$BUILD_DIR/examples/cli/da3-cli"
-"$(xcrun --find lipo)" -archs "$BUILD_DIR/examples/cli/da3-cli" | rg -q "(^| )$ARCH( |$)"
+"$(xcrun --find lipo)" -archs "$BUILD_DIR/examples/cli/da3-cli" | grep -Eq "(^| )$ARCH( |$)"
 cp "$BUILD_DIR/examples/cli/da3-cli" "$BUILD_ROOT/da3-cli-$ARCH"
