@@ -117,11 +117,7 @@ struct LibraryWorkspaceView: View {
                         ForEach(library.projects) { project in
                             NavigationRow(title: project.name, symbol: "briefcase",
                                           count: library.count(for: project), selected: library.selectedProjectID == project.id) {
-                                library.selectedProjectID = project.id
-                                library.selectedFolderID = nil
-                                library.selectedAlbumID = nil
-                                library.selectedSmartCollectionID = nil
-                                library.filter = .all
+                                library.selectProject(project.id)
                             }
                             .help("Open this project and its groups. Original files stay in place.")
                             .contextMenu {
@@ -147,19 +143,13 @@ struct LibraryWorkspaceView: View {
                                       count: library.count(for: project),
                                       selected: library.selectedFolderID == nil && library.selectedAlbumID == nil
                                         && library.selectedSmartCollectionID == nil && library.filter == .all) {
-                            library.selectedFolderID = nil
-                            library.selectedAlbumID = nil
-                            library.selectedSmartCollectionID = nil
-                            library.filter = .all
+                            library.selectReviewFilter(.all)
                         }
                         ForEach(LibraryFilter.allCases.filter { $0 != .all && ($0 != .missing || hasLocationScope) }) { filter in
                             NavigationRow(title: filter.title, symbol: filter.symbol, count: library.count(for: filter),
                                           selected: library.selectedFolderID == nil && library.selectedAlbumID == nil
                                             && library.selectedSmartCollectionID == nil && library.filter == filter) {
-                                library.selectedFolderID = nil
-                                library.selectedAlbumID = nil
-                                library.selectedSmartCollectionID = nil
-                                library.filter = filter
+                                library.selectReviewFilter(filter)
                             }
                         }
                     }
@@ -172,10 +162,7 @@ struct LibraryWorkspaceView: View {
                         ForEach(library.categories(for: project.id)) { category in
                             NavigationRow(title: category.name, symbol: "square.grid.2x2",
                                           count: library.count(for: category), selected: library.selectedAlbumID == category.id) {
-                                library.selectedFolderID = nil
-                                library.selectedAlbumID = category.id
-                                library.selectedSmartCollectionID = nil
-                                library.filter = .all
+                                library.selectGroup(category.id)
                             }
                             .contextMenu { categoryActions(category) }
                         }

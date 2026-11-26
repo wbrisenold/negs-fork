@@ -44,7 +44,7 @@ import XCTest
         second.albumIDs = [binID]
         let records = [first, second]
         let catalog = Catalog(folders: [LibraryFolder(id: folderID, path: source.path)], photos: records,
-                              albums: [LibraryAlbum(id: binID, name: "Review")],
+                              albums: [LibraryAlbum(id: binID, name: "Review", projectID: projectID)],
                               smartCollections: [SmartLibraryCollection(id: UUID(), name: "Picked", filter: .picked)],
                               projects: [LibraryProject(id: projectID, name: "Client", photoPaths: Set(records.map { $0.file.url.path }))])
         let store = root.appendingPathComponent("catalog.json")
@@ -89,6 +89,46 @@ import XCTest
         library.filter = .all
         XCTAssertEqual(library.count(for: .all), 1)
         XCTAssertEqual(library.sidebarCounts.smartCollections[LibraryFilter.picked.rawValue], 1)
+    }
+
+    func testProjectAndGroupNavigationAndMembershipSurviveRelaunchWithoutChangingSource() async throws {
+        let fixture = try await fixture()
+        defer { fixture.clean() }
+        let source = fixture.photos[0].file.url
+        try FileManager.default.createDirectory(at: source.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let originalBytes = Data("original photograph".utf8)
+        try originalBytes.write(to: source)
+
+        fixture.library.selectProject(fixture.projectID)
+        fixture.library.selectGroup(fixture.binID)
+        XCTAssertEqual(fixture.library.visiblePhotos.count, 2)
+        try await fixture.library.flushPersistence()
+
+        let relaunched = PhotoLibrary(storeURL: fixture.root.appendingPathComponent("catalog.json"))
+        await relaunched.load()
+        XCTAssertEqual(relaunched.selectedProjectID, fixture.projectID)
+        XCTAssertEqual(relaunched.selectedAlbumID, fixture.binID)
+        XCTAssertEqual(relaunched.visiblePhotos.count, 2)
+
+        relaunched.removeFromBin([fixture.photos[0]], binID: fixture.binID)
+        relaunched.addToBin([fixture.photos[0]], binID: fixture.binID)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+        XCTAssertEqual(try Data(contentsOf: source), originalBytes)
+        try await relaunched.flushPersistence()
+
+        let afterAdd = PhotoLibrary(storeURL: fixture.root.appendingPathComponent("catalog.json"))
+        await afterAdd.load()
+        XCTAssertTrue(try XCTUnwrap(afterAdd.photos.first { $0.file.url == source }).albumIDs.contains(fixture.binID))
+
+        afterAdd.removeFromBin([fixture.photos[0]], binID: fixture.binID)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+        XCTAssertEqual(try Data(contentsOf: source), originalBytes)
+        try await afterAdd.flushPersistence()
+
+        let afterMembershipChange = PhotoLibrary(storeURL: fixture.root.appendingPathComponent("catalog.json"))
+        await afterMembershipChange.load()
+        XCTAssertFalse(try XCTUnwrap(afterMembershipChange.photos.first { $0.file.url == source }).albumIDs.contains(fixture.binID))
+        XCTAssertEqual(try Data(contentsOf: source), originalBytes)
     }
 
     func testCommandSelectionAndBinRemovalLeaveOriginalReferences() async throws {

@@ -284,15 +284,17 @@ private struct PhotoLibraryDocument: Codable, Sendable {
     var smartCollections: [SmartLibraryCollection] = []
     var projects: [LibraryProject] = []
     var selectedProjectID: UUID?
+    var selectedAlbumID: UUID?
 
     private enum CodingKeys: String, CodingKey {
-        case schema, folders, photos, albums, smartCollections, projects, selectedProjectID
+        case schema, folders, photos, albums, smartCollections, projects, selectedProjectID, selectedAlbumID
     }
 
     init() {}
 
     init(schema: Int = 2, folders: [LibraryFolder], photos: [LibraryPhoto], albums: [LibraryAlbum],
-         smartCollections: [SmartLibraryCollection], projects: [LibraryProject] = [], selectedProjectID: UUID? = nil) {
+         smartCollections: [SmartLibraryCollection], projects: [LibraryProject] = [], selectedProjectID: UUID? = nil,
+         selectedAlbumID: UUID? = nil) {
         self.schema = schema
         self.folders = folders
         self.photos = photos
@@ -300,6 +302,7 @@ private struct PhotoLibraryDocument: Codable, Sendable {
         self.smartCollections = smartCollections
         self.projects = projects
         self.selectedProjectID = selectedProjectID
+        self.selectedAlbumID = selectedAlbumID
     }
 
     init(from decoder: Decoder) throws {
@@ -311,6 +314,7 @@ private struct PhotoLibraryDocument: Codable, Sendable {
         smartCollections = try container.decodeIfPresent([SmartLibraryCollection].self, forKey: .smartCollections) ?? []
         projects = try container.decodeIfPresent([LibraryProject].self, forKey: .projects) ?? []
         selectedProjectID = try container.decodeIfPresent(UUID.self, forKey: .selectedProjectID)
+        selectedAlbumID = try container.decodeIfPresent(UUID.self, forKey: .selectedAlbumID)
     }
 }
 
@@ -814,6 +818,9 @@ private struct LibraryProjectDocument: Codable, Sendable {
         migrateProjectCategories()
         selectedProjectID = document.selectedProjectID.flatMap { id in projects.contains(where: { $0.id == id }) ? id : nil }
             ?? projects.first?.id
+        selectedAlbumID = document.selectedAlbumID.flatMap { id in
+            albums.contains(where: { $0.id == id && $0.projectID == selectedProjectID }) ? id : nil
+        }
         beginFolderAccess()
         await refresh()
         loaded = true
@@ -1149,6 +1156,39 @@ private struct LibraryProjectDocument: Codable, Sendable {
         if changed { persist() }
     }
 
+    /// Opens a project and clears any narrower location so its full Library is shown.
+    func selectProject(_ id: UUID) {
+        guard projects.contains(where: { $0.id == id }) else { return }
+        selectedProjectID = id
+        selectedFolderID = nil
+        selectedAlbumID = nil
+        selectedSmartCollectionID = nil
+        filter = .all
+        persist()
+    }
+
+    /// Opens a group in its owning project. Groups organize catalog membership only.
+    func selectGroup(_ id: UUID) {
+        guard let group = albums.first(where: { $0.id == id }),
+              let projectID = group.projectID,
+              projects.contains(where: { $0.id == projectID }) else { return }
+        selectedProjectID = projectID
+        selectedFolderID = nil
+        selectedAlbumID = id
+        selectedSmartCollectionID = nil
+        filter = .all
+        persist()
+    }
+
+    /// Opens the project's ungrouped review view and persists the location.
+    func selectReviewFilter(_ filter: LibraryFilter) {
+        selectedFolderID = nil
+        selectedAlbumID = nil
+        selectedSmartCollectionID = nil
+        self.filter = filter
+        persist()
+    }
+
     func createAlbum(named name: String) {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let projectID = selectedProjectID, !name.isEmpty,
@@ -1448,7 +1488,8 @@ private struct LibraryProjectDocument: Codable, Sendable {
             guard let self, self.persistenceRevision == revision else { return }
             let document = PhotoLibraryDocument(folders: self.folders, photos: self.photos, albums: self.albums,
                                                 smartCollections: self.smartCollections, projects: self.projects,
-                                                selectedProjectID: self.selectedProjectID)
+                                                selectedProjectID: self.selectedProjectID,
+                                                selectedAlbumID: self.selectedAlbumID)
             do {
                 try await PhotoLibraryDiskWriter.shared.save(document, owner: self.persistenceID,
                                                               revision: revision, to: self.storeURL)
@@ -1468,7 +1509,8 @@ private struct LibraryProjectDocument: Codable, Sendable {
         let revision = persistenceRevision
         let document = PhotoLibraryDocument(folders: folders, photos: photos, albums: albums,
                                             smartCollections: smartCollections, projects: projects,
-                                            selectedProjectID: selectedProjectID)
+                                            selectedProjectID: selectedProjectID,
+                                            selectedAlbumID: selectedAlbumID)
         try await PhotoLibraryDiskWriter.shared.save(document, owner: persistenceID, revision: revision, to: storeURL)
     }
 }
