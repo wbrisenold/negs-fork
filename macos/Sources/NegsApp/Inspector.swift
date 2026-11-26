@@ -2048,130 +2048,159 @@ private struct ColorCorrectionWheel: View {
     @State private var eventStarted = false
     private let path = "prep.color_correction_offset"
 
-    var body: some View {
-        let values = model.value(path).array
-        let rawWhiteBalance = model.isRaw
-        let whiteBalanceWheel = model.whiteBalanceWheelPosition()
-        let hue = rawWhiteBalance ? whiteBalanceWheel.hue : values.first?.double ?? 0
-        let strength = rawWhiteBalance ? whiteBalanceWheel.strength : values.dropFirst().first?.double ?? 0
-        let mode = model.value("io.raw_white_balance.mode").string
-        let temperature = mode == "custom" ? model.value("io.raw_white_balance.temperature").double
-            : mode == "tungsten" ? 2850 : 6504
-        let tint = model.whiteBalanceTintAmount(for: mode == "custom" ? model.value("io.raw_white_balance.tint").double : 1)
-        let whiteBalanceModified = rawWhiteBalance && [
+    private var values: [JSONValue] { model.value(path).array }
+    private var rawWhiteBalance: Bool { model.isRaw }
+    private var whiteBalanceWheel: (hue: Double, strength: Double) { model.whiteBalanceWheelPosition() }
+    private var hue: Double { rawWhiteBalance ? whiteBalanceWheel.hue : values.first?.double ?? 0 }
+    private var strength: Double { rawWhiteBalance ? whiteBalanceWheel.strength : values.dropFirst().first?.double ?? 0 }
+    private var whiteBalanceMode: String { model.value("io.raw_white_balance.mode").string }
+    private var temperature: Double {
+        whiteBalanceMode == "custom" ? model.value("io.raw_white_balance.temperature").double
+            : whiteBalanceMode == "tungsten" ? 2850 : 6504
+    }
+    private var tint: Double {
+        model.whiteBalanceTintAmount(for: whiteBalanceMode == "custom" ? model.value("io.raw_white_balance.tint").double : 1)
+    }
+    private var whiteBalanceModified: Bool { rawWhiteBalance && [
             "io.raw_white_balance.mode", "io.raw_white_balance.temperature", "io.raw_white_balance.tint"
         ].contains(where: model.isModified)
-        let strengthBinding = Binding<Double>(
+    }
+    private var strengthBinding: Binding<Double> {
+        Binding(
             get: {
-                let raw = rawWhiteBalance ? model.whiteBalanceWheelPosition().strength : model.value(path).array.dropFirst().first?.double ?? 0
+                let raw = rawWhiteBalance ? model.whiteBalanceWheelPosition().strength : values.dropFirst().first?.double ?? 0
                 return rawWhiteBalance ? sqrt(raw / 100) * 100 : raw
             },
             set: { amount in
                 if rawWhiteBalance {
                     model.setWhiteBalanceWheel(hue: model.whiteBalanceWheelPosition().hue, strength: amount * amount / 100)
                 } else {
-                    let current = model.value(path).array
-                    model.set(path, .array([current.first ?? .number(0), .number(amount)]))
+                    model.set(path, .array([values.first ?? .number(0), .number(amount)]))
                 }
             })
+    }
+
+    var body: some View {
         VStack(spacing: 10) {
-            HStack {
-                Text(rawWhiteBalance ? "RAW balance · before film" : "Color offset · before film scan")
-                    .font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.dim)
-                Spacer()
-                Button("Reset") {
-                    model.beginInteraction()
-                    if rawWhiteBalance {
-                        model.resetColorCorrection()
-                    } else {
-                        model.set(path, .array([.number(0), .number(0)]))
-                        model.resetValue("prep.color_correction_saturation")
-                    }
-                    model.endInteraction(action: "Reset Color Correction")
-                }
+            header
+            HStack(alignment: .center, spacing: 12) {
+                wheel
+                readout
+                Spacer(minLength: 0)
+            }
+            .frame(height: 168)
+            strengthControl
+        }
+        .padding(.horizontal, Theme.Size.gutter)
+        .padding(.vertical, 8)
+    }
+
+    private var header: some View {
+        HStack {
+            Text(rawWhiteBalance ? "RAW balance · before film" : "Color offset · before film scan")
+                .font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.dim)
+            Spacer()
+            Button("Reset", action: reset)
                 .buttonStyle(InkPressStyle())
                 .disabled(hue == 0 && strength == 0 && !whiteBalanceModified
                           && !model.isModified(path) && !model.isModified("prep.color_correction_saturation"))
                 .accessibilityLabel("Reset color correction")
-            }
-            HStack(alignment: .center, spacing: 12) {
-                GeometryReader { geometry in
-                    let side = min(geometry.size.width, geometry.size.height)
-                    let radius = side / 2 - 9
-                    let radians = hue * .pi / 180
-                    let marker = CGPoint(x: side / 2 + cos(radians) * radius * strength / 100,
-                                         y: side / 2 + sin(radians) * radius * strength / 100)
-                    if rawWhiteBalance {
-                        let dominant = max(abs(cos(radians)), abs(sin(radians)))
-                        let temperatureOffset = dominant > 0 ? cos(radians) / dominant * strength : 0
-                        let tintOffset = dominant > 0 ? sin(radians) / dominant * strength : 0
-                        RawWhiteBalancePad(model: model, temperature: temperature, tint: tint,
-                                           temperatureOffset: temperatureOffset, tintOffset: tintOffset)
-                    } else {
-                        ZStack {
-                            Circle()
-                                .fill(AngularGradient(colors: [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .red], center: .center))
-                                .overlay(Circle().fill(RadialGradient(colors: [.white, .clear], center: .center, startRadius: 0, endRadius: radius)))
-                            ForEach([0.25, 0.5, 0.75, 1.0], id: \.self) { fraction in
-                                Circle().stroke(.white.opacity(fraction == 1 ? 0.72 : 0.25), lineWidth: fraction == 1 ? 1.2 : 0.6)
-                                    .scaleEffect(fraction)
-                            }
-                            Circle().fill(.white).frame(width: 11, height: 11)
-                                .overlay(Circle().stroke(.black.opacity(0.8), lineWidth: 1.5))
-                                .position(marker)
-                        }
-                        .frame(width: side, height: side)
-                        .contentShape(Circle())
-                        .gesture(DragGesture(minimumDistance: 0)
-                            .onChanged { event in
-                                if !eventStarted { eventStarted = true; model.beginInteraction() }
-                                let dx = event.location.x - side / 2
-                                let dy = event.location.y - side / 2
-                                if hypot(dx, dy) > radius * 0.12 {
-                                    let angle = (atan2(dy, dx) * 180 / .pi + 360).truncatingRemainder(dividingBy: 360)
-                                    model.set(path, .array([.number(Double(angle)), .number(strength)]))
-                                }
-                            }
-                            .onEnded { _ in eventStarted = false; model.endInteraction(action: "Color Correction") })
-                    }
-                }
-                .frame(width: 168, height: 168)
-
-                VStack(alignment: .leading, spacing: 5) {
-                    if rawWhiteBalance {
-                        Text("\(Int(temperature.rounded())) K  ·  Tint \(Int(tint.rounded()))")
-                            .font(Theme.metadata(11, weight: .medium)).foregroundStyle(Theme.paper)
-                        Text("Temperature  ← →   ·   Tint  ↑ ↓")
-                            .foregroundStyle(Theme.dim)
-                    } else {
-                        Text("Hue \(Int(hue.rounded()))°  ·  \(Int(strength.rounded()))%")
-                            .font(Theme.metadata(11, weight: .medium)).foregroundStyle(Theme.paper)
-                        Text("Wheel: hue  ·  Strength: amount")
-                            .foregroundStyle(Theme.dim)
-                    }
-                }
-                .font(Theme.ui(11))
-                Spacer(minLength: 0)
-            }
-            .frame(height: 168)
-            LabeledSlider(title: rawWhiteBalance ? "WB amount" : "Strength", value: strengthBinding,
-                          range: 0...100, step: 0.1, unit: "%", defaultValue: 0,
-                          modified: rawWhiteBalance ? whiteBalanceModified : model.isModified(path),
-                          reset: {
-                              if rawWhiteBalance {
-                                  model.setWhiteBalanceWheel(hue: hue, strength: 0)
-                              } else {
-                                  let current = model.value(path).array
-                                  model.set(path, .array([current.first ?? .number(0), .number(0)]))
-                              }
-                          },
-                          editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Color Correction Strength") },
-                          help: rawWhiteBalance
-                            ? "Make smaller WB changes near neutral. The full temperature and tint range remains available at the ends; changing amount preserves the selected direction."
-                            : "Adjust the global color correction strength from neutral. The response is finer near zero and ramps up smoothly; changing strength does not alter the selected hue.")
         }
-        .padding(.horizontal, Theme.Size.gutter)
-        .padding(.vertical, 8)
+    }
+
+    private var wheel: some View {
+        GeometryReader { geometry in
+            wheelContent(side: min(geometry.size.width, geometry.size.height))
+        }
+        .frame(width: 168, height: 168)
+    }
+
+    @ViewBuilder private func wheelContent(side: CGFloat) -> some View {
+        let radius = side / 2 - 9
+        let radians = hue * .pi / 180
+        if rawWhiteBalance {
+            let dominant = max(abs(cos(radians)), abs(sin(radians)))
+            RawWhiteBalancePad(model: model, temperature: temperature, tint: tint,
+                               temperatureOffset: dominant > 0 ? cos(radians) / dominant * strength : 0,
+                               tintOffset: dominant > 0 ? sin(radians) / dominant * strength : 0)
+        } else {
+            chromaWheel(side: side, radius: radius,
+                        marker: CGPoint(x: side / 2 + cos(radians) * radius * strength / 100,
+                                        y: side / 2 + sin(radians) * radius * strength / 100))
+        }
+    }
+
+    private func chromaWheel(side: CGFloat, radius: CGFloat, marker: CGPoint) -> some View {
+        ZStack {
+            Circle()
+                .fill(AngularGradient(colors: [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .red], center: .center))
+                .overlay(Circle().fill(RadialGradient(colors: [.white, .clear], center: .center, startRadius: 0, endRadius: radius)))
+            ForEach([0.25, 0.5, 0.75, 1.0], id: \.self) { fraction in
+                Circle().stroke(.white.opacity(fraction == 1 ? 0.72 : 0.25), lineWidth: fraction == 1 ? 1.2 : 0.6)
+                    .scaleEffect(fraction)
+            }
+            Circle().fill(.white).frame(width: 11, height: 11)
+                .overlay(Circle().stroke(.black.opacity(0.8), lineWidth: 1.5))
+                .position(marker)
+        }
+        .frame(width: side, height: side)
+        .contentShape(Circle())
+        .gesture(DragGesture(minimumDistance: 0)
+            .onChanged { event in
+                if !eventStarted { eventStarted = true; model.beginInteraction() }
+                let dx = event.location.x - side / 2
+                let dy = event.location.y - side / 2
+                if hypot(dx, dy) > radius * 0.12 {
+                    let angle = (atan2(dy, dx) * 180 / .pi + 360).truncatingRemainder(dividingBy: 360)
+                    model.set(path, .array([.number(Double(angle)), .number(strength)]))
+                }
+            }
+            .onEnded { _ in eventStarted = false; model.endInteraction(action: "Color Correction") })
+    }
+
+    private var readout: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if rawWhiteBalance {
+                Text("\(Int(temperature.rounded())) K  ·  Tint \(Int(tint.rounded()))")
+                    .font(Theme.metadata(11, weight: .medium)).foregroundStyle(Theme.paper)
+                Text("Temperature  ← →   ·   Tint  ↑ ↓").foregroundStyle(Theme.dim)
+            } else {
+                Text("Hue \(Int(hue.rounded()))°  ·  \(Int(strength.rounded()))%")
+                    .font(Theme.metadata(11, weight: .medium)).foregroundStyle(Theme.paper)
+                Text("Wheel: hue  ·  Strength: amount").foregroundStyle(Theme.dim)
+            }
+        }
+        .font(Theme.ui(11))
+    }
+
+    private var strengthControl: some View {
+        LabeledSlider(title: rawWhiteBalance ? "WB amount" : "Strength", value: strengthBinding,
+                      range: 0...100, step: 0.1, unit: "%", defaultValue: 0,
+                      modified: rawWhiteBalance ? whiteBalanceModified : model.isModified(path),
+                      reset: resetStrength,
+                      editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Color Correction Strength") },
+                      help: rawWhiteBalance
+                        ? "Make smaller WB changes near neutral. The full temperature and tint range remains available at the ends; changing amount preserves the selected direction."
+                        : "Adjust the global color correction strength from neutral. The response is finer near zero and ramps up smoothly; changing strength does not alter the selected hue.")
+    }
+
+    private func reset() {
+        model.beginInteraction()
+        if rawWhiteBalance {
+            model.resetColorCorrection()
+        } else {
+            model.set(path, .array([.number(0), .number(0)]))
+            model.resetValue("prep.color_correction_saturation")
+        }
+        model.endInteraction(action: "Reset Color Correction")
+    }
+
+    private func resetStrength() {
+        if rawWhiteBalance {
+            model.setWhiteBalanceWheel(hue: hue, strength: 0)
+        } else {
+            model.set(path, .array([values.first ?? .number(0), .number(0)]))
+        }
     }
 }
 
