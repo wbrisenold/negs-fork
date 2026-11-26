@@ -131,6 +131,56 @@ import XCTest
         XCTAssertEqual(try Data(contentsOf: source), originalBytes)
     }
 
+    func testReturningFromDevelopKeepsLibraryContextAndSelectionWhenPhotoStillBelongs() async throws {
+        let fixture = try await fixture()
+        defer { fixture.clean() }
+        let library = fixture.library
+        let firstURL = fixture.photos[0].file.url
+        let secondURL = fixture.photos[1].file.url
+        try FileManager.default.createDirectory(at: firstURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("photograph".utf8).write(to: firstURL)
+        library.selectProject(fixture.projectID)
+        library.selectGroup(fixture.binID)
+        library.selectReviewFilter(.picked)
+        library.searchText = "a.png"
+        library.selectGridPhoto(firstURL, in: [firstURL])
+
+        // Develop returns through syncEditedPhoto when Library reappears. A
+        // photograph already in the current view must not replace its review
+        // scope or selection with the default All Photos view.
+        await library.syncEditedPhoto(firstURL)
+
+        XCTAssertEqual(library.selectedProjectID, fixture.projectID)
+        XCTAssertEqual(library.selectedAlbumID, fixture.binID)
+        XCTAssertEqual(library.filter, .picked)
+        XCTAssertEqual(library.searchText, "a.png")
+        XCTAssertEqual(library.selectedPhotoURL, firstURL)
+        XCTAssertEqual(library.gridSelection.selected, Set([firstURL]))
+        XCTAssertEqual(library.visiblePhotos.map(\.file.url), [firstURL])
+        XCTAssertNotEqual(library.selectedPhotoURL, secondURL)
+    }
+
+    func testReturningToLibraryExplainsMissingSourceAndKeepsContextUsable() async throws {
+        let fixture = try await fixture()
+        defer { fixture.clean() }
+        let library = fixture.library
+        library.selectProject(fixture.projectID)
+        library.selectGroup(fixture.binID)
+        library.selectReviewFilter(.picked)
+        library.searchText = "b.png"
+
+        await library.syncEditedPhoto(fixture.photos[1].file.url)
+
+        XCTAssertEqual(library.selectedProjectID, fixture.projectID)
+        XCTAssertEqual(library.selectedAlbumID, fixture.binID)
+        XCTAssertEqual(library.filter, .picked)
+        XCTAssertEqual(library.searchText, "b.png")
+        XCTAssertTrue(try XCTUnwrap(library.photos.first { $0.file.url == fixture.photos[1].file.url }).missing)
+        XCTAssertTrue(library.error?.contains("b.png") == true)
+        XCTAssertEqual(library.visiblePhotos.map(\.file.url), [fixture.photos[1].file.url])
+        XCTAssertEqual(library.count(for: .missing), 1)
+    }
+
     func testCommandSelectionAndBinRemovalLeaveOriginalReferences() async throws {
         let fixture = try await fixture()
         defer { fixture.clean() }
