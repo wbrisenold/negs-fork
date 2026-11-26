@@ -160,6 +160,30 @@ import XCTest
         XCTAssertNil(library.selectedPhotoURL)
     }
 
+    func testReviewSelectionTracksTheCurrentSearchAndFilterResults() async throws {
+        let fixture = try await fixture()
+        defer { fixture.clean() }
+        let library = fixture.library
+        library.selectProject(fixture.projectID)
+
+        library.selectAllGridPhotos(in: library.filteredPhotos())
+        XCTAssertEqual(library.selectedCount(in: library.filteredPhotos()), 2)
+
+        library.searchText = "a.png"
+        XCTAssertEqual(library.filteredPhotos().map(\.file.name), ["a.png"])
+        XCTAssertEqual(library.selectedCount(in: library.filteredPhotos()), 1)
+        library.pruneGridSelection(to: library.filteredPhotos().map(\.file.url))
+        XCTAssertEqual(library.gridSelection.selected, [fixture.photos[0].file.url])
+
+        library.searchText = ""
+        library.filter = .fiveStar
+        XCTAssertEqual(library.filteredPhotos().map(\.file.name), ["b.png"])
+        XCTAssertEqual(library.selectedCount(in: library.filteredPhotos()), 0)
+        library.selectAllGridPhotos(in: library.filteredPhotos())
+        XCTAssertEqual(library.gridSelection.selected, [fixture.photos[1].file.url])
+        XCTAssertEqual(library.selectedCount(in: library.filteredPhotos()), 1)
+    }
+
     func testFailedFolderImportStillPersistsItsReference() async throws {
         let fixture = try await fixture()
         defer { fixture.clean() }
