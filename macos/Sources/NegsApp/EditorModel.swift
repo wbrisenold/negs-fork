@@ -27,6 +27,19 @@ private enum DiagnosticOverlayMode: String {
     }
 }
 
+
+enum SaturationOverlayMode: String, CaseIterable, Identifiable {
+    case monoBalance, ciecam02
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .monoBalance: "MONO-Balance · ΔRGB"
+        case .ciecam02: "CIECAM02 · s"
+        }
+    }
+}
+
 /// Adjustment families that can come from the global reset preset.
 enum ResetKeepGroup: String, CaseIterable, Identifiable, Codable {
     case exposure = "Exposure"
@@ -269,6 +282,11 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
             updateDiagnosticOverlay()
         }
     }
+    private(set) var saturationOverlayMode: SaturationOverlayMode = {
+        guard let raw = UserDefaults.standard.string(forKey: "saturationOverlayMode"),
+              let mode = SaturationOverlayMode(rawValue: raw) else { return .monoBalance }
+        return mode
+    }()
     var clippingOverlayEnabled: Bool {
         get { diagnosticOverlayMode == .clipping }
         set { setDiagnosticOverlayMode(.clipping, enabled: newValue) }
@@ -286,6 +304,12 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
     var saturationOverlayEnabled: Bool {
         get { diagnosticOverlayMode == .saturation }
         set { setDiagnosticOverlayMode(.saturation, enabled: newValue) }
+    }
+    func setSaturationOverlayMode(_ mode: SaturationOverlayMode) {
+        guard saturationOverlayMode != mode else { return }
+        saturationOverlayMode = mode
+        UserDefaults.standard.set(mode.rawValue, forKey: "saturationOverlayMode")
+        if saturationOverlayEnabled { updateDiagnosticOverlay() }
     }
     var skinToneOverlayEnabled: Bool {
         get { diagnosticOverlayMode == .skinTone }
@@ -4317,7 +4341,11 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
             case .clipping: overlay = ImageScopes.clippingOverlay(
                 image, low: lowThreshold, high: highThreshold, clippedHighlights: clippedHighlights)
             case .falseColor: overlay = ImageScopes.falseColorOverlay(image)
-            case .saturation: overlay = ImageScopes.saturationFalseColorOverlay(image)
+            case .saturation:
+                switch self?.saturationOverlayMode ?? .monoBalance {
+                case .monoBalance: overlay = ImageScopes.saturationFalseColorOverlay(image)
+                case .ciecam02: overlay = ImageScopes.ciecam02SaturationOverlay(image)
+                }
             case .skinTone: overlay = ImageScopes.skinToneFalseColorOverlay(image)
             case .neutralCandidates: overlay = ImageScopes.neutralCandidateOverlay(image)
             }

@@ -9,6 +9,7 @@
 ))]
 mod capacity;
 pub mod cpu_backend;
+pub mod chroma_denoise;
 #[cfg(feature = "cuda-backend")]
 pub mod cuda_backend;
 #[cfg(feature = "wgpu-backend")]

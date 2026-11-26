@@ -11,6 +11,7 @@ PYTHON="${PYTHON:-python3}"
 RELEASE_DIR="${RELEASE_DIR:-dist/releases}"
 MACOS_ARCHS="${MACOS_ARCHS:-arm64 x86_64}"
 CLEAN_BUILD_CACHE="${CLEAN_BUILD_CACHE:-1}"
+MIN_FREE_BUILD_GB="${MIN_FREE_BUILD_GB:-6}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
@@ -23,22 +24,45 @@ release_name="$("$PYTHON" scripts/macos_release.py --field name)"
 # Keep the binary deployment target consistent with Info.plist.
 export MACOSX_DEPLOYMENT_TARGET=14.0
 
+# Apple Clang needs the active macOS SDK even when Xcode's full IDE is absent.
+if [[ -z "${SDKROOT:-}" ]]; then
+    SDKROOT="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null)" || {
+        echo "Cannot locate the macOS SDK. Install Xcode or Command Line Tools." >&2
+        exit 2
+    }
+fi
+export SDKROOT
+[[ -f "$SDKROOT/usr/include/math.h" ]] || {
+    echo "The macOS SDK at $SDKROOT is missing standard headers. Select a complete Xcode/Command Line Tools SDK." >&2
+    exit 2
+}
+
+[[ "$MIN_FREE_BUILD_GB" =~ ^[0-9]+$ ]] || {
+    echo "MIN_FREE_BUILD_GB must be a whole number of GiB." >&2
+    exit 2
+}
+free_kib="$(df -Pk "$repo_root" | awk 'NR == 2 {print $4}')"
+required_kib=$((MIN_FREE_BUILD_GB * 1024 * 1024))
+if (( free_kib < required_kib )); then
+    free_gib=$((free_kib / 1024 / 1024))
+    echo "Universal macOS packaging needs at least ${MIN_FREE_BUILD_GB} GiB free; found about ${free_gib} GiB." >&2
+    echo "Free space or set MIN_FREE_BUILD_GB after checking the build's actual peak use." >&2
+    exit 2
+fi
+
 # Build the requested native slices. The default remains universal for releases;
 # an Intel workstation can set MACOS_ARCHS=x86_64 to skip the unused arm64 build.
 read -r -a requested_archs <<< "$MACOS_ARCHS"
-rust_targets=()
 swift_triples=()
 rust_triples=()
 for arch in "${requested_archs[@]}"; do
     case "$arch" in
         arm64)
             rust_triples+=(aarch64-apple-darwin)
-            rust_targets+=(--target aarch64-apple-darwin)
             swift_triples+=(arm64-apple-macosx14.0)
             ;;
         x86_64)
             rust_triples+=(x86_64-apple-darwin)
-            rust_targets+=(--target x86_64-apple-darwin)
             swift_triples+=(x86_64-apple-macosx14.0)
             ;;
         *) echo "Unsupported MACOS_ARCHS entry: $arch (use arm64 and/or x86_64)" >&2; exit 2 ;;
@@ -52,7 +76,7 @@ if [[ ${#requested_archs[@]} -eq 1 ]]; then
     esac
     release_name="${release_name%-universal}-$arch_label"
 fi
-# CI builds each architecture's Rust executables in parallel jobs and places
+# CI builds each architecture's Rust executables in separate jobs and places
 # them under $BUILD_TARGET_DIR/<target>/release before calling this script.
 if [[ "${NEGS_PREBUILT_RUST:-}" == 1 ]]; then
     for target in "${rust_triples[@]}"; do
@@ -64,17 +88,36 @@ if [[ "${NEGS_PREBUILT_RUST:-}" == 1 ]]; then
         done
     done
 else
-    cargo build --locked --release -p spektrafilm-native "${rust_targets[@]}" --target-dir "$BUILD_TARGET_DIR"
+    rustc_bin="${RUSTC:-rustc}"
+    for target in "${rust_triples[@]}"; do
+        target_libdir="$("$rustc_bin" --print target-libdir --target "$target" 2>/dev/null || true)"
+        [[ -d "$target_libdir" ]] || {
+            echo "Rust standard libraries for $target are missing from $(command -v "$rustc_bin")." >&2
+            echo "Put the Rustup toolchain first in PATH or install this target for the selected toolchain." >&2
+            exit 2
+        }
+    done
+    echo "Cargo: $(command -v cargo); Rustc: $(command -v "$rustc_bin"); SDK: $SDKROOT"
+    for target in "${rust_triples[@]}"; do
+        cargo build --locked --release -p spektrafilm-native --target "$target" --target-dir "$BUILD_TARGET_DIR"
+    done
 fi
+
+# The Swift app imports the shared Odin core through its C module map. Build
+# one universal archive before SwiftPM so both app slices link the same API.
+python3 core/build.py lib --universal --out "$repo_root/target/negs-core/libnegs_core.a"
+
 swift_bin_dirs=()
 for triple in "${swift_triples[@]}"; do
     scratch="$BUILD_TARGET_DIR/swift-$triple"
-    swift build --package-path macos --scratch-path "$scratch" -c release --force-resolved-versions --triple "$triple"
+    swift build --package-path macos --scratch-path "$scratch" -c release --force-resolved-versions --triple "$triple" -Xlinker "-L$repo_root/target/negs-core"
     swift_bin_dirs+=("$(swift build --package-path macos --scratch-path "$scratch" -c release --force-resolved-versions --triple "$triple" --show-bin-path)")
 done
 if [[ "${NEGS_PREBUILT_RUST:-}" != 1 ]]; then
-    cargo build --locked --release -p spektrafilm-cli --bin spektrafilm "${rust_targets[@]}" --target-dir "$BUILD_TARGET_DIR"
-    cargo build --locked --release -p spektrafilm-cli --bin spektrafilm-f64 --features precision-f64 "${rust_targets[@]}" --target-dir "$BUILD_TARGET_DIR"
+    for target in "${rust_triples[@]}"; do
+        cargo build --locked --release -p spektrafilm-cli --bin spektrafilm --target "$target" --target-dir "$BUILD_TARGET_DIR"
+        cargo build --locked --release -p spektrafilm-cli --bin spektrafilm-f64 --features precision-f64 --target "$target" --target-dir "$BUILD_TARGET_DIR"
+    done
 fi
 app_binary="${swift_bin_dirs[0]}/NegsApp"
 binary_dir="$BUILD_TARGET_DIR/${rust_triples[0]}/release"

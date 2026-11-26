@@ -7,7 +7,7 @@ the core never touches it. Plan, rules and progress:
 [shared-core-progress.md](../docs/shared-core-progress.md).
 
 ```
-python3 core/install_odin.py      # the pinned Odin (ODIN_VERSION) into ~/.negs/odin/<tag>
+python3 core/install_odin.py      # installs the pin; Intel macOS builds it from source
 python3 core/build.py lib         # target/negs-core/libnegs_core.a (negs_core.lib on Windows)
 python3 core/build.py lib --universal   # macOS arm64 + x86_64
 python3 core/build.py test        # C99 header, unit tests (leaks fail), leak self-check, layout

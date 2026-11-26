@@ -506,8 +506,14 @@ private struct LibraryProjectDocument: Codable, Sendable {
         if let cached = scopePhotosCache, cached.scope == scope { return cached.photos }
         let folderNames = Dictionary(uniqueKeysWithValues: folders.map { ($0.id, $0.name) })
         let project = projects.first { $0.id == selectedProjectID }
+        var seenPhotoKeys = Set<String>()
         let result = photos.filter { photo in
             let path = photo.file.url.standardizedFileURL.path
+            // A previous catalog/import path could persist the same record
+            // more than once. Keep a single card per folder and file before
+            // SwiftUI receives its URL based grid identity.
+            let identity = photo.folderID.uuidString + "\0" + path
+            guard seenPhotoKeys.insert(identity).inserted else { return false }
             let projectMatches = project.map { ($0.folderIDs.contains(photo.folderID) || $0.photoPaths.contains(path))
                 && !$0.excludedPhotoPaths.contains(path) } ?? false
             let albumMatches = selectedAlbumID.map { photo.albumIDs.contains($0) } ?? true
@@ -580,9 +586,12 @@ private struct LibraryProjectDocument: Codable, Sendable {
             return (photo, date)
         }
         let groups = BurstClusterEngine.temporalGroups(
-            dated.map { BurstTimedItem(id: $0.0.file.url.path, date: $0.1) }, maxGap: 10
+            dated.map { BurstTimedItem(id: $0.0.file.url.standardizedFileURL.path, date: $0.1) }, maxGap: 10
         )
-        let byPath = Dictionary(uniqueKeysWithValues: dated.map { ($0.0.file.url.path, $0.0) })
+        let byPath = dated.reduce(into: [String: LibraryPhoto]()) { result, item in
+            let path = item.0.file.url.standardizedFileURL.path
+            if result[path] == nil { result[path] = item.0 }
+        }
         var retained = Set(candidates.filter {
             $0.cull?.failed != false || $0.cull?.captureDate == nil || $0.cull?.sceneFingerprint == nil
         }.map(\.file.url))
@@ -772,10 +781,23 @@ private struct LibraryProjectDocument: Codable, Sendable {
             return
         }
         folders = document.folders
-        photos = document.photos.map { photo in
-            var photo = photo
+        var photoIndicesByPath: [String: Int] = [:]
+        photos = []
+        for var photo in document.photos {
             photo.rating = min(5, max(0, photo.rating))
-            return photo
+            let key = photo.folderID.uuidString + "\0" + photo.file.url.standardizedFileURL.path
+            if let index = photoIndicesByPath[key] {
+                photos[index].rating = max(photos[index].rating, photo.rating)
+                if photos[index].flag == .none { photos[index].flag = photo.flag }
+                photos[index].clientPicked = photos[index].clientPicked || photo.clientPicked
+                photos[index].selectedForExport = photos[index].selectedForExport || photo.selectedForExport
+                photos[index].missing = photos[index].missing && photo.missing
+                photos[index].albumIDs.formUnion(photo.albumIDs)
+                if photos[index].cull == nil { photos[index].cull = photo.cull }
+            } else {
+                photoIndicesByPath[key] = photos.count
+                photos.append(photo)
+            }
         }
         albums = document.albums
         smartCollections = document.smartCollections
@@ -1013,11 +1035,19 @@ private struct LibraryProjectDocument: Codable, Sendable {
         guard !Task.isCancelled else { return }
         var previousByFolder = Dictionary(grouping: photos, by: \.folderID)
         var refreshedPhotos = photos.filter { !activeFolderIDs.contains($0.folderID) }
+        var refreshedFolderIDs = Set<UUID>()
         for (folderID, files) in scans {
             // A folder removed while its scan runs must not reappear.
-            guard activeFolderIDs.contains(folderID), let files else { continue }
-            var byName = Dictionary(uniqueKeysWithValues:
-                (previousByFolder.removeValue(forKey: folderID) ?? []).map { ($0.file.name, $0) })
+            guard activeFolderIDs.contains(folderID), refreshedFolderIDs.insert(folderID).inserted,
+                  let files else { continue }
+            // Catalogs can contain duplicate rows after older imports or a
+            // previously interrupted refresh. Keep the first saved row for a
+            // filename and let the current folder scan reconcile it below.
+            var byName = (previousByFolder.removeValue(forKey: folderID) ?? []).reduce(into: [String: LibraryPhoto]()) { result, photo in
+                if result[photo.file.name] == nil {
+                    result[photo.file.name] = photo
+                }
+            }
             for name in Array(byName.keys) {
                 byName[name]?.missing = true
             }
@@ -1060,9 +1090,10 @@ private struct LibraryProjectDocument: Codable, Sendable {
 
     func analyzeCull(replacingExisting: Bool = false) async {
         guard !analyzingCull else { return }
+        var seenPaths = Set<String>()
         let candidates = photos.filter { !$0.missing && (replacingExisting || $0.cull == nil) }
+            .filter { seenPaths.insert($0.file.url.standardizedFileURL.path).inserted }
         guard !candidates.isEmpty else { return }
-        var photoIndices = Dictionary(uniqueKeysWithValues: photos.enumerated().map { ($0.element.file.url, $0.offset) })
         analyzingCull = true
         cullProgress = 0
         cullTotal = candidates.count
@@ -1070,17 +1101,19 @@ private struct LibraryProjectDocument: Codable, Sendable {
 
         for photo in candidates {
             if Task.isCancelled { break }
-            let result = await Task.detached(priority: .utility) {
-                CullAnalyzer.analyze(photo.file.url)
+            let (exists, result) = await Task.detached(priority: .utility) {
+                guard FileManager.default.fileExists(atPath: photo.file.url.path) else {
+                    return (false, nil)
+                }
+                return (true, CullAnalyzer.analyze(photo.file.url))
             }.value
-            let index = photoIndices[photo.file.url].flatMap { index in
-                photos.indices.contains(index) && photos[index].file.url == photo.file.url ? index : nil
-            } ?? photos.firstIndex(where: { $0.file.url == photo.file.url })
-            if let index {
-                photos[index].cull = result ?? CullAnalysis(score: 0, sharpness: 0, aesthetics: nil,
+            guard exists else { continue }
+            let analysis = result ?? CullAnalysis(score: 0, sharpness: 0, aesthetics: nil,
                     composition: nil, eyesOpen: nil, faceCount: 0, utilityImage: false, failed: true,
                     reasons: ["Could not decode this image for culling; review it manually"])
-                photoIndices[photo.file.url] = index
+            let path = photo.file.url.standardizedFileURL.path
+            for index in photos.indices where photos[index].file.url.standardizedFileURL.path == path {
+                photos[index].cull = analysis
             }
             cullProgress += 1
         }

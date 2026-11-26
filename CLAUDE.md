@@ -57,3 +57,17 @@ the app is `C:\Users\Noah\Projects\negs\windows\target\release\Negs.exe`. A
 branch gets a worktree under `negs\worktrees\<name>` with
 `C:\Users\Noah\.negs\wt.cmd <name> <mac-branch> [build]`; remove it when done.
 Don't clone the repo into `.negs` or make other `Projects\negs-*` folders.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues live in `wbrisenold/negs-fork`; always pass `--repo wbrisenold/negs-fork`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Use the single-context root `GLOSSARY.md` and `docs/adr/` layout. See `docs/agents/domain.md`.

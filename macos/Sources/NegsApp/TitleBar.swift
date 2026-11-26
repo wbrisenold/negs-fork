@@ -66,8 +66,8 @@ final class EditorFrameView: NSView {
 /// bar.
 final class TitleBand: NSView {
     let name = NSTextField(labelWithString: "Negs")
-    private let libraryButton = NSButton(title: "Library", target: nil, action: nil)
-    private let developButton = NSButton(title: "Develop", target: nil, action: nil)
+    private let workspaceControl = NSSegmentedControl(labels: ["Library", "Develop"], trackingMode: .selectOne,
+                                                      target: nil, action: nil)
     private let exportButton = NSButton(title: "Export", target: nil, action: nil)
     private let showAdjustmentsButton = NSButton(title: "Adjustments", target: nil, action: nil)
     var onSelectWorkspace: ((EditorWorkspace) -> Void)?
@@ -77,7 +77,7 @@ final class TitleBand: NSView {
         didSet { showAdjustmentsButton.isHidden = !showsStudioControls || !showsAdjustmentReopen; needsLayout = true }
     }
     var showingLibrary = false {
-        didSet { styleWorkspaceButtons() }
+        didSet { workspaceControl.selectedSegment = showingLibrary ? 0 : 1 }
     }
     var exportEnabled = false {
         didSet { exportButton.isEnabled = exportEnabled }
@@ -94,8 +94,7 @@ final class TitleBand: NSView {
     }
     var showsStudioControls = true {
         didSet {
-            libraryButton.isHidden = !showsStudioControls
-            developButton.isHidden = !showsStudioControls
+            workspaceControl.isHidden = !showsStudioControls
             exportButton.isHidden = !showsStudioControls
             showAdjustmentsButton.isHidden = !showsStudioControls || !showsAdjustmentReopen
             needsLayout = true
@@ -117,12 +116,16 @@ final class TitleBand: NSView {
         // The window's title says it; VoiceOver reads that.
         name.setAccessibilityElement(false)
         addSubview(name)
-        configureToolbarButton(libraryButton, title: "Library", symbol: "square.grid.2x2", help: "Browse and organize photographs")
-        libraryButton.action = #selector(showLibrary)
-        addSubview(libraryButton)
-        configureToolbarButton(developButton, title: "Develop", symbol: "slider.horizontal.3", help: "Develop the selected photograph")
-        developButton.action = #selector(showDevelop)
-        addSubview(developButton)
+        workspaceControl.segmentStyle = .rounded
+        workspaceControl.controlSize = .small
+        workspaceControl.setWidth(88, forSegment: 0)
+        workspaceControl.setWidth(88, forSegment: 1)
+        workspaceControl.target = self
+        workspaceControl.action = #selector(selectWorkspace)
+        workspaceControl.selectedSegment = 1
+        workspaceControl.setAccessibilityLabel("Workspace")
+        workspaceControl.setAccessibilityHelp("Choose Library to organize photos or Develop to edit the selected photo")
+        addSubview(workspaceControl)
         exportButton.image = NSImage(systemSymbolName: "square.and.arrow.up", accessibilityDescription: "Export")
         exportButton.imagePosition = .imageLeading
         exportButton.target = self
@@ -151,12 +154,13 @@ final class TitleBand: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         let hit = super.hitTest(point)
-        return showsStudioControls && (hit === libraryButton || hit === developButton || hit === exportButton
+        return showsStudioControls && (hit === workspaceControl || hit === exportButton
             || (showsAdjustmentReopen && hit === showAdjustmentsButton)) ? hit : nil
     }
 
-    @objc private func showLibrary() { onSelectWorkspace?(.library) }
-    @objc private func showDevelop() { onSelectWorkspace?(.editor) }
+    @objc private func selectWorkspace(_ sender: NSSegmentedControl) {
+        onSelectWorkspace?(sender.selectedSegment == 0 ? .library : .editor)
+    }
     @objc private func export(_ sender: NSButton) { onExport?(sender) }
     @objc private func showAdjustments() { onShowAdjustments?() }
     override var mouseDownCanMoveWindow: Bool { true }
@@ -172,13 +176,6 @@ final class TitleBand: NSView {
         button.toolTip = help
         button.bezelColor = selected ? Theme.NS.accent : Theme.NS.panel
         button.contentTintColor = selected ? Theme.NS.onAccent : Theme.NS.label
-    }
-
-    private func styleWorkspaceButtons() {
-        configureToolbarButton(libraryButton, title: "Library", symbol: "square.grid.2x2",
-                               help: "Browse and organize photographs", selected: showingLibrary)
-        configureToolbarButton(developButton, title: "Develop", symbol: "slider.horizontal.3",
-                               help: "Develop the selected photograph", selected: !showingLibrary)
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -203,12 +200,10 @@ final class TitleBand: NSView {
             left = convert(zoom.bounds, from: zoom).maxX + Self.gap
             middle = convert(close.bounds, from: close).midY
         }
-        let workspaceButtonWidth: CGFloat = 94
+        let workspaceButtonWidth: CGFloat = 176
         let workspaceButtonHeight: CGFloat = 28
-        libraryButton.frame = NSRect(x: left.rounded(), y: (middle - workspaceButtonHeight / 2).rounded(),
-                                     width: workspaceButtonWidth, height: workspaceButtonHeight)
-        developButton.frame = NSRect(x: libraryButton.frame.maxX + 6, y: libraryButton.frame.minY,
-                                     width: workspaceButtonWidth, height: workspaceButtonHeight)
+        workspaceControl.frame = NSRect(x: left.rounded(), y: (middle - workspaceButtonHeight / 2).rounded(),
+                                        width: workspaceButtonWidth, height: workspaceButtonHeight)
         let exportSize = exportButton.fittingSize
         exportButton.frame = NSRect(x: bounds.width - exportSize.width - Theme.Size.gutter,
                                     y: (bounds.midY - exportSize.height / 2).rounded(),
@@ -217,7 +212,7 @@ final class TitleBand: NSView {
         showAdjustmentsButton.frame = NSRect(x: exportButton.frame.minX - adjustmentsSize.width - 8,
                                              y: (bounds.midY - adjustmentsSize.height / 2).rounded(),
                                              width: adjustmentsSize.width, height: adjustmentsSize.height)
-        let titleLeft = showsStudioControls ? developButton.frame.maxX + 14 : left
+        let titleLeft = showsStudioControls ? workspaceControl.frame.maxX + 14 : left
         let nameMaxX = showsStudioControls
             ? (showsAdjustmentReopen ? showAdjustmentsButton.frame.minX : exportButton.frame.minX) - 16
             : bounds.width - Theme.Size.gutter

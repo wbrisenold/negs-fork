@@ -993,6 +993,8 @@ struct AdjustmentInspector: View {
                             setFalseColorEnabled: { model.falseColorEnabled = $0 },
                             saturationOverlayEnabled: model.saturationOverlayEnabled,
                             setSaturationOverlayEnabled: { model.saturationOverlayEnabled = $0 },
+                            saturationOverlayMode: model.saturationOverlayMode,
+                            setSaturationOverlayMode: { model.setSaturationOverlayMode($0) },
                             skinToneOverlayEnabled: model.skinToneOverlayEnabled,
                             setSkinToneOverlayEnabled: { model.skinToneOverlayEnabled = $0 },
                             neutralCandidatesEnabled: model.neutralCandidatesEnabled,

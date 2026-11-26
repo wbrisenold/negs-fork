@@ -173,6 +173,12 @@ pub struct ScannerParams {
     /// Suppresses low-amplitude high-pass differences before sharpening.
     #[serde(default)]
     pub unsharp_threshold: f32,
+    /// Suppresses chroma noise while preserving the scan's grain structure.
+    #[serde(default)]
+    pub chroma_noise_reduction: f32,
+    /// Chroma reduction radius in micrometres on the film.
+    #[serde(default = "default_chroma_noise_radius_um")]
+    pub chroma_noise_radius_um: f32,
 }
 
 impl Default for ScannerParams {
@@ -185,8 +191,14 @@ impl Default for ScannerParams {
             black_level: 0.01,
             unsharp_mask: [0.7, 0.7],
             unsharp_threshold: 0.0,
+            chroma_noise_reduction: 0.0,
+            chroma_noise_radius_um: default_chroma_noise_radius_um(),
         }
     }
+}
+
+fn default_chroma_noise_radius_um() -> f32 {
+    40.0
 }
 
 /// Upstream experimental's `GrainParams` (`runtime/params_schema.py`). The
@@ -754,6 +766,9 @@ pub struct IoParams {
     /// time so the pipeline always sees an upright image.
     #[serde(default)]
     pub rotate_cw: i32,
+    /// Flip the final rendered image horizontally.
+    #[serde(default)]
+    pub flip: bool,
 }
 
 impl Default for IoParams {
@@ -779,6 +794,7 @@ impl Default for IoParams {
             output_gamut_compress: OutputGamutCompressParams::default(),
             input_gamut_compress: InputGamutCompressParams::default(),
             rotate_cw: 0,
+            flip: false,
         }
     }
 }
@@ -1041,6 +1057,25 @@ impl Default for SettingsParams {
     }
 }
 
+/// Route selection used by Negs' film and print workflows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorkflowParams {
+    pub route: String,
+}
+
+impl Default for WorkflowParams {
+    fn default() -> Self {
+        Self { route: "input > film > print > scan".into() }
+    }
+}
+
+impl WorkflowParams {
+    pub fn converts_film(&self) -> bool {
+        self.route == "input > convert-film > print > scan"
+    }
+}
+
 /// Top-level runtime parameters. Combines all sub-parameter groups.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeParams {
@@ -1064,6 +1099,8 @@ pub struct RuntimeParams {
     /// Finishing edits on the scan; see [`crate::post`].
     #[serde(default)]
     pub post: crate::post::PostParams,
+    #[serde(default)]
+    pub workflow: WorkflowParams,
 }
 
 impl Default for RuntimeParams {
@@ -1078,6 +1115,7 @@ impl Default for RuntimeParams {
             io: IoParams::default(),
             settings: SettingsParams::default(),
             post: crate::post::PostParams::default(),
+            workflow: WorkflowParams::default(),
         }
     }
 }

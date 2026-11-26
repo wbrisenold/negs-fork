@@ -144,6 +144,121 @@ struct ImageScopes: Equatable, Sendable {
         }
     }
 
+    /// Continuous rendition of the MONO-Balance palette for the CIECAM02
+    /// saturation correlate. The DCTL's numeric band boundaries describe its
+    /// own HSV.S × HSV.V signal and are not reused as CIECAM02 thresholds.
+    private static func ciecam02FalseColor(_ saturation: Double) -> (Double, Double, Double) {
+        // The sRGB gamut maximum is approximately 107.35 for blue under these
+        // viewing conditions (confirmed against Colour Science on a 65³ grid).
+        let position = max(0, min(1, saturation / 107.4)) * Double(ciecam02Palette.count - 1)
+        let lowerIndex = min(ciecam02Palette.count - 2, Int(position))
+        let amount = position - Double(lowerIndex)
+        let lower = ciecam02Palette[lowerIndex], upper = ciecam02Palette[lowerIndex + 1]
+        return (lower.0 + (upper.0 - lower.0) * amount,
+                lower.1 + (upper.1 - lower.1) * amount,
+                lower.2 + (upper.2 - lower.2) * amount)
+    }
+
+    private static let ciecam02Palette: [(Double, Double, Double)] = [
+        (0.00, 0.04, 0.04), (0.03, 0.06, 0.12), (0.05, 0.09, 0.19),
+        (0.05, 0.17, 0.28), (0.13, 0.29, 0.21), (0.18, 0.40, 0.27),
+        (0.46, 0.46, 0.46), (0.67, 0.65, 0.22), (0.62, 0.39, 0.18),
+        (0.52, 0.25, 0.22), (0.41, 0.19, 0.16), (0.37, 0.07, 0.07),
+        (0.30, 0.01, 0.01)
+    ]
+
+    private static let ciecam02LA = 64 / Double.pi * 0.2
+    private static let ciecam02BackgroundRatio = 0.2
+    private static let ciecam02SurroundC = 0.69
+    private static let ciecam02Adaptation = 1 - exp((-ciecam02LA - 42) / 92) / 3.6
+    private static let ciecam02K = 1 / (5 * ciecam02LA + 1)
+    private static let ciecam02K4 = pow(ciecam02K, 4)
+    private static let ciecam02FL = 0.2 * ciecam02K4 * (5 * ciecam02LA)
+        + 0.1 * pow(1 - ciecam02K4, 2) * pow(5 * ciecam02LA, 1 / 3)
+    private static let ciecam02FLQuarter = pow(ciecam02FL, 0.25)
+    private static let ciecam02NBB = 0.725 * pow(1 / ciecam02BackgroundRatio, 0.2)
+    private static let ciecam02ZFactor = 1.48 + sqrt(ciecam02BackgroundRatio)
+    private static let ciecam02ChromaScale = pow(1.64 - pow(0.29, ciecam02BackgroundRatio), 0.73)
+
+    private static func ciecam02CAT02(_ x: Double, _ y: Double, _ z: Double) -> (Double, Double, Double) {
+        (0.7328 * x + 0.4296 * y - 0.1624 * z,
+         -0.7036 * x + 1.6975 * y + 0.0061 * z,
+         0.0030 * x + 0.0136 * y + 0.9834 * z)
+    }
+
+    private static func ciecam02HPE(_ value: (Double, Double, Double)) -> (Double, Double, Double) {
+        let x = 1.09612382 * value.0 - 0.27886900 * value.1 + 0.18274518 * value.2
+        let y = 0.45436904 * value.0 + 0.47353315 * value.1 + 0.07209780 * value.2
+        let z = -0.00962761 * value.0 - 0.00569803 * value.1 + 1.01532564 * value.2
+        return (0.38971 * x + 0.68898 * y - 0.07868 * z,
+                -0.22981 * x + 1.18340 * y + 0.04641 * z, z)
+    }
+
+    private static let ciecam02CATWhite = ciecam02CAT02(95.04559271, 100, 108.90577508)
+    private static let ciecam02WhiteAchromatic: Double = {
+        let white = ciecam02CATWhite
+        let adaptation = ciecam02Adaptation
+        let whiteAdapted = (100 * adaptation + (1 - adaptation) * white.0,
+                            100 * adaptation + (1 - adaptation) * white.1,
+                            100 * adaptation + (1 - adaptation) * white.2)
+        let whiteResponses = ciecam02HPE(whiteAdapted)
+        func response(_ value: Double) -> Double {
+            let compressed = pow(max(0, ciecam02FL * abs(value) / 100), 0.42)
+            return 400 * (value < 0 ? -1 : 1) * compressed / (27.13 + compressed) + 0.1
+        }
+        let raw = response(whiteResponses.0)
+        let gaw = response(whiteResponses.1)
+        let baw = response(whiteResponses.2)
+        return (2 * raw + gaw + baw / 20 - 0.305) * ciecam02NBB
+    }()
+
+    private static func ciecam02Response(_ value: Double) -> Double {
+        let compressed = pow(max(0, ciecam02FL * abs(value) / 100), 0.42)
+        return 400 * (value < 0 ? -1 : 1) * compressed / (27.13 + compressed) + 0.1
+    }
+
+    /// CIECAM02 saturation correlate s under the published sRGB reference
+    /// viewing conditions: D65 white, average surround, Yb=20, La=64/pi*0.2.
+    /// Input is linear sRGB and output is the CIECAM02 saturation correlate.
+    private static func ciecam02Saturation(linearR r: Double, g: Double, b: Double) -> Double {
+        let x = 41.24564 * r + 35.75761 * g + 18.04375 * b
+        let y = 21.26729 * r + 71.51522 * g + 7.21750 * b
+        let z = 1.93339 * r + 11.91920 * g + 95.03040 * b
+
+        let rgb = Self.ciecam02CAT02(x, y, z)
+        let white = Self.ciecam02CATWhite
+        let adaptation = Self.ciecam02Adaptation
+        let rgbc = ((100 * adaptation / white.0 + 1 - adaptation) * rgb.0,
+                    (100 * adaptation / white.1 + 1 - adaptation) * rgb.1,
+                    (100 * adaptation / white.2 + 1 - adaptation) * rgb.2)
+
+        // HPE × inverse CAT02, as specified for the CIECAM02 post-adaptation
+        // cone responses. Fixed viewing-condition values are cached above.
+        let rgbp = Self.ciecam02HPE(rgbc)
+        let whiteAchromatic = Self.ciecam02WhiteAchromatic
+        let ra = Self.ciecam02Response(rgbp.0)
+        let ga = Self.ciecam02Response(rgbp.1)
+        let ba = Self.ciecam02Response(rgbp.2)
+        let achromatic = (2 * ra + ga + ba / 20 - 0.305) * Self.ciecam02NBB
+        guard achromatic > 0, whiteAchromatic > 0 else { return 0 }
+        let j = 100 * pow(achromatic / whiteAchromatic, Self.ciecam02SurroundC * Self.ciecam02ZFactor)
+        guard j > 0 else { return 0 }
+        let q = (4 / Self.ciecam02SurroundC) * sqrt(j / 100) * (whiteAchromatic + 4) * Self.ciecam02FLQuarter
+        let a = ra - 12 * ga / 11 + ba / 11
+        let opponentB = (ra + ga - 2 * ba) / 9
+        let hueRadians = atan2(opponentB, a)
+        let eccentricity = 0.25 * (cos(hueRadians + 2) + 3.8)
+        let denominator = ra + ga + 1.05 * ba
+        guard denominator > 0, q > 0 else { return 0 }
+        let tNumerator = (50000 / 13) * Self.ciecam02NBB * eccentricity * hypot(a, opponentB)
+        let t = tNumerator / denominator
+        let chroma = pow(max(0, t), 0.9) * sqrt(j / 100) * Self.ciecam02ChromaScale
+        let colorfulness = chroma * Self.ciecam02FLQuarter
+        let saturation = 100 * sqrt(max(0, colorfulness / q))
+        return saturation.isFinite ? saturation : 0
+    }
+
+
     private static func exposureFalseColor(_ luma: Double) -> (Double, Double, Double) {
         switch luma {
         case 0.956...: (0.19, 0.01, 0.01)
@@ -264,9 +379,15 @@ struct ImageScopes: Equatable, Sendable {
                        provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
     }
 
-    /// Display-referred saturation heatmap. Convert tagged Rec.2020 previews
-    /// to Rec.709, then apply the Neutral/DCTL saturation bands.
     static func saturationFalseColorOverlay(_ surface: IOSurface) -> CGImage? {
+        saturationOverlay(surface, mode: .monoBalance)
+    }
+
+    static func ciecam02SaturationOverlay(_ surface: IOSurface) -> CGImage? {
+        saturationOverlay(surface, mode: .ciecam02)
+    }
+
+    private static func saturationOverlay(_ surface: IOSurface, mode: SaturationOverlayMode) -> CGImage? {
         guard surface.width > 0, surface.height > 0, surface.bytesPerElement == 4,
               surface.planeCount <= 1, !Task.isCancelled else { return nil }
         let isRec2020 = EditorModel.displaySpace(of: surface) == "Rec. 2020 (sRGB transfer)"
@@ -306,16 +427,21 @@ struct ImageScopes: Equatable, Sendable {
                     green = Self.encodeSRGB(green)
                     blue = Self.encodeSRGB(blue)
                 }
-                // sRGB preview channels already are Rec.709 display values;
-                // avoid a decode/encode round trip for every pixel.
-                let rec709R = red, rec709G = green, rec709B = blue
-                let maximum = max(rec709R, max(rec709G, rec709B))
-                let minimum = min(rec709R, min(rec709G, rec709B))
-                // Use HSV saturation (chroma divided by value), not chroma
-                // alone. Chroma falls as a pixel gets darker, which made the
-                // overlay confuse exposure with saturation.
-                let saturation = maximum > 0 ? (maximum - minimum) / maximum : 0
-                let color = Self.saturationFalseColor(saturation)
+                let color: (Double, Double, Double)
+                switch mode {
+                case .monoBalance:
+                    // MONO-Balance computes S = HSV.S * HSV.V, which simplifies
+                    // to the RGB channel spread for normalized RGB.
+                    let maximum = max(red, max(green, blue))
+                    let minimum = min(red, min(green, blue))
+                    color = Self.saturationFalseColor(maximum - minimum)
+                case .ciecam02:
+                    let linearR = isRec2020 ? ColorSample.linear(red) : Self.srgbLinearByteTable[Int(source[src + 2])]
+                    let linearG = isRec2020 ? ColorSample.linear(green) : Self.srgbLinearByteTable[Int(source[src + 1])]
+                    let linearB = isRec2020 ? ColorSample.linear(blue) : Self.srgbLinearByteTable[Int(source[src])]
+                    let saturation = Self.ciecam02Saturation(linearR: linearR, g: linearG, b: linearB)
+                    color = Self.ciecam02FalseColor(saturation)
+                }
                 let offset = (y * width + x) * 4
                 rgba[offset] = UInt8((color.0 * 255).rounded())
                 rgba[offset + 1] = UInt8((color.1 * 255).rounded())
@@ -774,6 +900,8 @@ struct ScopePanelView: View {
     var setFalseColorEnabled: (Bool) -> Void = { _ in }
     var saturationOverlayEnabled = false
     var setSaturationOverlayEnabled: (Bool) -> Void = { _ in }
+    var saturationOverlayMode: SaturationOverlayMode = .monoBalance
+    var setSaturationOverlayMode: (SaturationOverlayMode) -> Void = { _ in }
     var skinToneOverlayEnabled = false
     var setSkinToneOverlayEnabled: (Bool) -> Void = { _ in }
     var neutralCandidatesEnabled = false
@@ -796,7 +924,7 @@ struct ScopePanelView: View {
             Group {
                 VStack(spacing: StudioStyle.Space.compact) {
                     if falseColorEnabled { FalseColorLegend().padding(.horizontal, 3) }
-                    if saturationOverlayEnabled { SaturationOverlayLegend().padding(.horizontal, 3) }
+                    if saturationOverlayEnabled { SaturationOverlayLegend(mode: saturationOverlayMode).padding(.horizontal, 3) }
                     if skinToneOverlayEnabled { SkinToneOverlayLegend().padding(.horizontal, 3) }
                     if neutralCandidatesEnabled { NeutralCandidateLegend().padding(.horizontal, 3) }
                     switch mode {
@@ -863,16 +991,30 @@ struct ScopePanelView: View {
                 .buttonStyle(.borderless)
                 .accessibilityLabel("False Color")
                 .help("Show a false-colour exposure map over the developed photograph.")
-                Button {
-                    setSaturationOverlayEnabled(!saturationOverlayEnabled)
+                Menu {
+                    Button { setSaturationOverlayEnabled(false) } label: {
+                        if !saturationOverlayEnabled { Label("Off", systemImage: "checkmark") }
+                        else { Text("Off") }
+                    }
+                    Divider()
+                    ForEach(SaturationOverlayMode.allCases) { option in
+                        Button {
+                            setSaturationOverlayMode(option)
+                            setSaturationOverlayEnabled(true)
+                        } label: {
+                            if saturationOverlayEnabled && saturationOverlayMode == option {
+                                Label(option.title, systemImage: "checkmark")
+                            } else { Text(option.title) }
+                        }
+                    }
                 } label: {
                     Image(systemName: "circle.lefthalf.filled")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(saturationOverlayEnabled ? Color.green : Color.secondary)
                 }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Saturation overlay")
-                .help("Show the color-space-aware saturation map over the developed photograph.")
+                .menuStyle(.borderlessButton)
+                .accessibilityLabel("Saturation overlay method")
+                .help("Choose MONO-Balance RGB spread or CIECAM02 appearance saturation for the developed photograph.")
                 Button {
                     setSkinToneOverlayEnabled(!skinToneOverlayEnabled)
                 } label: {
@@ -975,6 +1117,8 @@ private struct FalseColorLegend: View {
 }
 
 private struct SaturationOverlayLegend: View {
+    let mode: SaturationOverlayMode
+
     var body: some View {
         let colors = [Color(red: 0.00, green: 0.04, blue: 0.04),
                       Color(red: 0.03, green: 0.06, blue: 0.12),
@@ -991,7 +1135,8 @@ private struct SaturationOverlayLegend: View {
                       Color(red: 0.30, green: 0.01, blue: 0.01)]
         VStack(spacing: 3) {
             HStack(spacing: 6) {
-                Text("SAT").font(.system(size: 8, weight: .semibold, design: .monospaced))
+                Text(mode == .monoBalance ? "SAT · ΔRGB" : "CIECAM02 · s")
+                    .font(.system(size: 8, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.tertiary)
                 HStack(spacing: 0) {
                     ForEach(Array(colors.enumerated()), id: \.offset) { _, color in
@@ -999,22 +1144,31 @@ private struct SaturationOverlayLegend: View {
                     }
                 }
                 .frame(height: 7)
-                Text("0–100%").font(.system(size: 8, weight: .medium, design: .monospaced))
+                Text(mode == .monoBalance ? "0–100%" : "s 0–107.4")
+                    .font(.system(size: 8, weight: .medium, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
             HStack(spacing: 3) {
-                Text("0–1% near-neutral")
-                Spacer(minLength: 2)
-                Text("16–22% midrange").foregroundStyle(Color(red: 0.72, green: 0.72, blue: 0.44))
-                Spacer(minLength: 2)
-                Text("74%+ strong · no fixed target")
+                if mode == .monoBalance {
+                    Text("0–1% near-neutral")
+                    Spacer(minLength: 2)
+                    Text("16–22% midrange").foregroundStyle(Color(red: 0.72, green: 0.72, blue: 0.44))
+                    Spacer(minLength: 2)
+                    Text("74%+ strong · no fixed target")
+                } else {
+                    Text("CIECAM02 saturation correlate s")
+                    Spacer(minLength: 2)
+                    Text("D65 · avg surround · Yb 20 · S&G ’16")
+                }
             }
             .font(.system(size: 7, weight: .medium, design: .monospaced))
             .foregroundStyle(.secondary)
             .lineLimit(1)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("DCTL saturation bands from near neutral to high saturation. No fixed saturation level is an ideal for every image.")
+        .accessibilityLabel(mode == .monoBalance
+            ? "MONO-Balance saturation heatmap: normalized Rec.709 RGB channel spread. Its bands are visual guidance, not a claim that a color is over-saturated."
+            : "CIECAM02 saturation correlate s heatmap using D65, average surround, and background Yb 20. False-color scale is a visualization, not an over-saturation threshold.")
     }
 }
 

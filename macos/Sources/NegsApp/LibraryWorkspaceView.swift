@@ -236,7 +236,7 @@ struct LibraryWorkspaceView: View {
                 Spacer(minLength: 8)
                 if !library.photos.isEmpty {
                 TextField("Search Library", text: $librarySearchInput)
-                    .textFieldStyle(.roundedBorder).controlSize(.small).frame(width: 145)
+                    .textFieldStyle(.roundedBorder).controlSize(.small).frame(width: 190)
                     .focused($librarySearchFocused)
                     .onSubmit { library.searchText = librarySearchInput }
                     .task(id: librarySearchInput) {
@@ -265,22 +265,6 @@ struct LibraryWorkspaceView: View {
                 }
                 if !library.photos.isEmpty {
                 Menu {
-                    ForEach(LibrarySort.allCases) { sort in
-                        Button {
-                            library.sort = sort
-                        } label: {
-                            if library.sort == sort { Label(sort.title, systemImage: "checkmark") }
-                            else { Text(sort.title) }
-                        }
-                    }
-                } label: {
-                    Label(library.sort.title, systemImage: "arrow.up.arrow.down")
-                        .font(.callout)
-                }
-                .menuStyle(.borderlessButton).fixedSize().controlSize(.small)
-                .help("Sort photos")
-                }
-                Menu {
                     Button("Open Project…", systemImage: "folder", action: openProjectPanel)
                     if let projectID = library.selectedProjectID {
                         Button("Save Project…", systemImage: "square.and.arrow.down") {
@@ -298,21 +282,28 @@ struct LibraryWorkspaceView: View {
                     }
                     .disabled(library.refreshing)
                     Divider()
+                    Menu("Sort by · \(library.sort.title)") {
+                        ForEach(LibrarySort.allCases) { sort in
+                            Button {
+                                library.sort = sort
+                            } label: {
+                                if library.sort == sort { Label(sort.title, systemImage: "checkmark") }
+                                else { Text(sort.title) }
+                            }
+                        }
+                    }
+                    Button(showInspector ? "Hide Photo Details" : "Show Photo Details", systemImage: "sidebar.trailing") {
+                        showInspector.toggle()
+                    }
+                    Divider()
                     Slider(value: $thumbnailSize, in: 120...256) { Text("Thumbnail Size") }
                 } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(Theme.ui(14))
+                    Label("More", systemImage: "ellipsis.circle")
+                        .font(Theme.ui(11, weight: .medium))
                 }
                 .menuStyle(.borderlessButton).fixedSize().controlSize(.small)
-                .help("Project, analysis and display actions")
-                Button { showInspector.toggle() } label: {
-                    Image(systemName: "sidebar.trailing")
-                        .font(Theme.ui(14))
-                        .foregroundStyle(showInspector ? Theme.paper : Theme.dim)
-                        .frame(width: 28, height: 26)
+                .help("Project, analysis, sorting and display actions")
                 }
-                .buttonStyle(WordActionStyle())
-                .help(showInspector ? "Hide photo details" : "Show photo details")
             }
             .controlSize(.small)
             .padding(.horizontal, StudioStyle.Space.section).padding(.vertical, 11)

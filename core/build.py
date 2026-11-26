@@ -63,6 +63,17 @@ def find_odin() -> str:
         if COMMIT in out:
             return candidate
         seen.append(f"{candidate}: {out.strip()}")
+    # Keep the pin self-healing on new Intel Macs: Odin no longer publishes
+    # an Intel macOS binary, so install_odin.py builds this exact source pin.
+    installer = CORE / "install_odin.py"
+    if not os.environ.get("NEGS_ODIN") and installer.is_file():
+        run([sys.executable, str(installer)])
+        pinned = Path.home() / ".negs" / "odin" / TAG / exe
+        if pinned.is_file():
+            out = subprocess.run([str(pinned), "version"], capture_output=True, text=True, check=True).stdout
+            if COMMIT in out:
+                return str(pinned)
+            seen.append(f"{pinned}: {out.strip()}")
     detail = "; ".join(seen) or "none found"
     sys.exit(
         f"[core] Odin {TAG} ({COMMIT}) not found ({detail}).\n"

@@ -1,0 +1,123 @@
+name: Upstream sync
+
+on:
+  schedule:
+    - cron: "17 12 * * *"
+  workflow_dispatch:
+    inputs:
+      base_branch:
+        description: Fork branch containing the accepted custom app
+        required: false
+        type: string
+  pull_request:
+    branches:
+      - main
+      - studio-port-upstream-sync
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      changed: ${{ steps.detect.outputs.changed }}
+      branch: ${{ steps.detect.outputs.branch }}
+      base: ${{ steps.detect.outputs.base }}
+      upstream_sha: ${{ steps.detect.outputs.upstream_sha }}
+    env:
+      BASE_BRANCH: ${{ inputs.base_branch || vars.UPSTREAM_SYNC_BASE_BRANCH || 'studio-port-upstream-sync' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify custom-wins merge behavior
+        run: bash scripts/test_upstream_sync.sh
+      - name: Check for upstream commits
+        id: detect
+        run: |
+          git check-ref-format --branch "$BASE_BRANCH"
+          git remote add upstream https://github.com/noahhaasis/negs.git
+          git fetch origin "$BASE_BRANCH"
+          git fetch upstream main
+          base_sha="$(git rev-parse "origin/$BASE_BRANCH")"
+          upstream_sha="$(git rev-parse upstream/main)"
+          echo "base=$BASE_BRANCH" >> "$GITHUB_OUTPUT"
+          echo "upstream_sha=$upstream_sha" >> "$GITHUB_OUTPUT"
+          if git merge-base --is-ancestor "$upstream_sha" "$base_sha"; then
+            echo "No upstream commits to integrate."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          short_sha="${upstream_sha:0:12}"
+          branch="upstream-sync-$short_sha-$GITHUB_RUN_ID"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+      - name: Merge with the custom base authoritative on conflicts
+        if: steps.detect.outputs.changed == 'true'
+        env:
+          SYNC_BRANCH: ${{ steps.detect.outputs.branch }}
+          BASE_BRANCH: ${{ steps.detect.outputs.base }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          UPSTREAM_SYNC_BRANCH="$SYNC_BRANCH" bash scripts/start_upstream_sync.sh "origin/$BASE_BRANCH"
+          if git rev-parse --verify -q MERGE_HEAD >/dev/null; then
+            git commit -m "Merge upstream main into Negs fork"
+          fi
+          git push origin "$SYNC_BRANCH"
+
+  validate-universal-macos:
+    needs: sync
+    if: >-
+      always() &&
+      ((github.event_name == 'pull_request') ||
+       (needs.sync.result == 'success' && needs.sync.outputs.changed == 'true'))
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || needs.sync.outputs.branch }}
+      - uses: dtolnay/rust-toolchain@1.93.1
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Record macOS toolchain
+        run: |
+          xcodebuild -version
+          rustc -vV
+          xcrun --sdk macosx --show-sdk-path
+      - name: Build and verify universal app package
+        env:
+          MACOS_ARCHS: arm64 x86_64
+          BUILD_TARGET_DIR: target/macos-app
+          CLEAN_BUILD_CACHE: "1"
+        run: bash scripts/package_macos_app.sh
+
+  open-pull-request:
+    needs: [sync, validate-universal-macos]
+    if: needs.sync.outputs.changed == 'true' && needs.validate-universal-macos.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Open the validated upstream sync PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_BRANCH: ${{ needs.sync.outputs.base }}
+          SYNC_BRANCH: ${{ needs.sync.outputs.branch }}
+          UPSTREAM_SHA: ${{ needs.sync.outputs.upstream_sha }}
+        run: |
+          gh pr create \
+            --base "$BASE_BRANCH" \
+            --head "$SYNC_BRANCH" \
+            --title "Sync upstream main ($UPSTREAM_SHA)" \
+            --body "Upstream main was merged with the custom base retained for conflicted files. The universal macOS package job passed. Review the diff and launch the app before merging."
