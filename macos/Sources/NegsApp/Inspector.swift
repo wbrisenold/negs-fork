@@ -2127,8 +2127,12 @@ private struct ColorCorrectionWheel: View {
                 temperatureOffset: dominant > 0 ? cos(radians) / dominant * strength : 0,
                 tintOffset: dominant > 0 ? sin(radians) / dominant * strength : 0))
         }
-        let marker = CGPoint(x: side / 2 + cos(radians) * radius * strength / 100,
-                             y: side / 2 + sin(radians) * radius * strength / 100)
+        let horizontal = CGFloat(cos(radians))
+        let vertical = CGFloat(sin(radians))
+        let strengthScale = CGFloat(strength / 100)
+        let markerOffsetX = horizontal * radius * strengthScale
+        let markerOffsetY = vertical * radius * strengthScale
+        let marker = CGPoint(x: side / 2 + markerOffsetX, y: side / 2 + markerOffsetY)
         return AnyView(chromaWheel(side: side, radius: radius, marker: marker))
     }
 
