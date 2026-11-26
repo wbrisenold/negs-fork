@@ -436,6 +436,8 @@ private struct LibraryProjectDocument: Codable, Sendable {
     private(set) var cullProgress = 0
     private(set) var cullTotal = 0
     private(set) var error: String?
+    var importStatus: LibraryImportStatus?
+    var retryableImport: LibraryImportRequest?
     @ObservationIgnored private var scopedFolders: [UUID: URL] = [:]
     @ObservationIgnored private var loadStarted = false
     @ObservationIgnored private var sceneGroupsCache: (scope: Set<URL>, groups: [[LibraryPhoto]])?
@@ -448,7 +450,9 @@ private struct LibraryProjectDocument: Codable, Sendable {
     @ObservationIgnored private let persistenceID = UUID()
     @ObservationIgnored private var persistenceRevision = 0
     @ObservationIgnored private var persistenceTask: Task<Void, Never>?
-    @ObservationIgnored private var refreshRequested = false
+    @ObservationIgnored private var activeRefresh: Task<[String], Never>?
+    @ObservationIgnored private var activeRefreshProjectID: UUID?
+    @ObservationIgnored private var activeRefreshID: UUID?
     @ObservationIgnored private let storeURL: URL
 
     private static let sceneDistanceThreshold = 0.45
@@ -809,16 +813,33 @@ private struct LibraryProjectDocument: Codable, Sendable {
         if !document.projects.isEmpty || (!folders.isEmpty && document.projects.isEmpty) { persist() }
     }
 
+    struct FolderImportResult {
+        let importedCount: Int
+        let scannedCount: Int
+        let failures: [String]
+    }
+
     func importFolders(_ urls: [URL]) async {
-        guard let projectIndex = projects.firstIndex(where: { $0.id == selectedProjectID }) else { return }
+        guard let selectedProjectID else { return }
+        _ = await importFolders(urls, to: selectedProjectID)
+    }
+
+    func importFolders(_ urls: [URL], to projectID: UUID) async -> FolderImportResult {
+        guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }) else {
+            return FolderImportResult(importedCount: 0, scannedCount: 0, failures: ["The destination project no longer exists."])
+        }
         var selectedFolderIDs = Set<UUID>()
+        var failures: [String] = []
+        let initialPhotoURLs = Set(projectPhotos(projects[projectIndex]).map { $0.file.url.standardizedFileURL })
         var foldersByPath = Dictionary(folders.map { (URL(fileURLWithPath: $0.path).standardizedFileURL.path, $0.id) },
                                        uniquingKeysWith: { first, _ in first })
         for url in urls {
             let standardized = url.standardizedFileURL
             if let existingID = foldersByPath[standardized.path] {
-                if let otherProject = projects.first(where: { $0.id != selectedProjectID && $0.folderIDs.contains(existingID) }) {
-                    error = "“\(standardized.lastPathComponent)” already belongs to project “\(otherProject.name)”. Folders belong to one project at a time."
+                if let otherProject = projects.first(where: { $0.id != projectID && $0.folderIDs.contains(existingID) }) {
+                    let message = "“\(standardized.lastPathComponent)” already belongs to project “\(otherProject.name)”. Folders belong to one project at a time."
+                    if projectID == selectedProjectID { error = message }
+                    failures.append(message)
                     continue
                 }
                 selectedFolderIDs.insert(existingID)
@@ -832,17 +853,23 @@ private struct LibraryProjectDocument: Codable, Sendable {
             selectedFolderIDs.insert(folder.id)
             if url.startAccessingSecurityScopedResource() { scopedFolders[folder.id] = url }
         }
-        guard !selectedFolderIDs.isEmpty else { return }
+        guard !selectedFolderIDs.isEmpty else {
+            return FolderImportResult(importedCount: 0, scannedCount: 0,
+                                      failures: failures.isEmpty ? ["Choose at least one source folder."] : failures)
+        }
         projects[projectIndex].folderIDs.formUnion(selectedFolderIDs)
         for folderID in selectedFolderIDs {
-            ensureSourceCategory(folderID, projectID: selectedProjectID)
+            ensureSourceCategory(folderID, projectID: projectID)
         }
-        selectedFolderID = nil
-        selectedAlbumID = nil
-        selectedSmartCollectionID = nil
-        filter = .all
         persist()
-        await refresh()
+        failures.append(contentsOf: await refresh(projectID: projectID, afterCurrent: true))
+        guard let updatedProjectIndex = projects.firstIndex(where: { $0.id == projectID }) else {
+            return FolderImportResult(importedCount: 0, scannedCount: selectedFolderIDs.count,
+                                      failures: ["The destination project was removed during import."])
+        }
+        let importedCount = projectPhotos(projects[updatedProjectIndex])
+            .filter { !initialPhotoURLs.contains($0.file.url.standardizedFileURL) }.count
+        return FolderImportResult(importedCount: importedCount, scannedCount: selectedFolderIDs.count, failures: failures)
     }
 
     /// Bring the folder already open in Edit into the selected Library
@@ -981,50 +1008,80 @@ private struct LibraryProjectDocument: Codable, Sendable {
         return "\(safe.isEmpty ? "Project" : safe).negproject"
     }
 
-    func refresh() async {
-        guard !refreshing else { refreshRequested = true; return }
-        refreshing = true
-        refreshProgress = 0
-        defer {
-            refreshing = false
-            if refreshRequested {
-                refreshRequested = false
-                Task { await self.refresh() }
+    func refresh(projectID: UUID? = nil, afterCurrent: Bool = false) async -> [String] {
+        if let activeRefresh {
+            let currentProjectID = activeRefreshProjectID
+            let currentRefreshID = activeRefreshID
+            let result = await activeRefresh.value
+            if afterCurrent || currentProjectID != projectID {
+                if activeRefreshID == currentRefreshID {
+                    self.activeRefresh = nil
+                    activeRefreshProjectID = nil
+                    activeRefreshID = nil
+                    refreshing = false
+                }
+                return await refresh(projectID: projectID)
             }
+            return result
         }
-        let activeFolderIDs = projects.first(where: { $0.id == selectedProjectID })?.folderIDs ?? []
+        refreshing = true
+        let targetProjectID = projectID ?? selectedProjectID
+        activeRefreshProjectID = targetProjectID
+        let refreshID = UUID()
+        activeRefreshID = refreshID
+        let task = Task { await self.refreshNow(projectID: targetProjectID) }
+        activeRefresh = task
+        let failures = await task.value
+        if activeRefreshID == refreshID {
+            activeRefresh = nil
+            activeRefreshProjectID = nil
+            activeRefreshID = nil
+            refreshing = false
+        }
+        return failures
+    }
+
+    private func refreshNow(projectID: UUID?) async -> [String] {
+        refreshProgress = 0
+        let activeFolderIDs = projects.first(where: { $0.id == projectID })?.folderIDs ?? []
         let sources = folders.filter { activeFolderIDs.contains($0.id) }.map { ($0.id, $0.resolvedURL()) }
         refreshTotal = sources.count
-        let scans = await withTaskGroup(of: (UUID, [PhotoFile]?).self, returning: [(UUID, [PhotoFile]?)].self) { group in
+        let scans = await withTaskGroup(of: (UUID, [PhotoFile]?, String?).self, returning: [(UUID, [PhotoFile]?, String?)].self) { group in
             var nextSource = 0
-            var results: [(UUID, [PhotoFile]?)] = []
+            var results: [(UUID, [PhotoFile]?, String?)] = []
             for _ in 0..<min(2, sources.count) {
                 let (id, url) = sources[nextSource]
                 nextSource += 1
                 group.addTask {
-                    do { return (id, try PhotoFolder.snapshot(in: url)) }
-                    catch { return (id, nil) }
+                    do { return (id, try PhotoFolder.snapshot(in: url), nil) }
+                    catch { return (id, nil, "Couldn’t scan “\(url.lastPathComponent)”: \(error.localizedDescription)") }
                 }
             }
             while let result = await group.next() {
                 results.append(result)
                 refreshProgress += 1
+                if let status = importStatus, status.phase == .importing,
+                   status.projectID == projectID {
+                    importStatus = LibraryImportStatus(destinationName: status.destinationName, phase: status.phase,
+                                                      importedCount: status.importedCount, progress: refreshProgress,
+                                                      total: refreshTotal, message: status.message, canRetry: status.canRetry)
+                }
                 if nextSource < sources.count {
                     let (id, url) = sources[nextSource]
                     nextSource += 1
                     group.addTask {
-                        do { return (id, try PhotoFolder.snapshot(in: url)) }
-                        catch { return (id, nil) }
+                        do { return (id, try PhotoFolder.snapshot(in: url), nil) }
+                        catch { return (id, nil, "Couldn’t scan “\(url.lastPathComponent)”: \(error.localizedDescription)") }
                     }
                 }
             }
             return results
         }
         // A cancelled caller must not publish a partial multi-folder scan.
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else { return [] }
         var previousByFolder = Dictionary(grouping: photos, by: \.folderID)
         var refreshedPhotos = photos.filter { !activeFolderIDs.contains($0.folderID) }
-        for (folderID, files) in scans {
+        for (folderID, files, _) in scans {
             // A folder removed while its scan runs must not reappear.
             guard activeFolderIDs.contains(folderID), let files else { continue }
             var byName = Dictionary(uniqueKeysWithValues:
@@ -1048,18 +1105,19 @@ private struct LibraryProjectDocument: Codable, Sendable {
         if scans.contains(where: { $0.1 != nil }) {
             refreshedPhotos.append(contentsOf: previousByFolder.values.joined())
             photos = refreshedPhotos.sorted { $0.file.url.path < $1.file.url.path }
-            error = refreshError(for: scans)
+            if projectID == selectedProjectID { error = refreshError(for: scans) }
             persist()
-        } else if !sources.isEmpty {
+        } else if !sources.isEmpty, projectID == selectedProjectID {
             error = refreshError(for: scans)
         }
         if let selectedPhotoURL, !photos.contains(where: { $0.file.url == selectedPhotoURL }) {
             self.selectedPhotoURL = nil
         }
+        return scans.compactMap(\.2)
     }
 
-    private func refreshError(for scans: [(UUID, [PhotoFile]?)]) -> String? {
-        let failed = scans.compactMap { id, files in
+    private func refreshError(for scans: [(UUID, [PhotoFile]?, String?)]) -> String? {
+        let failed = scans.compactMap { id, files, _ in
             files == nil ? folders.first(where: { $0.id == id })?.name : nil
         }
         guard !failed.isEmpty else { return nil }

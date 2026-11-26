@@ -4,6 +4,30 @@ enum LibraryWorkflowIntent {
     case openProject(UUID)
     case openReview(LibraryFilter)
     case openGroup(UUID)
+    case importFolders([URL], to: UUID)
+    case addSelectedPhotos([LibraryPhoto], to: UUID)
+}
+
+enum LibraryImportPhase: Equatable {
+    case importing
+    case completed
+    case failed
+}
+
+struct LibraryImportStatus: Equatable {
+    let projectID: UUID
+    let destinationName: String
+    let phase: LibraryImportPhase
+    let importedCount: Int
+    let progress: Int
+    let total: Int
+    let message: String?
+    let canRetry: Bool
+}
+
+enum LibraryImportRequest {
+    case folders([URL], UUID)
+    case photos([URL], UUID)
 }
 
 enum LibraryWorkflowNextStep: Equatable {
@@ -28,6 +52,7 @@ struct LibraryWorkflowVisibleState: Equatable {
     let photoCount: Int
     let selectedCount: Int
     let emptyState: LibraryWorkflowEmptyState?
+    let importStatus: LibraryImportStatus?
 }
 
 /// The single app-level route for Library scope intents and their visible result.
@@ -39,6 +64,7 @@ struct LibraryWorkflowVisibleState: Equatable {
         case .openProject(let id): library.selectProject(id)
         case .openReview(let filter): library.selectReviewFilter(filter)
         case .openGroup(let id): library.selectGroup(id)
+        case .importFolders, .addSelectedPhotos: break
         }
 
         // Selection and photo-specific details belong to the previous scope.
@@ -109,8 +135,65 @@ struct LibraryWorkflowVisibleState: Equatable {
             projectTitle: project?.name,
             photoCount: photos.count,
             selectedCount: library.selectedCount(in: photos),
-            emptyState: emptyState
+            emptyState: emptyState,
+            importStatus: library.importStatus
         )
+    }
+
+    @discardableResult
+    static func perform(_ intent: LibraryWorkflowIntent, in library: PhotoLibrary) async -> LibraryWorkflowVisibleState {
+        switch intent {
+        case .importFolders(let urls, let projectID):
+            await importFolders(urls, to: projectID, in: library)
+        case .addSelectedPhotos(let photos, let projectID):
+            await addSelectedPhotos(photos, to: projectID, in: library)
+        default: break
+        }
+        return visibleState(in: library)
+    }
+
+    @discardableResult
+    static func retryImport(in library: PhotoLibrary) async -> LibraryWorkflowVisibleState {
+        guard let request = library.retryableImport else { return visibleState(in: library) }
+        switch request {
+        case .folders(let urls, let projectID): await importFolders(urls, to: projectID, in: library)
+        case .photos(let urls, let projectID):
+            let photos = library.photos.filter { urls.contains($0.file.url.standardizedFileURL) }
+            await addSelectedPhotos(photos, to: projectID, in: library)
+        }
+        return visibleState(in: library)
+    }
+
+    private static func importFolders(_ urls: [URL], to projectID: UUID, in library: PhotoLibrary) async {
+        guard let project = library.projects.first(where: { $0.id == projectID }) else { return }
+        library.retryableImport = .folders(urls, projectID)
+        library.importStatus = LibraryImportStatus(projectID: projectID, destinationName: project.name, phase: .importing,
+                                                   importedCount: 0, progress: 0, total: urls.count,
+                                                   message: nil, canRetry: false)
+        let result = await library.importFolders(urls, to: projectID)
+        let failures = result.failures
+        library.importStatus = LibraryImportStatus(projectID: projectID, destinationName: project.name,
+                                                   phase: failures.isEmpty ? .completed : .failed,
+                                                   importedCount: result.importedCount,
+                                                   progress: result.scannedCount, total: max(urls.count, result.scannedCount),
+                                                   message: failures.first,
+                                                   canRetry: !failures.isEmpty)
+        if failures.isEmpty { library.retryableImport = nil }
+    }
+
+    private static func addSelectedPhotos(_ photos: [LibraryPhoto], to projectID: UUID, in library: PhotoLibrary) async {
+        guard let project = library.projects.first(where: { $0.id == projectID }) else { return }
+        let urls = photos.map { $0.file.url.standardizedFileURL }
+        library.retryableImport = .photos(urls, projectID)
+        library.importStatus = LibraryImportStatus(projectID: projectID, destinationName: project.name, phase: .importing,
+                                                   importedCount: 0, progress: 0, total: urls.count,
+                                                   message: nil, canRetry: false)
+        await Task.yield()
+        library.add(photos, to: projectID)
+        library.importStatus = LibraryImportStatus(projectID: projectID, destinationName: project.name, phase: .completed,
+                                                   importedCount: urls.count, progress: urls.count, total: urls.count,
+                                                   message: nil, canRetry: false)
+        library.retryableImport = nil
     }
 
     @MainActor private struct ScopeIdentity: Equatable {
