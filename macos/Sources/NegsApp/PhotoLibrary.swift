@@ -1062,7 +1062,7 @@ private struct LibraryProjectDocument: Codable, Sendable {
                 refreshProgress += 1
                 if let status = importStatus, status.phase == .importing,
                    status.projectID == projectID {
-                    importStatus = LibraryImportStatus(projectID: projectID, destinationName: status.destinationName, phase: status.phase,
+                    importStatus = LibraryImportStatus(projectID: status.projectID, destinationName: status.destinationName, phase: status.phase,
                                                       importedCount: status.importedCount, progress: refreshProgress,
                                                       total: refreshTotal, message: status.message, canRetry: status.canRetry)
                 }
@@ -1113,7 +1113,7 @@ private struct LibraryProjectDocument: Codable, Sendable {
         if let selectedPhotoURL, !photos.contains(where: { $0.file.url == selectedPhotoURL }) {
             self.selectedPhotoURL = nil
         }
-        return scans.compactMap(\.2)
+        return scans.compactMap { $0.2 }
     }
 
     private func refreshError(for scans: [(UUID, [PhotoFile]?, String?)]) -> String? {
