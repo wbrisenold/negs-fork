@@ -56,6 +56,81 @@ import XCTest
         XCTAssertEqual(model.shownFrame?.frame, model.currentFrame, "Redo must show the frame for its selected history state")
     }
 
+    func testCropAndMaskEditsStayWithTheVisibleHistoryAndSavedPhoto() async throws {
+        let previousSidecarsPreference = UserDefaults.standard.object(forKey: "sidecars")
+        let sidecars = SidecarStore()
+        let (model, root, photo) = try await fixture(sidecars: sidecars)
+        defer { model.shutdown(); try? FileManager.default.removeItem(at: root) }
+        defer {
+            model.sidecarsEnabled = previousSidecarsPreference as? Bool ?? true
+            if let previousSidecarsPreference { UserDefaults.standard.set(previousSidecarsPreference, forKey: "sidecars") }
+            else { UserDefaults.standard.removeObject(forKey: "sidecars") }
+        }
+        let originalContrast = model.value("prep.contrast")
+        let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
+
+        // A crop changes the canvas frame immediately without requiring a
+        // redundant develop; its history state and sidecar remain selectable.
+        model.beginCrop()
+        try XCTUnwrap(model.cropSession).choose(.square)
+        undo.beginUndoGrouping(); model.endCrop(apply: true); undo.endUndoGrouping()
+        XCTAssertEqual(model.photoSize, CGSize(width: 64, height: 64))
+        XCTAssertTrue(model.previewCurrent)
+        XCTAssertEqual(model.shownFrame?.frame, model.currentFrame)
+        undo.undo()
+        XCTAssertFalse(model.state.crop.cropped)
+        XCTAssertEqual(model.photoSize, CGSize(width: 96, height: 64))
+        undo.redo()
+        XCTAssertEqual(model.photoSize, CGSize(width: 64, height: 64))
+
+        // A painted mask is a rendered edit and must refresh the settled frame
+        // while retaining unrelated adjustments.
+        undo.beginUndoGrouping(); model.set("prep.contrast", .number(23)); undo.endUndoGrouping()
+        try await waitUntil { model.frameStatus == .current(model.currentFrame) }
+        undo.beginUndoGrouping()
+        model.createBrushBackgroundMask()
+        undo.endUndoGrouping()
+        model.backgroundMaskBrushSize = 12
+        undo.beginUndoGrouping()
+        model.beginBackgroundMaskStroke(at: CGPoint(x: 0.5, y: 0.5))
+        model.endBackgroundMaskStroke()
+        undo.endUndoGrouping()
+        try await waitUntil { model.frameStatus == .current(model.currentFrame) }
+        XCTAssertEqual(model.shownFrame?.frame, model.currentFrame)
+        XCTAssertEqual(model.value("prep.contrast"), .number(23))
+        XCTAssertFalse(model.state.params["post.background_masks"].array.isEmpty)
+
+        undo.undo()
+        try await waitUntil { model.frameStatus == .current(model.currentFrame) }
+        XCTAssertEqual(model.value("prep.contrast"), .number(23))
+        XCTAssertFalse(model.state.params["post.background_masks"].array.isEmpty)
+        undo.undo()
+        try await waitUntil { model.frameStatus == .current(model.currentFrame) }
+        XCTAssertTrue(model.state.params["post.background_masks"].array.isEmpty)
+        XCTAssertNil(model.backgroundMaskOverlay, "Undoing the last mask must remove its overlay from the current frame")
+        undo.redo()
+        undo.redo()
+        try await waitUntil { model.frameStatus == .current(model.currentFrame) }
+        XCTAssertFalse(model.state.params["post.background_masks"].array.isEmpty)
+        XCTAssertNotNil(model.backgroundMaskOverlay)
+
+        await model.flushSidecars()
+        let saved = try XCTUnwrap(sidecars.read(photo: photo)?.variants.first?.edits)
+        XCTAssertEqual(saved["crop"]["rect"].array.count, 2)
+        XCTAssertEqual(saved["params"]["prep"]["contrast"].double, 23, accuracy: 1e-9)
+
+        // Reopening through the editor restores the selected crop and mask
+        // together with the independent adjustment.
+        model.open(photo)
+        try await waitUntil { model.previewCurrent || model.error != nil }
+        XCTAssertNil(model.error)
+        XCTAssertTrue(model.state.crop.cropped)
+        XCTAssertEqual(model.value("prep.contrast"), .number(23))
+        XCTAssertFalse(model.state.params["post.background_masks"].array.isEmpty)
+        XCTAssertEqual(model.photoSize, CGSize(width: 64, height: 64))
+        XCTAssertNotEqual(originalContrast, model.value("prep.contrast"))
+    }
+
     func testExportRefusesOriginalAndEmptyBatchCreatesNoRun() async throws {
         let (model, root, photo) = try await fixture()
         defer { model.shutdown(); try? FileManager.default.removeItem(at: root) }
@@ -68,7 +143,7 @@ import XCTest
         XCTAssertFalse(model.batchRunning)
     }
 
-    private func fixture() async throws -> (EditorModel, URL, URL) {
+    private func fixture(sidecars: SidecarStore? = nil) async throws -> (EditorModel, URL, URL) {
         let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
         let binaries = repo.appendingPathComponent("target/macos-app/x86_64-apple-darwin/release")
@@ -89,7 +164,8 @@ import XCTest
             }
         }
         try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: photo)
-        let model = EditorModel(sidecars: SidecarStore(writes: false))
+        let model = EditorModel(sidecars: sidecars ?? SidecarStore(writes: false))
+        if sidecars != nil { model.sidecarsEnabled = true }
         await model.start(paths: EnginePaths(helper: helper, exporter: binaries.appendingPathComponent("spektrafilm-f64"),
                                           data: repo.appendingPathComponent("data")), restoration: Task { nil })
         model.open(photo)

@@ -4406,9 +4406,7 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
     private func refreshBackgroundMaskForImageUpdate(_ generation: Int) {
         syncDepthRangeFromSelectedMask()
         guard backgroundMaskSourceGeneration != generation else {
-            if backgroundMaskEnabled, hasBackgroundMask {
-                backgroundMaskOverlay = activeBackgroundMaskOverlay()
-            }
+            backgroundMaskOverlay = backgroundMaskEnabled && hasBackgroundMask ? activeBackgroundMaskOverlay() : nil
             return
         }
         backgroundMaskSourceGeneration = generation
