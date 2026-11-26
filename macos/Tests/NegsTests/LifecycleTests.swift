@@ -108,6 +108,80 @@ import XCTest
         XCTAssertEqual(NSImage(contentsOf: destination)?.representations.first?.pixelsWide, 96)
     }
 
+    /// Export the selected Develop frame, including a real crop and edit, rather
+    /// than a previously settled frame. The artifact and visible frame must agree.
+    func testFastExportMatchesSelectedDevelopFrameAndCrop() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths().helper.path) else { throw XCTSkip("Build the release helper first") }
+        let model = EditorModel()
+        defer { model.shutdown() }
+        await model.start(paths: paths())
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        model.open(fixture)
+        try await settle(model)
+
+        let mask = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 96, pixelsHigh: 64,
+                                                  bitsPerSample: 8, samplesPerPixel: 3, hasAlpha: false,
+                                                  isPlanar: false, colorSpaceName: .deviceRGB,
+                                                  bytesPerRow: 96 * 3, bitsPerPixel: 24))
+        for y in 0..<64 {
+            for x in 0..<96 {
+                let index = y * mask.bytesPerRow + x * 3
+                let value: UInt8 = x >= 48 ? 255 : 0
+                mask.bitmapData![index] = value
+                mask.bitmapData![index + 1] = value
+                mask.bitmapData![index + 2] = value
+            }
+        }
+        let maskPNG = try XCTUnwrap(mask.representation(using: .png, properties: [:])).base64EncodedString()
+        model.set("post.background_masks", .array([.object([
+            "id": .string("selected-export-mask"),
+            "selection": .string(BackgroundMask.Selection.custom.rawValue),
+            "mask_png_base64": .string(maskPNG),
+            "exposure_ev": .number(1.5), "temperature": .number(0),
+            "tint": .number(0), "saturation": .number(0)
+        ])]))
+        model.set("post.contrast", .number(75))
+        model.beginCrop()
+        let crop = try XCTUnwrap(model.cropSession)
+        crop.rect = CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
+        model.endCrop(apply: true)
+        try await settle(model)
+        XCTAssertEqual(model.state.params["post.contrast"], .number(75))
+        XCTAssertEqual(model.state.params["post.background_masks"].array.count, 1)
+        XCTAssertTrue(model.crop.cropped)
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = directory.appendingPathComponent("selected.png")
+        await model.export(to: destination, engine: .fast)
+        XCTAssertNil(model.error)
+        let artifact = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: destination)))
+        XCTAssertEqual(artifact.pixelsWide, Int(model.imageSize.width))
+        XCTAssertEqual(artifact.pixelsHigh, Int(model.imageSize.height))
+
+        let previewData = try XCTUnwrap(model.image?.tiffRepresentation)
+        let preview = try XCTUnwrap(NSBitmapImageRep(data: previewData))
+        let x = artifact.pixelsWide * 3 / 4, y = artifact.pixelsHigh / 2
+        let exportedPixel = try XCTUnwrap(artifact.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
+        let previewPixel = try XCTUnwrap(preview.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
+        XCTAssertEqual(exportedPixel.redComponent, previewPixel.redComponent, accuracy: 1.0 / 255)
+        XCTAssertEqual(exportedPixel.greenComponent, previewPixel.greenComponent, accuracy: 1.0 / 255)
+        XCTAssertEqual(exportedPixel.blueComponent, previewPixel.blueComponent, accuracy: 1.0 / 255)
+
+        // Reference export deliberately develops from the source through the
+        // full-resolution job instead of saving the interactive preview.
+        if FileManager.default.isExecutableFile(atPath: paths().exporter.path) {
+            let referenceDestination = directory.appendingPathComponent("selected-reference.png")
+            await model.export(to: referenceDestination, engine: .reference)
+            XCTAssertNil(model.error)
+            let reference = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: referenceDestination)))
+            XCTAssertEqual(reference.pixelsWide, artifact.pixelsWide)
+            XCTAssertEqual(reference.pixelsHigh, artifact.pixelsHigh)
+        }
+    }
+
     /// Image Size end to end with the real helper: the target, its remembered
     /// value, Reset, crop Done/Cancel/limit, panning, Undo, Original, and a
     /// Fast export of the enlarged preview.
