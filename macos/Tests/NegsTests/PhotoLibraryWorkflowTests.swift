@@ -120,6 +120,36 @@ import XCTest
         XCTAssertNil(library.selectedPhotoURL)
     }
 
+    func testWorkflowScopeActionUpdatesVisibleGroupAndClearsStalePhotoFocus() async throws {
+        let fixture = try await fixture()
+        defer { fixture.clean() }
+        let library = fixture.library
+        let focusedPhoto = fixture.photos[0].file.url
+        library.selectedPhotoURL = focusedPhoto
+        library.gridSelection.select(focusedPhoto)
+
+        let visible = LibraryWorkflow.perform(.openGroup(fixture.binID), in: library)
+
+        XCTAssertEqual(visible.title, "Review")
+        XCTAssertEqual(visible.projectTitle, "Client")
+        XCTAssertEqual(visible.photoCount, 2)
+        XCTAssertNil(visible.emptyState)
+        XCTAssertNil(library.selectedPhotoURL)
+        XCTAssertTrue(library.gridSelection.selected.isEmpty)
+
+        library.createProject(named: "New Job")
+        let emptyProjectID = try XCTUnwrap(library.projects.first { $0.name == "New Job" }?.id)
+        _ = LibraryWorkflow.perform(.openProject(fixture.projectID), in: library)
+        library.selectedPhotoURL = focusedPhoto
+        library.gridSelection.select(focusedPhoto)
+        let emptyProject = LibraryWorkflow.perform(.openProject(emptyProjectID), in: library)
+        XCTAssertEqual(emptyProject.scopeLabel, "PROJECT · NEW JOB · ALL PHOTOS")
+        XCTAssertEqual(emptyProject.photoCount, 0)
+        XCTAssertEqual(emptyProject.emptyState?.nextStep, .addPhotos)
+        XCTAssertNil(library.selectedPhotoURL)
+        XCTAssertTrue(library.gridSelection.selected.isEmpty)
+    }
+
     func testFailedFolderImportStillPersistsItsReference() async throws {
         let fixture = try await fixture()
         defer { fixture.clean() }

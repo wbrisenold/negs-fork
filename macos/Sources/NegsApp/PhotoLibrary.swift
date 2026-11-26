@@ -696,6 +696,11 @@ private struct LibraryProjectDocument: Codable, Sendable {
         }
     }
 
+    func clearPhotoSelection() {
+        gridSelection = LibrarySelection()
+        selectedPhotoURL = nil
+    }
+
     func pruneGridSelection(to order: [URL]) {
         let visible = Set(order)
         if let current = gridSelection.current, !visible.contains(current) {
@@ -736,6 +741,12 @@ private struct LibraryProjectDocument: Codable, Sendable {
             scopedFilterCountsCache = (scope, counts)
         }
         return scopedFilterCountsCache?.counts[filter, default: 0] ?? 0
+    }
+
+    func selectedCount(in visible: [LibraryPhoto]) -> Int {
+        let visibleURLs = Set(visible.map { $0.file.url })
+        let selectedURLs = gridSelection.selected.union(selectedPhotoURL.map { [$0] } ?? [])
+        return selectedURLs.intersection(visibleURLs).count
     }
 
     func count(for project: LibraryProject) -> Int {
@@ -1161,6 +1172,36 @@ private struct LibraryProjectDocument: Codable, Sendable {
 
     func categories(for projectID: UUID) -> [LibraryAlbum] {
         albums.filter { $0.projectID == projectID }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    func selectProject(_ id: UUID) {
+        guard projects.contains(where: { $0.id == id }) else { return }
+        selectedProjectID = id
+        selectedFolderID = nil
+        selectedAlbumID = nil
+        selectedSmartCollectionID = nil
+        filter = .all
+        persist()
+    }
+
+    func selectGroup(_ id: UUID) {
+        guard let group = albums.first(where: { $0.id == id }),
+              let projectID = group.projectID,
+              projects.contains(where: { $0.id == projectID }) else { return }
+        selectedProjectID = projectID
+        selectedFolderID = nil
+        selectedAlbumID = id
+        selectedSmartCollectionID = nil
+        filter = .all
+        persist()
+    }
+
+    func selectReviewFilter(_ filter: LibraryFilter) {
+        selectedFolderID = nil
+        selectedAlbumID = nil
+        selectedSmartCollectionID = nil
+        self.filter = filter
+        persist()
     }
 
     func removeFromBin(_ targets: [LibraryPhoto], binID: UUID) {
