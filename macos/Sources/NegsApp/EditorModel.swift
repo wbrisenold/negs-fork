@@ -403,6 +403,33 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
     private(set) var ready = false
     private(set) var rendering = false
     private(set) var previewCurrent = false
+    /// Observable lifecycle of the requested frame. A quick or drag frame
+    /// remains pending until the settled frame for the edit appears.
+    enum FrameStatus: Equatable {
+        case empty
+        case pending(FrameID)
+        case rendering(FrameID)
+        case current(FrameID)
+        case failed(FrameID, String)
+    }
+    struct ShownFrame: Equatable {
+        var frame: FrameID
+        var step: RenderStep
+    }
+    private(set) var shownFrame: ShownFrame?
+    var currentFrame: FrameID { FrameID(revision: revision, generation: sourceGeneration) }
+    var renderScheduled: Bool { pendingRender != nil }
+    var matchDecodeFailedHere: Bool { matchDecodeFailed == currentFrame }
+    var frameStatus: FrameStatus {
+        guard source != nil else { return .empty }
+        let frame = currentFrame
+        if renderFailed, let developFailure { return .failed(frame, developFailure) }
+        if rendering { return .rendering(frame) }
+        guard previewCurrent, let shownFrame, shownFrame.frame == frame, shownFrame.step == .settled else {
+            return .pending(frame)
+        }
+        return .current(frame)
+    }
     /// The shown preview is out of date, and the update is slow enough to mention.
     private(set) var showsActivity = false
     /// Why the latest edit couldn't be developed, said on the canvas over
@@ -849,7 +876,7 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
         sourceGeneration += 1
         photoFacts = nil
         cameraWhiteBalance = .null
-        source = nil; sourceVariant = nil; image = nil; placeholder = nil; standIn = nil; previewCurrent = false; developFailure = nil
+        source = nil; sourceVariant = nil; image = nil; shownFrame = nil; placeholder = nil; standIn = nil; previewCurrent = false; developFailure = nil
         asShotWhiteBalance = nil
         imageSize = .zero; placeholderSize = .zero; sourceSize = .zero; workingSize = .zero; previewScale = 1
         showingCachedPreview = false; isRaw = false; inputColour = .null; lensCorrectionSupported = false
@@ -1836,7 +1863,7 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
         let previous = state
         cancelBrightnessMatch(); brightnessMatchFailure = nil
         sourceDeleted = false
-        source = url; sourceVariant = item.variantID; image = nil; placeholder = nil; standIn = nil; previewCurrent = false; developFailure = nil
+        source = url; sourceVariant = item.variantID; image = nil; shownFrame = nil; placeholder = nil; standIn = nil; previewCurrent = false; developFailure = nil
         asShotWhiteBalance = nil
         // Leaving the grid opens its current photograph and keeps the selection.
         if selection.current != item { selection.select(item) }
@@ -1928,6 +1955,7 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
         guard generation == sourceGeneration, image == nil, !closing else { return true }
         guard renderState.rendered == rendered else { return false }
         let frame = cached.frame
+        shownFrame = ShownFrame(frame: currentFrame, step: .settled)
         image = frame.surface; imageSize = frame.photoSize; isRaw = frame.raw
         clippingMask = nil // Cached display frames do not retain scan clipping provenance.
         sourceSize = frame.sourceSize; workingSize = frame.workingSize
@@ -4176,6 +4204,7 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
                 previewScale = workingSize.width > 0 ? min(Double(width) / workingSize.width, 1) : 1
                 showingInteractiveFrame = interactiveScale != nil
                 quickFrame = quick ? frame : nil
+                shownFrame = ShownFrame(frame: frame, step: step)
                 image = developed.0; clippingMask = developed.1; placeholder = nil; standIn = nil
                 refreshBackgroundMaskForImageUpdate(generation)
                 if comparisonMode != .off { prepareComparison() }
@@ -4828,7 +4857,12 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
             if self?.trialImage != nil { try? await Task.sleep(for: .milliseconds(1100)) }
             guard let self, !Task.isCancelled else { return }
             self.activityTimer = nil
-            if !self.previewCurrent, !self.showingCachedPreview, !self.interacting, !self.renderFailed, self.source != nil {
+            let frameStillNeedsWork: Bool
+            switch self.frameStatus {
+            case .pending, .rendering: frameStillNeedsWork = true
+            case .empty, .current, .failed: frameStillNeedsWork = false
+            }
+            if frameStillNeedsWork, !self.showingCachedPreview, !self.interacting, self.source != nil {
                 self.showsActivity = true
             }
         }
