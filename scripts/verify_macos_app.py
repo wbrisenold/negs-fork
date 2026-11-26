@@ -96,13 +96,24 @@ def verify_app(app, architectures, expected_revision, expected_branch):
     return {"app": str(app), "architectures": sorted(actual_architectures), "manifest": manifest}
 
 
+def distribution_app_bundles(dist_root):
+    """Find app bundles shipped at the distribution level, excluding app internals."""
+    bundles = []
+    for current, directories, _ in os.walk(dist_root):
+        for name in directories[:]:
+            if name.endswith(".app"):
+                bundles.append((Path(current) / name).resolve())
+                directories.remove(name)
+    return sorted(bundles)
+
+
 def verify_dist(dist_root, canonical_app):
     dist_root = dist_root.resolve(strict=True)
     expected = (dist_root / CANONICAL_RELATIVE.relative_to("dist")).resolve(strict=True)
     canonical = canonical_app.resolve(strict=True)
     if canonical != expected:
         raise ValueError(f"App is not at the canonical path: {expected}")
-    bundles = sorted(p.resolve() for p in dist_root.rglob("*.app") if p.is_dir())
+    bundles = distribution_app_bundles(dist_root)
     if bundles != [expected]:
         found = ", ".join(str(p) for p in bundles) or "none"
         raise ValueError(f"Expected only {expected} under dist; found: {found}")
@@ -119,7 +130,7 @@ def clean_legacy_dist_apps(dist_root, canonical_app):
         if app.is_dir():
             shutil.rmtree(app)
             removed.append(str(app))
-    stray = [p for p in dist_root.rglob("*.app") if p.is_dir() and p.resolve() != canonical]
+    stray = [p for p in distribution_app_bundles(dist_root) if p != canonical]
     if stray:
         raise ValueError("Unexpected app bundles remain under dist: " + ", ".join(map(str, stray)))
     print(json.dumps({"removed_legacy_apps": removed, "canonical_app": str(canonical)}, indent=2))
