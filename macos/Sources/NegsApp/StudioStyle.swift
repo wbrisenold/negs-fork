@@ -18,6 +18,19 @@ enum StudioStyle {
         static let pane: CGFloat = 12
     }
 
+    enum ActionRole {
+        static let primary = Theme.accent
+        static let secondary = Theme.label
+        static let quiet = Theme.dim
+        static let focus = Theme.accent
+        static let disabledOpacity = Theme.disabledOpacity
+    }
+
+    enum ActionKind: Equatable {
+        case primary
+        case secondary
+    }
+
     enum Layout {
         static let editorPresetSidebarWidth: CGFloat = 280
     }
@@ -51,5 +64,43 @@ extension View {
         return background(surface, in: shape)
             .overlay(shape.strokeBorder(StudioStyle.outline, lineWidth: 0.8))
             .clipShape(shape)
+    }
+
+    /// A compact square card surface shared by Library scope guidance and editor panels.
+    func studioWorkspaceCard(surface: Color = StudioStyle.panel) -> some View {
+        let shape = RoundedRectangle(cornerRadius: StudioStyle.Radius.card, style: .continuous)
+        return background(surface, in: shape)
+            .overlay(shape.strokeBorder(StudioStyle.outline, lineWidth: 0.8))
+            .clipShape(shape)
+    }
+}
+
+struct StudioActionButtonStyle: ButtonStyle {
+    var kind: StudioStyle.ActionKind = .secondary
+
+    func makeBody(configuration: Configuration) -> some View {
+        StyledAction(configuration: configuration, kind: kind)
+    }
+
+    private struct StyledAction: View {
+        let configuration: ButtonStyle.Configuration
+        let kind: StudioStyle.ActionKind
+        @Environment(\.isEnabled) private var enabled
+        @Environment(\.isFocused) private var focused
+        @State private var hovered = false
+
+        var body: some View {
+            let primary = kind == .primary
+            let shape = RoundedRectangle(cornerRadius: StudioStyle.Radius.control, style: .continuous)
+            return configuration.label
+                .font(Theme.text(11, weight: primary ? 600 : 500))
+                .foregroundStyle(primary ? Theme.onAccent : StudioStyle.ActionRole.secondary)
+                .padding(.horizontal, 11).frame(minHeight: 30)
+                .background(shape.fill(primary ? Theme.accent.opacity(configuration.isPressed ? 0.75 : hovered ? 0.9 : 0.78) : Theme.panel))
+                .overlay(shape.strokeBorder(focused ? StudioStyle.ActionRole.focus : StudioStyle.outline, lineWidth: focused ? 1.5 : 0.8))
+                .contentShape(shape)
+                .opacity(enabled ? 1 : StudioStyle.ActionRole.disabledOpacity)
+                .onHover { hovered = $0 && enabled }
+        }
     }
 }
