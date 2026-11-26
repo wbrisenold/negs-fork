@@ -1008,6 +1008,7 @@ private struct LibraryProjectDocument: Codable, Sendable {
         return "\(safe.isEmpty ? "Project" : safe).negproject"
     }
 
+    @discardableResult
     func refresh(projectID: UUID? = nil, afterCurrent: Bool = false) async -> [String] {
         if let activeRefresh {
             let currentProjectID = activeRefreshProjectID
