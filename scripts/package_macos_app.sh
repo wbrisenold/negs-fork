@@ -6,7 +6,8 @@ ICON_ICNS="${ICON_ICNS:-}"
 BUILD_TARGET_DIR="${BUILD_TARGET_DIR:-target/macos-app}"
 DIST_DIR="${DIST_DIR:-dist/negs-macos}"
 APP_NAME="${APP_NAME:-Negs}"
-APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
+APP_BUNDLE=""
+CANONICAL_APP_BUNDLE=""
 PYTHON="${PYTHON:-python3}"
 RELEASE_DIR="${RELEASE_DIR:-dist/releases}"
 MACOS_ARCHS="${MACOS_ARCHS:-arm64 x86_64}"
@@ -14,6 +15,35 @@ CLEAN_BUILD_CACHE="${CLEAN_BUILD_CACHE:-1}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
+
+source_branch="studio-port-upstream-sync"
+current_branch="$(git branch --show-current)"
+if [[ "${GITHUB_ACTIONS:-}" != "true" ]]; then
+    [[ "$current_branch" == "$source_branch" ]] || {
+        echo "Package refused: Negs source of truth is $source_branch (current: ${current_branch:-detached})." >&2
+        exit 2
+    }
+    [[ -z "$(git status --porcelain)" ]] || {
+        echo "Package refused: commit all source changes before packaging." >&2
+        git status --short >&2
+        exit 2
+    }
+    git fetch --quiet origin "refs/heads/$source_branch:refs/remotes/origin/$source_branch"
+    [[ "$(git rev-parse HEAD)" == "$(git rev-parse "origin/$source_branch")" ]] || {
+        echo "Package refused: push the source commit before packaging." >&2
+        exit 2
+    }
+fi
+
+[[ "$DIST_DIR" == "dist/negs-macos" ]] || {
+    echo "Negs has one supported app output: dist/negs-macos/Negs.app (got DIST_DIR=$DIST_DIR)." >&2
+    exit 2
+}
+[[ "$APP_NAME" == "Negs" ]] || {
+    echo "Negs has one supported app name: Negs.app (got APP_NAME=$APP_NAME)." >&2
+    exit 2
+}
+CANONICAL_APP_BUNDLE="$DIST_DIR/Negs.app"
 
 # Validate metadata before doing expensive build work. Public release settings
 # come from CI; local packages intentionally have no live update configuration.
@@ -23,9 +53,13 @@ release_name="$("$PYTHON" scripts/macos_release.py --field name)"
 # Keep the binary deployment target consistent with Info.plist.
 export MACOSX_DEPLOYMENT_TARGET=14.0
 
-# Build the requested native slices. The default remains universal for releases;
-# an Intel workstation can set MACOS_ARCHS=x86_64 to skip the unused arm64 build.
+# Every package installed at the canonical path is universal. The separate
+# cached debug runner is the fast Intel-only path for iterative UI work.
 read -r -a requested_archs <<< "$MACOS_ARCHS"
+if [[ " ${requested_archs[*]} " != " arm64 x86_64 " && " ${requested_archs[*]} " != " x86_64 arm64 " ]]; then
+    echo "Release packaging must include both macOS architectures: arm64 and x86_64." >&2
+    exit 2
+fi
 rust_targets=()
 swift_triples=()
 rust_triples=()
@@ -115,8 +149,11 @@ for arch in "${requested_archs[@]}"; do
     }
 done
 
-rm -rf "$DIST_DIR"
-mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources" "$APP_BUNDLE/Contents/Frameworks" "$RELEASE_DIR"
+mkdir -p "$DIST_DIR" "$RELEASE_DIR"
+stage="$(mktemp -d "$BUILD_TARGET_DIR/package.XXXXXX")"
+trap 'rm -rf "$stage"' EXIT
+APP_BUNDLE="$stage/app/Negs.app"
+mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources" "$APP_BUNDLE/Contents/Frameworks"
 # SwiftPM builds the Swift sources but does not compile Xcode asset catalogs.
 # Prefer Apple's compiler; use the pinned clean-room compiler for the single
 # named color catalog when building with Command Line Tools alone.
@@ -184,6 +221,9 @@ chmod +x "$APP_BUNDLE/Contents/MacOS/NegsApp" \
     "$APP_BUNDLE/Contents/MacOS/spektrafilm" \
     "$APP_BUNDLE/Contents/MacOS/spektrafilm-f64" \
     "$APP_BUNDLE/Contents/MacOS/da3-cli"
+
+"$PYTHON" scripts/verify_macos_app.py stamp --app "$APP_BUNDLE" \
+    --build-mode release --architectures "${requested_archs[@]}"
 
 "$PYTHON" scripts/macos_release.py --plist "$APP_BUNDLE/Contents/Info.plist" > "$DIST_DIR/release.json"
 
@@ -276,8 +316,8 @@ README
     "$PYTHON" scripts/macos_release.py
 } > "$DIST_DIR/BUILD-INFO.txt"
 
-# Snapshot the actual working source, including uncommitted port changes.
-# Exclude build products and local files unrelated to reproducing the app.
+# Snapshot the exact committed source that produced the app. Exclude build
+# products and local files unrelated to reproducing the app.
 COPYFILE_DISABLE=1 tar --exclude='.DS_Store' --exclude='__pycache__' --exclude='.build' --exclude='.swiftpm' \
     -czf "$DIST_DIR/SOURCE.tar.gz" AGENTS.md .gitignore Cargo.toml Cargo.lock LICENSE README.md \
     crates macos data assets scripts docs .github release
@@ -292,6 +332,8 @@ done
 codesign --force --sign - "$APP_BUNDLE"
 codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 plutil -lint "$APP_BUNDLE/Contents/Info.plist"
+"$PYTHON" scripts/verify_macos_app.py verify --app "$APP_BUNDLE" \
+    --architectures "${requested_archs[@]}"
 
 # Only the app goes in the update archive. Corresponding source is a separate
 # release asset so it doesn't double every updater download.
@@ -302,8 +344,6 @@ cp "$DIST_DIR/README.txt" "$RELEASE_DIR/INSTALL.txt"
 cp "$DIST_DIR/BUILD-INFO.txt" "$RELEASE_DIR/BUILD-INFO.txt"
 
 # A native drag-to-Applications installer, with no system-wide components.
-stage="$(mktemp -d "$BUILD_TARGET_DIR/package.XXXXXX")"
-trap 'rm -rf "$stage"' EXIT
 mkdir "$stage/dmg"
 ditto "$APP_BUNDLE" "$stage/dmg/$APP_NAME.app"
 ln -s /Applications "$stage/dmg/Applications"
@@ -320,6 +360,24 @@ cp "$stage/unpacked/package-report.json" "$DIST_DIR/package-report.json"
     cd "$RELEASE_DIR"
     shasum -a 256 "$release_name.zip" "$release_name.dmg" "$release_name-source.tar.gz" > SHA256SUMS
 )
+
+# Promote only after the app, release ZIP, DMG, and source archive all verify.
+# Keep the previous canonical app in the staging directory until replacement
+# and the one-app-in-dist regression check pass.
+previous_app="$stage/previous/Negs.app"
+mkdir -p "$(dirname "$previous_app")"
+if [[ -d "$CANONICAL_APP_BUNDLE" ]]; then
+    mv "$CANONICAL_APP_BUNDLE" "$previous_app"
+fi
+if ! mv "$APP_BUNDLE" "$CANONICAL_APP_BUNDLE"; then
+    [[ ! -d "$previous_app" ]] || mv "$previous_app" "$CANONICAL_APP_BUNDLE"
+    echo "Could not promote the verified app to $CANONICAL_APP_BUNDLE." >&2
+    exit 1
+fi
+"$PYTHON" scripts/verify_macos_app.py clean-legacy-dist-apps \
+    --dist-root "$repo_root/dist" --canonical-app "$CANONICAL_APP_BUNDLE"
+"$PYTHON" scripts/verify_macos_app.py verify --app "$CANONICAL_APP_BUNDLE" \
+    --architectures "${requested_archs[@]}" --dist-root "$repo_root/dist"
 echo "Packaged: $repo_root/$RELEASE_DIR/$release_name.dmg"
 if [[ "$BUILD_TARGET_DIR" == "target/macos-app" && "$CLEAN_BUILD_CACHE" == 1 ]]; then
     "$PYTHON" scripts/cleanup_storage.py --build-caches --apply

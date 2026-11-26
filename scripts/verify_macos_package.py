@@ -11,6 +11,9 @@ import plistlib
 import re
 import subprocess
 import tarfile
+import os
+
+from verify_macos_app import source_branch, source_revision, verify_app
 
 from macos_release import metadata
 
@@ -47,12 +50,19 @@ def main():
     app = apps[0]
     checked("/usr/bin/codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app))
     checked("/usr/bin/plutil", "-lint", str(app / "Contents/Info.plist"))
+    build_identity = verify_app(
+        app,
+        args.architectures,
+        source_revision(),
+        os.environ.get("GITHUB_HEAD_REF") or os.environ.get("GITHUB_REF_NAME") or source_branch(),
+    )
     plist = plistlib.loads((app / "Contents/Info.plist").read_bytes())
     expected = metadata()
     require(plist["CFBundleShortVersionString"] == expected["version"], "app version differs from Cargo")
     require(plist["CFBundleVersion"] == expected["build"], "app build number differs from release metadata")
     report = {"zip_sha256": sha(args.zip), "app": str(app), "signature_verified": True,
-              "minimum_macos": plist["LSMinimumSystemVersion"], "binaries": {}, "data": {}}
+              "minimum_macos": plist["LSMinimumSystemVersion"], "build": build_identity,
+              "binaries": {}, "data": {}}
     for name in [plist["CFBundleExecutable"], "spektrafilm", "spektrafilm-f64", "da3-cli"] + (["spektrafilm-native"] if plist["CFBundleExecutable"] in {"Negs", "NegsApp"} else []):
         binary = app / "Contents/MacOS" / name
         arch = checked("/usr/bin/lipo", "-archs", str(binary)).strip()

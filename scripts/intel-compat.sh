@@ -8,15 +8,15 @@ Usage:
   scripts/intel-compat.sh --build-negs
 
 Audit a macOS app/disk image for x86_64 executable code, or build this Negs
-checkout as an Intel-only app. An ARM-only binary cannot be translated into
-x86_64 machine code; rebuilding requires the original source code.
+checkout as the supported universal app. Release packages contain both
+architectures; use the cached debug launcher for Intel-only UI iteration.
 EOF
 }
 
 if [[ "${1:-}" == "--build-negs" ]]; then
     repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
     cd "$repo_root"
-    MACOS_ARCHS=x86_64 bash scripts/package_macos_app.sh
+    bash scripts/package_macos_app.sh
     exit
 fi
 
