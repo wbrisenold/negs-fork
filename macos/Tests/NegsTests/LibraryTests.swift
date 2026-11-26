@@ -668,6 +668,48 @@ final class LibraryFormatTests: XCTestCase {
         await model.flushSidecars()
     }
 
+    func testEditingSelectedLibrarySetSharesEditsWithoutMixingPhotoStateAndReturnsToLibrary() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let source = try fixture(in: dir, "a-source.png")
+        let first = try fixture(in: dir, "b-first.png")
+        let second = try fixture(in: dir, "c-second.png")
+        let outside = try fixture(in: dir, "d-outside.png")
+        try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "first", "rating": 2, "flag": "pick"}]}"#, sidecarOf: first)
+        try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "second", "rating": 4, "flag": "reject"}]}"#, sidecarOf: second)
+        let store = SidecarStore()
+        let model = try await model(store: store)
+        let strip = UserDefaults.standard.object(forKey: "filmstripVisible")
+        addTeardownBlock { UserDefaults.standard.set(strip, forKey: "filmstripVisible") }
+        model.filmstripVisible = true
+        model.open(source)
+        let watching = Task { await model.library.watch(dir) }
+        defer { watching.cancel() }
+        try await waitUntil { model.library.summariesLoaded && model.library.files.count == 4 }
+
+        model.set("prep.lift", .number(18))
+        model.copyEdits(from: source)
+        model.editLibrarySelection([second, first])
+
+        XCTAssertEqual(model.workspace, .editor, "the batch action opens Develop rather than selecting the first grid cell")
+        XCTAssertEqual(model.source, first, "the set opens on its first Library-order photograph")
+        XCTAssertEqual(model.shownPhotos.map(\.url), [first, second], "Develop contains the selected set only")
+        XCTAssertEqual(model.editTargets, [first, second], "shared edits target the selected set in visible order")
+
+        model.pasteEdits()
+        await model.flushSidecars()
+        XCTAssertEqual(try store.read(photo: first)?.variants.first?.edits?["params.prep.lift"], .number(18))
+        XCTAssertEqual(try store.read(photo: second)?.variants.first?.edits?["params.prep.lift"], .number(18))
+        XCTAssertEqual(try store.read(photo: first)?.summary, LibrarySummary(rating: 2, flag: .pick, edited: true))
+        XCTAssertEqual(try store.read(photo: second)?.summary, LibrarySummary(rating: 4, flag: .reject, edited: true))
+        XCTAssertNil(try store.read(photo: outside), "an unselected photograph is not changed")
+
+        model.showLibrary()
+        XCTAssertEqual(model.workspace, .library)
+        XCTAssertEqual(model.selection.selected, [first, second], "returning keeps the batch selection available")
+        await model.flushSidecars()
+    }
+
     /// Paste, Reset and Duplicate change several photographs' sidecars as
     /// one undo step each, which survives opening another photograph.
     func testPasteResetAndDuplicateAreOneUndoStepEach() async throws {

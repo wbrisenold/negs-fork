@@ -476,6 +476,9 @@ struct LibraryWorkspaceView: View {
                         Text(selectedURLs.isEmpty ? "Edit All \(editTargets.count)" : "Edit Selected \(editTargets.count)")
                     }
                     .buttonStyle(OutlinedButtonStyle(prominent: true))
+                    .help(selectedURLs.isEmpty
+                          ? "Open every ready photograph in this Library view together in Develop."
+                          : "Open only the selected ready photographs together in Develop. Shared edit actions apply to this set; each photograph keeps its own edit and rating state.")
                     if !selectedReady.isEmpty {
                         Button {
                             library.setExportQueued(true, for: selectedReady.map(\.file.url))

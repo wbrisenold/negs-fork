@@ -142,8 +142,8 @@ import XCTest
         library.selectProject(fixture.projectID)
         library.selectGroup(fixture.binID)
         library.selectReviewFilter(.picked)
-        library.searchText = "a.png"
-        library.selectGridPhoto(firstURL, in: [firstURL])
+        library.selectGridPhoto(firstURL, in: [firstURL, secondURL])
+        library.selectGridPhoto(secondURL, toggling: true, in: [firstURL, secondURL])
 
         // Develop returns through syncEditedPhoto when Library reappears. A
         // photograph already in the current view must not replace its review
@@ -153,10 +153,10 @@ import XCTest
         XCTAssertEqual(library.selectedProjectID, fixture.projectID)
         XCTAssertEqual(library.selectedAlbumID, fixture.binID)
         XCTAssertEqual(library.filter, .picked)
-        XCTAssertEqual(library.searchText, "a.png")
+        XCTAssertEqual(library.searchText, "")
         XCTAssertEqual(library.selectedPhotoURL, firstURL)
-        XCTAssertEqual(library.gridSelection.selected, Set([firstURL]))
-        XCTAssertEqual(library.visiblePhotos.map(\.file.url), [firstURL])
+        XCTAssertEqual(library.gridSelection.selected, Set([firstURL, secondURL]))
+        XCTAssertEqual(library.visiblePhotos.map(\.file.url), [firstURL, secondURL])
         XCTAssertNotEqual(library.selectedPhotoURL, secondURL)
     }
 
