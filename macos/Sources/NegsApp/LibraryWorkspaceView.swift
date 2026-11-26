@@ -203,11 +203,12 @@ struct LibraryWorkspaceView: View {
                     HStack(spacing: 7) {
                         Text(currentTitle).font(Theme.text(18, weight: 600)).foregroundStyle(Theme.paper)
                             .lineLimit(1).truncationMode(.tail)
-                        Text("\(displayedPhotos.count) photos").font(Theme.metadata(10.5)).foregroundStyle(Theme.dim)
+                        Text("\(displayedPhotos.count) visible · \(library.selectedCount(in: displayedPhotos)) selected")
+                            .font(Theme.metadata(10.5)).foregroundStyle(Theme.dim).monospacedDigit()
                             .lineLimit(1).fixedSize(horizontal: true, vertical: false)
                             .help(library.selectedProjectID != nil
-                                  ? "Project membership and library changes are saved automatically on this Mac."
-                                  : "Photographs in the current Library view.")
+                                  ? "Visible and selected photographs in this project, group, search, and filter view. Project membership and library changes are saved automatically on this Mac."
+                                  : "Visible results and selected photographs in the current Library view.")
                         if library.analyzingCull {
                             Text("Analyzing \(library.cullProgress) / \(library.cullTotal)")
                                 .font(Theme.ui(10)).foregroundStyle(Theme.dim)
@@ -427,7 +428,7 @@ struct LibraryWorkspaceView: View {
                     Text("\(library.gridSelection.selected.count) selected")
                         .font(Theme.ui(10, weight: .medium)).foregroundStyle(Theme.dim).monospacedDigit()
                         .help("Bulk selection for the visible Library grid")
-                    Button("Clear Selection") { library.gridSelection.deselectAll() }
+                    Button("Deselect Others") { library.gridSelection.deselectAll() }
                         .buttonStyle(OutlinedButtonStyle()).help("Keep the current photo selected")
                 }
                 if !selectedPhotos.isEmpty {

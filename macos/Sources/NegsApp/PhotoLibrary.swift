@@ -709,6 +709,25 @@ private struct LibraryProjectDocument: Codable, Sendable {
         }
     }
 
+    /// Selects exactly the photos in the Library's current result set. A
+    /// focused photo from an earlier scope is pruned before choosing the new
+    /// set, so it cannot leak into select-all after a search or filter change.
+    func selectAllGridPhotos(in results: [LibraryPhoto]) {
+        let order = results.map(\.file.url)
+        pruneGridSelection(to: order)
+        gridSelection.selectAll(order)
+        selectedPhotoURL = gridSelection.current
+    }
+
+    /// Counts selected cards that belong to the result set currently shown.
+    /// This stays correct while SwiftUI is applying the corresponding prune.
+    func selectedCount(in results: [LibraryPhoto]) -> Int {
+        let resultURLs = Set(results.map(\.file.url))
+        return gridSelection.selected.reduce(into: 0) { count, url in
+            if resultURLs.contains(url) { count += 1 }
+        }
+    }
+
     func pruneGridSelection(to order: [URL]) {
         let visible = Set(order)
         if let current = gridSelection.current, !visible.contains(current) {
