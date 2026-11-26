@@ -6,6 +6,29 @@ import XCTest
 /// The list under a tab's count lists what the count counts, and Reset on the
 /// tab clears both in one undo step.
 @MainActor final class TabEditsTests: XCTestCase {
+    func testTaskTabsHaveStableKeyboardRoutesAndAccessibleNames() {
+        XCTAssertEqual(InspectorTab.allCases.map(\.shortcutKey), ["1", "2", "3", "4", "5"])
+        XCTAssertTrue(InspectorTab.allCases.allSatisfy { $0.shortcutModifiers == [.command, .option] })
+        XCTAssertEqual(InspectorTab.allCases.map(\.accessibilityName), ["Light", "Color", "Film", "Masks", "Export"])
+        XCTAssertEqual(InspectorTab.allCases.map(\.accessibilityHint), [
+            "Show Light adjustments (Command-Option-1)",
+            "Show Color adjustments (Command-Option-2)",
+            "Show Film adjustments (Command-Option-3)",
+            "Show Masks adjustments (Command-Option-4)",
+            "Show Export adjustments (Command-Option-5)"
+        ])
+        XCTAssertEqual(InspectorTab.exposure.accessibilityLabel(editCount: 0), "Light")
+        XCTAssertEqual(InspectorTab.exposure.accessibilityLabel(editCount: 1), "Light, 1 edit")
+        XCTAssertEqual(InspectorTab.output.accessibilityLabel(editCount: 3), "Export, 3 edits")
+        XCTAssertEqual(InspectorTab.color.accessibilityValue(isSelected: true, editCount: 2), "Selected, 2 edits")
+        XCTAssertEqual(InspectorTab.lab.accessibilityValue(isSelected: false, editCount: 0), "Not selected")
+    }
+
+    func testTaskTabKeyboardFocusOrderMatchesVisibleTaskOrder() {
+        XCTAssertEqual(InspectorTab.focusOrder, InspectorTab.allCases)
+        XCTAssertEqual(InspectorTab.focusOrder.map(\.accessibilityName), ["Light", "Color", "Film", "Masks", "Export"])
+    }
+
     func testUnavailableAdjustmentsExplainWorkflowAndRestoreSavedEdits() {
         let redGrain = Adjustment.stockSlider("Red granularity", "film_render.grain.rms_granularity", 0, 0...80, 0.1, bw: "Granularity")
         let greenGrain = Adjustment.stockSlider("Green granularity", "film_render.grain.rms_granularity", 1, 0...80, 0.1, bw: nil)
