@@ -160,6 +160,12 @@ enum TopPickUnit: String, CaseIterable, Identifiable {
     var title: String { self == .images ? "images per scene" : "% per scene" }
 }
 
+struct CullAnalysisSummary: Equatable {
+    let attempted: Int
+    let failed: Int
+    let cancelled: Bool
+}
+
 /// Local Vision results plus transparent, deterministic technical signals.
 /// A missing aesthetic score means this macOS version did not provide Apple's
 /// on-device aesthetics request; it is never replaced with a guessed value.
@@ -435,6 +441,7 @@ private struct LibraryProjectDocument: Codable, Sendable {
     private(set) var analyzingCull = false
     private(set) var cullProgress = 0
     private(set) var cullTotal = 0
+    private(set) var cullAnalysisSummary: CullAnalysisSummary?
     private(set) var error: String?
     var importStatus: LibraryImportStatus?
     var retryableImport: LibraryImportRequest?
@@ -1128,16 +1135,23 @@ private struct LibraryProjectDocument: Codable, Sendable {
         return "Couldn’t read \(shown)\(extra). Check folder access and retry."
     }
 
-    func analyzeCull(replacingExisting: Bool = false) async {
+    func analyzeCull(in scope: Set<URL>? = nil, replacingExisting: Bool = false) async {
         guard !analyzingCull else { return }
-        let candidates = photos.filter { !$0.missing && (replacingExisting || $0.cull == nil) }
-        guard !candidates.isEmpty else { return }
+        let candidates = photos.filter {
+            !$0.missing && (scope?.contains($0.file.url) ?? true) && (replacingExisting || $0.cull == nil)
+        }
+        guard !candidates.isEmpty else {
+            cullAnalysisSummary = CullAnalysisSummary(attempted: 0, failed: 0, cancelled: false)
+            return
+        }
         var photoIndices = Dictionary(uniqueKeysWithValues: photos.enumerated().map { ($0.element.file.url, $0.offset) })
         analyzingCull = true
         cullProgress = 0
         cullTotal = candidates.count
+        cullAnalysisSummary = nil
         defer { analyzingCull = false }
 
+        var failedCount = 0
         for photo in candidates {
             if Task.isCancelled { break }
             let result = await Task.detached(priority: .utility) {
@@ -1152,13 +1166,30 @@ private struct LibraryProjectDocument: Codable, Sendable {
                     reasons: ["Could not decode this image for culling; review it manually"])
                 photoIndices[photo.file.url] = index
             }
+            if result == nil { failedCount += 1 }
             cullProgress += 1
         }
         persist()
+        cullAnalysisSummary = CullAnalysisSummary(
+            attempted: cullProgress,
+            failed: failedCount,
+            cancelled: Task.isCancelled
+        )
     }
 
     func setRating(_ rating: Int, for url: URL? = nil) {
         update(url) { $0.rating = min(5, max(0, rating)) }
+    }
+    func setRating(_ rating: Int, for urls: [URL]) {
+        let targets = Set(urls)
+        guard !targets.isEmpty else { return }
+        let boundedRating = min(5, max(0, rating))
+        var changed = false
+        for index in photos.indices where targets.contains(photos[index].file.url) && photos[index].rating != boundedRating {
+            photos[index].rating = boundedRating
+            changed = true
+        }
+        if changed { persist() }
     }
     func setFlag(_ flag: LibraryFlag, for url: URL? = nil) { update(url) { $0.flag = flag } }
     func setFlag(_ flag: LibraryFlag, for urls: [URL]) {

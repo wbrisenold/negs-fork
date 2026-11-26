@@ -6,11 +6,19 @@ struct LibraryWorkspaceView: View {
         let selectedURLs: Set<URL>
         let selectedPhotos: [LibraryPhoto]
         let selectedReady: [LibraryPhoto]
+        let selectedOfflineCount: Int
         let editTargets: [LibraryPhoto]
         let unqueuedSelectionCount: Int
+        let queuedReady: [LibraryPhoto]
+        let queuedOfflineCount: Int
         let projectIsEmpty: Bool
         let editableCount: Int
         let offlineCount: Int
+    }
+
+    private struct ProjectRemovalRequest {
+        let projectID: UUID
+        let photos: [LibraryPhoto]
     }
 
     let model: EditorModel
@@ -27,8 +35,15 @@ struct LibraryWorkspaceView: View {
     @State private var categoryError: String?
     @State private var showingProjectPhotoPicker = false
     @State private var showingCategoryResetConfirmation = false
+    @State private var showingProjectRemovalConfirmation = false
+    @State private var pendingProjectRemoval: ProjectRemovalRequest?
+    @State private var showingProjectDeleteConfirmation = false
+    @State private var projectToDelete: UUID?
+    @State private var showingGroupDeleteConfirmation = false
+    @State private var categoryToDelete: UUID?
     @State private var showingFilterOptions = false
     @State private var showingTopPickOptions = false
+    @State private var cullAnalysisTask: Task<Void, Never>?
     @State private var projectName = ""
     @FocusState private var librarySearchFocused: Bool
     @FocusState private var libraryGridFocused: Bool
@@ -61,7 +76,7 @@ struct LibraryWorkspaceView: View {
         let topPickQuota = library.topPickUnit == .percent ? " · \(library.topPickValue)%" : ""
         let topPickLabel = analyzedTopPicks == 0
             ? "Top Picks · Not analyzed"
-            : "Top \(topPickURLs.count) of \(analyzedTopPicks)\(topPickQuota)"
+            : "Top Picks · \(topPickURLs.count) of \(analyzedTopPicks)\(topPickQuota)"
         return HSplitView {
             sidebar.frame(minWidth: 172, idealWidth: 196, maxWidth: 228)
                 .padding(StudioStyle.Space.paneInset)
@@ -111,6 +126,41 @@ struct LibraryWorkspaceView: View {
         } message: {
             Text("Online photos in this group will return to their default edits. Offline photos are left unchanged until they’re available. Original files are kept.")
         }
+        .confirmationDialog("Remove selected photos from this project?", isPresented: $showingProjectRemovalConfirmation,
+                            titleVisibility: .visible) {
+            Button("Remove from Project", role: .destructive) {
+                if let request = pendingProjectRemoval {
+                    library.remove(request.photos, from: request.projectID)
+                }
+                pendingProjectRemoval = nil
+            }
+            Button("Cancel", role: .cancel) { pendingProjectRemoval = nil }
+        } message: {
+            let count = pendingProjectRemoval?.photos.count ?? 0
+            Text("Remove \(count) selected photo\(count == 1 ? "" : "s") from this project only. Original files and edits stay on disk.")
+        }
+        .confirmationDialog("Delete this project?", isPresented: $showingProjectDeleteConfirmation,
+                            titleVisibility: .visible) {
+            Button("Delete Project", role: .destructive) {
+                if let projectToDelete { library.deleteProject(projectToDelete) }
+                projectToDelete = nil
+            }
+            Button("Cancel", role: .cancel) { projectToDelete = nil }
+        } message: {
+            let name = library.projects.first(where: { $0.id == projectToDelete })?.name ?? "This project"
+            Text("Delete “\(name)” and its groups from the Library. Original photos and edits stay on disk.")
+        }
+        .confirmationDialog("Delete this group?", isPresented: $showingGroupDeleteConfirmation,
+                            titleVisibility: .visible) {
+            Button("Delete Group", role: .destructive) {
+                if let categoryToDelete { library.deleteAlbum(categoryToDelete) }
+                categoryToDelete = nil
+            }
+            Button("Cancel", role: .cancel) { categoryToDelete = nil }
+        } message: {
+            let group = library.albums.first(where: { $0.id == categoryToDelete })
+            Text("Delete “\(group?.name ?? "this group")” and remove its group membership from photos. Original files and edits stay on disk.")
+        }
     }
 
     private var sidebar: some View {
@@ -142,7 +192,8 @@ struct LibraryWorkspaceView: View {
                                 }
                                 Divider()
                                 Button("Delete Project", systemImage: "trash", role: .destructive) {
-                                    library.deleteProject(project.id)
+                                    projectToDelete = project.id
+                                    showingProjectDeleteConfirmation = true
                                 }
                             }
                         }
@@ -194,6 +245,13 @@ struct LibraryWorkspaceView: View {
         .background(Theme.bg)
     }
 
+    private func beginCullAnalysis(in scope: Set<URL>, replacingExisting: Bool) {
+        cullAnalysisTask = Task {
+            await library.analyzeCull(in: scope, replacingExisting: replacingExisting)
+            cullAnalysisTask = nil
+        }
+    }
+
     private func content(visiblePhotos: [LibraryPhoto], topPickURLs: Set<URL>, topPickLabel: String) -> some View {
         let displayedPhotos = displayedPhotos(from: visiblePhotos, topPicks: topPickURLs)
         let workflowState = LibraryWorkflow.visibleState(in: library, displaying: displayedPhotos)
@@ -201,18 +259,24 @@ struct LibraryWorkspaceView: View {
         let selectedURLs = library.gridSelection.selected.union(library.selectedPhotoURL.map { Set([$0]) } ?? [])
         let selectedPhotos = displayedPhotos.filter { selectedURLs.contains($0.file.url) }
         let selectedReady = editablePhotos.filter { selectedURLs.contains($0.file.url) }
+        let selectedOfflineCount = selectedPhotos.count - selectedReady.count
         // An explicit selection containing only offline files must not fall
         // through to editing every available photo in the view.
         let editTargets = selectedURLs.isEmpty ? editablePhotos : selectedReady
         let unqueuedSelectionCount = selectedReady.filter { !$0.selectedForExport }.count
+        let queuedReady = displayedPhotos.filter { $0.selectedForExport && !$0.missing }
+        let queuedOfflineCount = displayedPhotos.filter { $0.selectedForExport && $0.missing }.count
         let offlineCount = displayedPhotos.count - editablePhotos.count
         let projectIsEmpty = workflowState.emptyState?.nextStep == .addPhotos
         let selection = LibrarySelectionActionContext(
             selectedURLs: selectedURLs,
             selectedPhotos: selectedPhotos,
             selectedReady: selectedReady,
+            selectedOfflineCount: selectedOfflineCount,
             editTargets: editTargets,
             unqueuedSelectionCount: unqueuedSelectionCount,
+            queuedReady: queuedReady,
+            queuedOfflineCount: queuedOfflineCount,
             projectIsEmpty: projectIsEmpty,
             editableCount: editablePhotos.count,
             offlineCount: offlineCount
@@ -264,7 +328,7 @@ struct LibraryWorkspaceView: View {
                     guard librarySearchInput != library.searchText else { return }
                     try? await Task.sleep(nanoseconds: 180_000_000)
                     guard !Task.isCancelled else { return }
-                    _ = LibraryWorkflow.perform(.search(librarySearchInput), in: library)
+                    _ = await LibraryWorkflow.perform(.search(librarySearchInput), in: library)
                 }
                 .overlay(alignment: .trailing) {
                     if !librarySearchInput.isEmpty {
@@ -309,10 +373,11 @@ struct LibraryWorkspaceView: View {
                     }
                 }
                 Divider()
-                Button(library.analyzingCull ? "Analyzing…" : library.photos.contains(where: { $0.cull != nil }) ? "Re-analyze with AI" : "Analyze with AI") {
-                    Task { await library.analyzeCull(replacingExisting: library.photos.allSatisfy { $0.cull != nil }) }
+                Button(library.analyzingCull ? "Analyzing…" : library.visiblePhotos.contains(where: { $0.cull != nil }) ? "Re-analyze with AI" : "Analyze with AI") {
+                    let scope = library.visiblePhotos
+                    beginCullAnalysis(in: Set(scope.map { $0.file.url }), replacingExisting: scope.allSatisfy { $0.cull != nil })
                 }
-                .disabled(library.analyzingCull || !library.photos.contains(where: { !$0.missing }))
+                .disabled(library.analyzingCull || !library.visiblePhotos.contains(where: { !$0.missing }))
                 Divider()
                 Button(library.refreshing ? "Refreshing…" : "Refresh Project Sources", systemImage: "arrow.clockwise") {
                     Task { await library.refresh() }
@@ -352,6 +417,67 @@ struct LibraryWorkspaceView: View {
             .padding(.horizontal, StudioStyle.Space.section).padding(.vertical, 7)
             .background(Theme.warn.opacity(0.08))
             Divider()
+        }
+        if library.analyzingCull {
+            HStack(spacing: StudioStyle.Space.standard) {
+                ProgressView(value: Double(library.cullProgress), total: Double(max(library.cullTotal, 1)))
+                    .frame(width: 96)
+                    .accessibilityLabel("Photo analysis progress")
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Analyzing photos with AI · \(library.cullProgress) of \(library.cullTotal)")
+                        .font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.label)
+                    Text("The Library stays available while this runs.")
+                        .font(Theme.ui(10)).foregroundStyle(Theme.dim)
+                }
+                Spacer(minLength: 4)
+                Button("Cancel") { cullAnalysisTask?.cancel() }
+                    .buttonStyle(OutlinedButtonStyle())
+            }
+            .padding(.horizontal, StudioStyle.Space.section).padding(.vertical, StudioStyle.Space.compact)
+            .studioWorkspaceCard()
+            .padding(.horizontal, StudioStyle.Space.section).padding(.bottom, StudioStyle.Space.compact)
+        } else if let summary = library.cullAnalysisSummary {
+            HStack(spacing: StudioStyle.Space.standard) {
+                Image(systemName: summary.failed > 0 ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                    .foregroundStyle(summary.failed > 0 ? Theme.warn : StudioStyle.positive)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    if summary.attempted == 0 {
+                        Text("AI analysis is up to date")
+                            .font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.label)
+                        Text("There were no unprocessed online photos in this Library scope.")
+                            .font(Theme.ui(10)).foregroundStyle(Theme.dim)
+                    } else if summary.cancelled {
+                        Text("Analysis stopped after \(summary.attempted) photos")
+                            .font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.label)
+                        Text("Completed results were saved. You can continue the remaining photos.")
+                            .font(Theme.ui(10)).foregroundStyle(Theme.dim)
+                    } else if summary.failed == summary.attempted {
+                        Text("Couldn’t analyze these photos")
+                            .font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.label)
+                        Text("\(summary.failed) source files could not be decoded. Retry analysis or review them manually.")
+                            .font(Theme.ui(10)).foregroundStyle(Theme.dim)
+                    } else {
+                        Text("Analysis complete · \(summary.attempted - summary.failed) of \(summary.attempted) photos ready")
+                            .font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.label)
+                        if summary.failed > 0 {
+                            Text("\(summary.failed) could not be decoded. Retry analysis or review them manually.")
+                                .font(Theme.ui(10)).foregroundStyle(Theme.dim)
+                        }
+                    }
+                }
+                Spacer(minLength: 4)
+                if summary.cancelled || summary.failed > 0 {
+                    Button(summary.failed > 0 ? "Retry Analysis" : "Continue Analysis") {
+                        let scope = Set(library.visiblePhotos.map { $0.file.url })
+                        beginCullAnalysis(in: scope, replacingExisting: summary.failed > 0)
+                    }
+                    .buttonStyle(StudioActionButtonStyle(kind: .secondary))
+                }
+            }
+            .padding(.horizontal, StudioStyle.Space.section).padding(.vertical, StudioStyle.Space.compact)
+            .studioWorkspaceCard()
+            .padding(.horizontal, StudioStyle.Space.section).padding(.bottom, StudioStyle.Space.compact)
         }
         if let importStatus = workflowState.importStatus {
             HStack(spacing: StudioStyle.Space.standard) {
@@ -449,7 +575,7 @@ struct LibraryWorkspaceView: View {
         Button {
             showingTopPickOptions = true
         } label: {
-            Text(cullFilters.contains(.topPicks) ? "Top Picks · On" : "Top Picks…")
+            Text(cullFilters.contains(.topPicks) ? topPickLabel : "Top Picks…")
         }
         .buttonStyle(OutlinedButtonStyle())
         .popover(isPresented: $showingTopPickOptions, arrowEdge: .bottom) {
@@ -507,7 +633,7 @@ struct LibraryWorkspaceView: View {
         }
     }
 
-    private func librarySelectionToolbar(
+    @ViewBuilder private func librarySelectionToolbar(
         workflowState: LibraryWorkflowVisibleState,
         selection: LibrarySelectionActionContext,
         topPickLabel: String
@@ -515,9 +641,14 @@ struct LibraryWorkspaceView: View {
         HStack(spacing: 8) {
             libraryFilterStrip(workflowState: workflowState, topPickLabel: topPickLabel)
             Spacer(minLength: 4)
-            if selection.offlineCount > 0 {
-                Text("\(selection.editableCount) ready · \(selection.offlineCount) offline")
+            if selection.selectedPhotos.isEmpty ? selection.offlineCount > 0 : true {
+                let readyCount = selection.selectedPhotos.isEmpty ? selection.editableCount : selection.selectedReady.count
+                let offlineCount = selection.selectedPhotos.isEmpty ? selection.offlineCount : selection.selectedOfflineCount
+                Text("\(readyCount) ready · \(offlineCount) offline")
                     .font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+                    .help(selection.selectedPhotos.isEmpty
+                          ? "Counts apply to the current visible Library scope."
+                          : "Counts apply to the selected photos; offline sources are identified separately.")
             }
             if workflowState.selectedCount > 1 {
                 Text("\(workflowState.selectedCount) selected")
@@ -542,16 +673,30 @@ struct LibraryWorkspaceView: View {
                 }
                 .menuStyle(.borderlessButton).fixedSize().controlSize(.small)
                 .help("Pick, reject, or clear flags for all selected photos")
+                Menu {
+                    ForEach(1...5, id: \.self) { rating in
+                        Button("Rate \(rating) Stars") {
+                            library.setRating(rating, for: selection.selectedPhotos.map(\.file.url))
+                        }
+                    }
+                    Button("Clear Ratings") {
+                        library.setRating(0, for: selection.selectedPhotos.map(\.file.url))
+                    }
+                } label: {
+                    Label("Rate \(selection.selectedPhotos.count)", systemImage: "star")
+                }
+                .menuStyle(.borderlessButton).fixedSize().controlSize(.small)
+                .help("Rate all \(selection.selectedPhotos.count) selected photos")
                 if let projectID = library.selectedProjectID {
                     let groups = library.categories(for: projectID)
                     if !groups.isEmpty {
                         Menu {
                             ForEach(groups) { group in
                                 Menu(group.name) {
-                                    Button("Add Selected Photos to Group", systemImage: "plus.circle") {
+                                    Button("Add \(selection.selectedPhotos.count) Selected to Group", systemImage: "plus.circle") {
                                         library.addToBin(selection.selectedPhotos, binID: group.id)
                                     }
-                                    Button("Remove Selected Photos from Group", systemImage: "minus.circle") {
+                                    Button("Remove \(selection.selectedPhotos.count) Selected from Group", systemImage: "minus.circle") {
                                         library.removeFromBin(selection.selectedPhotos, binID: group.id)
                                     }
                                 }
@@ -571,6 +716,9 @@ struct LibraryWorkspaceView: View {
                     Text(selection.selectedURLs.isEmpty ? "Edit All \(selection.editTargets.count)" : "Edit Selected \(selection.editTargets.count)")
                 }
                 .buttonStyle(OutlinedButtonStyle(prominent: true))
+                .help(selection.selectedURLs.isEmpty
+                      ? "Develop all \(selection.editTargets.count) visible photos; skip \(selection.offlineCount) offline sources."
+                      : "Develop \(selection.selectedReady.count) selected online photos; skip \(selection.selectedOfflineCount) offline sources.")
                 if !selection.selectedReady.isEmpty {
                     Button {
                         library.setExportQueued(true, for: selection.selectedReady.map(\.file.url))
@@ -579,8 +727,15 @@ struct LibraryWorkspaceView: View {
                     }
                     .buttonStyle(OutlinedButtonStyle())
                     .disabled(selection.unqueuedSelectionCount == 0)
-                    .help("Add the selected photos to the Export Queue")
+                    .help("Queue \(selection.unqueuedSelectionCount) selected online photos for export. \(selection.selectedOfflineCount) offline selected photos are excluded.")
                 }
+            }
+            if !selection.queuedReady.isEmpty {
+                Button("Export Queue · \(selection.queuedReady.count)") {
+                    model.exportLibraryPhotos(selection.queuedReady.map(\.file.url))
+                }
+                .buttonStyle(OutlinedButtonStyle())
+                .help("Export the \(selection.queuedReady.count) queued online photos in the current Library scope. \(selection.queuedOfflineCount) queued photos are offline and will be skipped.")
             }
             if library.selectedProjectID != nil && !selection.projectIsEmpty {
                 Button("Add Photos…", action: { showingProjectPhotoPicker = true })
@@ -588,10 +743,11 @@ struct LibraryWorkspaceView: View {
                 if let projectID = library.selectedProjectID {
                     if !selection.selectedPhotos.isEmpty {
                         Button("Remove Selected from Project") {
-                            library.remove(selection.selectedPhotos, from: projectID)
+                            pendingProjectRemoval = ProjectRemovalRequest(projectID: projectID, photos: selection.selectedPhotos)
+                            showingProjectRemovalConfirmation = true
                         }
                         .buttonStyle(OutlinedButtonStyle())
-                        .help("Remove only the selected photographs from this project.")
+                        .help("Remove \(selection.selectedPhotos.count) selected photos from project membership. This does not delete source files.")
                     }
                 }
             } else if !selection.selectedReady.isEmpty && !library.projects.isEmpty {
@@ -647,10 +803,10 @@ struct LibraryWorkspaceView: View {
             }
             .focusable()
             .focused($libraryGridFocused)
-            .onKeyPress(.leftArrow) { press in
+            .onKeyPress(keys: [.leftArrow]) { press in
                 moveLibrarySelection(by: -1, extending: press.modifiers.contains(.shift)); return .handled
             }
-            .onKeyPress(.rightArrow) { press in
+            .onKeyPress(keys: [.rightArrow]) { press in
                 moveLibrarySelection(by: 1, extending: press.modifiers.contains(.shift)); return .handled
             }
             .onKeyPress(characters: CharacterSet(charactersIn: "pxuPXU012345")) { press in
@@ -781,8 +937,11 @@ struct LibraryWorkspaceView: View {
                         Text("Run AI Cull for focus, eyes, composition and aesthetic scores on this Mac.")
                             .font(.caption).foregroundStyle(.secondary)
                         Button("Analyze Library") {
-                            Task { await library.analyzeCull() }
-                        }.buttonStyle(OutlinedButtonStyle())
+                            let scope = library.visiblePhotos
+                            beginCullAnalysis(in: Set(scope.map { $0.file.url }), replacingExisting: false)
+                        }
+                        .buttonStyle(OutlinedButtonStyle())
+                        .disabled(library.analyzingCull)
                     }
                     Divider()
                     HStack(spacing: 8) {
@@ -948,7 +1107,8 @@ struct LibraryWorkspaceView: View {
         }
         Divider()
         Button("Delete Group", systemImage: "trash", role: .destructive) {
-            library.deleteAlbum(category.id)
+            categoryToDelete = category.id
+            showingGroupDeleteConfirmation = true
         }
     }
 
