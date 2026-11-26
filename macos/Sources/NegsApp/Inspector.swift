@@ -2115,19 +2115,21 @@ private struct ColorCorrectionWheel: View {
         .frame(width: 168, height: 168)
     }
 
-    @ViewBuilder private func wheelContent(side: CGFloat) -> some View {
+    private func wheelContent(side: CGFloat) -> AnyView {
         let radius = side / 2 - 9
         let radians = hue * .pi / 180
         if rawWhiteBalance {
             let dominant = max(abs(cos(radians)), abs(sin(radians)))
-            RawWhiteBalancePad(model: model, temperature: temperature, tint: tint,
-                               temperatureOffset: dominant > 0 ? cos(radians) / dominant * strength : 0,
-                               tintOffset: dominant > 0 ? sin(radians) / dominant * strength : 0)
-        } else {
-            chromaWheel(side: side, radius: radius,
-                        marker: CGPoint(x: side / 2 + cos(radians) * radius * strength / 100,
-                                        y: side / 2 + sin(radians) * radius * strength / 100))
+            return AnyView(RawWhiteBalancePad(
+                model: model,
+                temperature: temperature,
+                tint: tint,
+                temperatureOffset: dominant > 0 ? cos(radians) / dominant * strength : 0,
+                tintOffset: dominant > 0 ? sin(radians) / dominant * strength : 0))
         }
+        let marker = CGPoint(x: side / 2 + cos(radians) * radius * strength / 100,
+                             y: side / 2 + sin(radians) * radius * strength / 100)
+        return AnyView(chromaWheel(side: side, radius: radius, marker: marker))
     }
 
     private func chromaWheel(side: CGFloat, radius: CGFloat, marker: CGPoint) -> some View {
