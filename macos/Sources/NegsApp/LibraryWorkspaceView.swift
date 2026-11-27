@@ -295,7 +295,6 @@ struct LibraryWorkspaceView: View {
     @ViewBuilder private func libraryHeader(workflowState: LibraryWorkflowVisibleState) -> some View {
         HStack(spacing: StudioStyle.Space.compact) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(workflowState.scopeLabel).font(Theme.metadata(10)).tracking(1.0).foregroundStyle(Theme.dim)
                 HStack(spacing: 7) {
                     Text(workflowState.title).font(Theme.text(18, weight: 600)).foregroundStyle(Theme.paper)
                         .lineLimit(1).truncationMode(.tail)
