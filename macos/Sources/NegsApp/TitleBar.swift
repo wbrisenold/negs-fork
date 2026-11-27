@@ -61,13 +61,11 @@ final class EditorFrameView: NSView {
     }
 }
 
-/// The band behind the traffic lights, with the file name beside them. It
-/// takes no clicks, so the window drags and zooms from it as from any title
-/// bar.
+/// The title band holds the filename and compact workspace/actions controls;
+/// its unused background still lets the window drag and zoom.
 final class TitleBand: NSView {
     let name = NSTextField(labelWithString: "Negs")
-    private let libraryButton = NSButton(title: "Library", target: nil, action: nil)
-    private let developButton = NSButton(title: "Develop", target: nil, action: nil)
+    private let workspaceSwitcher = NSSegmentedControl(labels: ["Library", "Develop"], trackingMode: .selectOne, target: nil, action: nil)
     private let exportButton = NSButton(title: "Export", target: nil, action: nil)
     private let showAdjustmentsButton = NSButton(title: "Adjustments", target: nil, action: nil)
     var onSelectWorkspace: ((EditorWorkspace) -> Void)?
@@ -77,7 +75,7 @@ final class TitleBand: NSView {
         didSet { showAdjustmentsButton.isHidden = !showsStudioControls || !showsAdjustmentReopen; needsLayout = true }
     }
     var showingLibrary = false {
-        didSet { styleWorkspaceButtons() }
+        didSet { synchronizeWorkspaceSelection() }
     }
     var exportEnabled = false {
         didSet { exportButton.isEnabled = exportEnabled }
@@ -94,8 +92,7 @@ final class TitleBand: NSView {
     }
     var showsStudioControls = true {
         didSet {
-            libraryButton.isHidden = !showsStudioControls
-            developButton.isHidden = !showsStudioControls
+            workspaceSwitcher.isHidden = !showsStudioControls
             exportButton.isHidden = !showsStudioControls
             showAdjustmentsButton.isHidden = !showsStudioControls || !showsAdjustmentReopen
             needsLayout = true
@@ -117,12 +114,20 @@ final class TitleBand: NSView {
         // The window's title says it; VoiceOver reads that.
         name.setAccessibilityElement(false)
         addSubview(name)
-        configureToolbarButton(libraryButton, title: "Library", symbol: "square.grid.2x2", help: "Browse and organize photographs")
-        libraryButton.action = #selector(showLibrary)
-        addSubview(libraryButton)
-        configureToolbarButton(developButton, title: "Develop", symbol: "slider.horizontal.3", help: "Develop the selected photograph")
-        developButton.action = #selector(showDevelop)
-        addSubview(developButton)
+        workspaceSwitcher.setImage(NSImage(systemSymbolName: "square.grid.2x2", accessibilityDescription: "Library"), forSegment: 0)
+        workspaceSwitcher.setImage(NSImage(systemSymbolName: "slider.horizontal.3", accessibilityDescription: "Develop"), forSegment: 1)
+        workspaceSwitcher.cell?.imagePosition = .imageLeading
+        workspaceSwitcher.segmentStyle = .capsule
+        workspaceSwitcher.controlSize = .small
+        workspaceSwitcher.contentTintColor = Theme.NS.accent
+        workspaceSwitcher.setWidth(88, forSegment: 0)
+        workspaceSwitcher.setWidth(88, forSegment: 1)
+        workspaceSwitcher.setAccessibilityLabel("Workspace")
+        workspaceSwitcher.setAccessibilityIdentifier("workspace-switcher")
+        workspaceSwitcher.toolTip = "Choose Library or Develop"
+        workspaceSwitcher.target = self
+        workspaceSwitcher.action = #selector(selectWorkspace(_:))
+        addSubview(workspaceSwitcher)
         exportButton.image = NSImage(systemSymbolName: "square.and.arrow.up", accessibilityDescription: "Export")
         exportButton.imagePosition = .imageLeading
         exportButton.target = self
@@ -139,7 +144,7 @@ final class TitleBand: NSView {
         showAdjustmentsButton.setAccessibilityLabel("Show Adjustments")
         showAdjustmentsButton.isHidden = true
         addSubview(showAdjustmentsButton)
-        styleWorkspaceButtons()
+        synchronizeWorkspaceSelection()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -151,12 +156,17 @@ final class TitleBand: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         let hit = super.hitTest(point)
-        return showsStudioControls && (hit === libraryButton || hit === developButton || hit === exportButton
+        return showsStudioControls && (hit === workspaceSwitcher || hit === exportButton
             || (showsAdjustmentReopen && hit === showAdjustmentsButton)) ? hit : nil
     }
 
-    @objc private func showLibrary() { onSelectWorkspace?(.library) }
-    @objc private func showDevelop() { onSelectWorkspace?(.editor) }
+    @objc private func selectWorkspace(_ sender: NSSegmentedControl) {
+        switch sender.selectedSegment {
+        case 0: onSelectWorkspace?(.library)
+        case 1: onSelectWorkspace?(.editor)
+        default: break
+        }
+    }
     @objc private func export(_ sender: NSButton) { onExport?(sender) }
     @objc private func showAdjustments() { onShowAdjustments?() }
     override var mouseDownCanMoveWindow: Bool { true }
@@ -174,11 +184,8 @@ final class TitleBand: NSView {
         button.contentTintColor = selected ? Theme.NS.onAccent : Theme.NS.label
     }
 
-    private func styleWorkspaceButtons() {
-        configureToolbarButton(libraryButton, title: "Library", symbol: "square.grid.2x2",
-                               help: "Browse and organize photographs", selected: showingLibrary)
-        configureToolbarButton(developButton, title: "Develop", symbol: "slider.horizontal.3",
-                               help: "Develop the selected photograph", selected: !showingLibrary)
+    private func synchronizeWorkspaceSelection() {
+        workspaceSwitcher.selectedSegment = showingLibrary ? 0 : 1
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -203,12 +210,9 @@ final class TitleBand: NSView {
             left = convert(zoom.bounds, from: zoom).maxX + Self.gap
             middle = convert(close.bounds, from: close).midY
         }
-        let workspaceButtonWidth: CGFloat = 94
-        let workspaceButtonHeight: CGFloat = 28
-        libraryButton.frame = NSRect(x: left.rounded(), y: (middle - workspaceButtonHeight / 2).rounded(),
-                                     width: workspaceButtonWidth, height: workspaceButtonHeight)
-        developButton.frame = NSRect(x: libraryButton.frame.maxX + 6, y: libraryButton.frame.minY,
-                                     width: workspaceButtonWidth, height: workspaceButtonHeight)
+        let switcherSize = workspaceSwitcher.fittingSize
+        workspaceSwitcher.frame = NSRect(x: left.rounded(), y: (middle - switcherSize.height / 2).rounded(),
+                                         width: switcherSize.width, height: switcherSize.height)
         let exportSize = exportButton.fittingSize
         exportButton.frame = NSRect(x: bounds.width - exportSize.width - Theme.Size.gutter,
                                     y: (bounds.midY - exportSize.height / 2).rounded(),
@@ -217,7 +221,7 @@ final class TitleBand: NSView {
         showAdjustmentsButton.frame = NSRect(x: exportButton.frame.minX - adjustmentsSize.width - 8,
                                              y: (bounds.midY - adjustmentsSize.height / 2).rounded(),
                                              width: adjustmentsSize.width, height: adjustmentsSize.height)
-        let titleLeft = showsStudioControls ? developButton.frame.maxX + 14 : left
+        let titleLeft = showsStudioControls ? workspaceSwitcher.frame.maxX + 14 : left
         let nameMaxX = showsStudioControls
             ? (showsAdjustmentReopen ? showAdjustmentsButton.frame.minX : exportButton.frame.minX) - 16
             : bounds.width - Theme.Size.gutter

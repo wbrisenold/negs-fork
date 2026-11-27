@@ -456,6 +456,7 @@ final class EdgeSplitView: NSSplitView {
         libraryWorkspaceShown = show
         if libraryWorkspace == nil {
             let host = NSHostingView(rootView: LibraryWorkspaceView(model: model))
+            host.identifier = NSUserInterfaceItemIdentifier("library-workspace")
             host.sizingOptions = []
             host.safeAreaRegions = []
             host.frame = root.bounds

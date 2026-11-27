@@ -20,6 +20,74 @@ import XCTest
         return (controller, window)
     }
 
+    private func workspaceSwitcher(in view: NSView) -> NSSegmentedControl? {
+        if let switcher = view as? NSSegmentedControl { return switcher }
+        for child in view.subviews {
+            if let switcher = workspaceSwitcher(in: child) { return switcher }
+        }
+        return nil
+    }
+
+    private func view(identifier: NSUserInterfaceItemIdentifier, in view: NSView) -> NSView? {
+        if view.identifier == identifier { return view }
+        for child in view.subviews {
+            if let match = self.view(identifier: identifier, in: child) { return match }
+        }
+        return nil
+    }
+
+    private func click(segment: Int, in control: NSSegmentedControl, window: NSWindow) throws {
+        let segmentRect = control.rect(forSegment: segment)
+        let point = control.convert(NSPoint(x: segmentRect.midX, y: segmentRect.midY), to: nil)
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            let event = try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+            NSApp.sendEvent(event)
+        }
+    }
+
+    func testTitleBarWorkspaceSwitcherChangesTheVisibleWorkspace() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("negs-workspace-switcher-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let photo = directory.appendingPathComponent("photo.png")
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 2, pixelsHigh: 2,
+            bitsPerSample: 8, samplesPerPixel: 3, hasAlpha: false, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 6, bitsPerPixel: 24))
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: photo)
+
+        let model = EditorModel(sidecars: SidecarStore())
+        defer { model.shutdown() }
+        model.open(photo)
+        XCTAssertNotNil(model.source)
+        let (controller, window) = try window(model)
+        window.setContentSize(NSSize(width: 1200, height: 800))
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+
+        let switcher = try XCTUnwrap(workspaceSwitcher(in: controller.editorFrame.band),
+                                    "the title bar exposes one native workspace switcher")
+        XCTAssertEqual(switcher.segmentCount, 2)
+        XCTAssertEqual(switcher.label(forSegment: 0), "Library")
+        XCTAssertEqual(switcher.label(forSegment: 1), "Develop")
+        XCTAssertEqual(switcher.selectedSegment, 1)
+
+        try click(segment: 0, in: switcher, window: window)
+        XCTAssertEqual(model.workspace, .library)
+        await Task.yield()
+        XCTAssertEqual(switcher.selectedSegment, 0)
+        let libraryHost = view(identifier: NSUserInterfaceItemIdentifier("library-workspace"), in: controller.editorFrame.view)
+        XCTAssertNotNil(libraryHost)
+        XCTAssertFalse(libraryHost?.isHidden ?? true)
+
+        try click(segment: 1, in: switcher, window: window)
+        XCTAssertEqual(model.workspace, .editor)
+        await Task.yield()
+        XCTAssertEqual(switcher.selectedSegment, 1)
+        XCTAssertTrue(libraryHost?.isHidden ?? false)
+    }
+
     func testNoToolbarAndTheNameBesideTheTrafficLights() throws {
         let model = EditorModel(sidecars: SidecarStore())
         defer { model.shutdown() }
