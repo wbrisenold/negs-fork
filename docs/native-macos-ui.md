@@ -28,6 +28,19 @@ Use platform controls and semantic colors, without custom-drawing imitations
 of macOS chrome. The image is the primary content; adjustments live in the
 trailing inspector. The app uses one editing window and a recent-files menu.
 
+## Product UI review
+
+- For an app-wide consistency request, inventory each top-level workspace and
+  its main workflow, then record the visible issues by screen before editing.
+  Keep all accepted screens in scope through implementation and visual review.
+- For a screenshot-based report, identify the pointer target and active screen
+  before diagnosing the complaint. Start with the pointed-at control.
+- Keep a visible label only when it adds distinct location, action, scope, or
+  result information. A breadcrumb must clarify a location and provide working
+  navigation; remove it when the same context is already visible elsewhere.
+- Keep each primary action's target and effect clear from its label and nearby
+  state. Selection-dependent actions should state which photos they will affect.
+
 ## Implementation
 
 All five steps are implemented. macOS packaging now launches the Swift app;

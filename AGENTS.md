@@ -3,6 +3,7 @@
 ## Targets and repository boundaries
 
 - The current Negs source of truth is branch `studio-port-upstream-sync`; build the Intel macOS app from a clean commit on that branch after it is pushed to `origin`.
+- The codebase-memory graph indexes this checkout as `negs-source-truth`; use that project alias with graph tools rather than the filesystem path.
 - The active workstation target is Intel macOS (`x86_64-apple-darwin`). Keep Intel build, preview, and packaging paths working when changing native code.
 - Keep the `upstream` remote pointed at `noahhaasis/negs`. Develop and push this fork's work on a branch; never push this fork's feature work to upstream `main`.
 - Core image processing belongs in the Rust crates. SwiftUI owns macOS presentation and interaction. Preserve the CLI, web, and non-macOS builds unless a task explicitly narrows scope.
@@ -33,6 +34,7 @@
 ## Build and package
 
 - Read [`docs/macos-app-build.md`](docs/macos-app-build.md) before building or opening Negs. It defines the only supported source branch, build commands, canonical app path, promotion checks, and GitHub artifact gate.
+- For app-wide UI consistency requests or screenshot-based UI bugs, follow the screen audit and label review in [`docs/native-macos-ui.md`](docs/native-macos-ui.md) before making broad changes.
 - For user-visible UI work, follow the fresh-app visual acceptance steps in [`docs/macos-app-build.md`](docs/macos-app-build.md); source changes and a successful build alone do not establish that the requested change is visible or usable.
 - Run `rtk scripts/run_cached_debug_app.sh` for iterative Intel UI work. It builds, verifies, promotes, and opens only `dist/negs-macos/Negs.app`.
 - Use `MACOS_ARCHS=x86_64 rtk bash scripts/package_macos_app.sh` for the optimized Intel release package. Local package builds retain caches by default; set `CLEAN_BUILD_CACHE=1` only when intentionally reclaiming build-cache space. The package gate verifies feature strings, source revision, Intel architecture, signature, and the single canonical app bundle.
