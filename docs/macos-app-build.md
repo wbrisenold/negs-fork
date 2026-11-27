@@ -3,7 +3,7 @@
 ## One source and one app
 
 - `studio-port-upstream-sync` is the source of truth for the Negs macOS app. Make the source change, commit it, and push it to `origin/studio-port-upstream-sync` before building. The local debug runner refuses another branch, a dirty tree, or a commit that is not the pushed branch head.
-- The only app users should open is `dist/negs-macos/Negs.app`. `target/macos-app` contains compiler caches and temporary promotion staging only. Do not launch an app from `/tmp`, a ticket worktree, or a variant directory under `dist`.
+- The only app users should open is `dist/negs-macos/Negs.app`. `target/macos-app` contains compiler caches and temporary promotion staging only. The debug runner promotes a debug-build executable into that same canonical bundle: “debug” is the build mode, not a second app path. Never manually launch a bundle from `target/` or from a sibling checkout.
 - App bundles and screenshots are generated output and stay out of Git. The commit is the durable source record; the push triggers the Intel packaging workflow, which uploads a SHA-named GitHub Actions artifact.
 
 ## Local builds
