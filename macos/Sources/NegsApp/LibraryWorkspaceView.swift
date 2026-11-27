@@ -621,21 +621,23 @@ struct LibraryWorkspaceView: View {
         let review = libraryReviewCard(workflowState: workflowState, topPickLabel: topPickLabel)
         let selectionStep = librarySelectionCard(workflowState: workflowState, selection: selection)
         let handoff = libraryHandoffCard(selection: selection)
-        return ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: StudioStyle.Space.standard) {
-                review.frame(minWidth: 300, maxWidth: .infinity)
-                selectionStep.frame(minWidth: 230, maxWidth: .infinity)
-                handoff.frame(minWidth: 270, maxWidth: .infinity)
+        return VStack(spacing: 0) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: StudioStyle.Space.standard) {
+                    review.frame(minWidth: 300, maxWidth: .infinity)
+                    selectionStep.frame(minWidth: 230, maxWidth: .infinity)
+                    handoff.frame(minWidth: 270, maxWidth: .infinity)
+                }
+                VStack(spacing: StudioStyle.Space.standard) {
+                    review
+                    selectionStep
+                    handoff
+                }
             }
-            VStack(spacing: StudioStyle.Space.standard) {
-                review
-                selectionStep
-                handoff
-            }
+            .padding(.horizontal, StudioStyle.Space.section)
+            .padding(.vertical, StudioStyle.Space.standard)
+            Divider()
         }
-        .padding(.horizontal, StudioStyle.Space.section)
-        .padding(.vertical, StudioStyle.Space.standard)
-        Divider()
     }
 
     private func libraryReviewCard(

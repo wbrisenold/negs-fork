@@ -19,10 +19,19 @@ The runner checks the pushed source revision, reuses `target/macos-app` SwiftPM 
 For the optimized Intel package and its ZIP/DMG:
 
 ```sh
-MACOS_ARCHS=x86_64 CLEAN_BUILD_CACHE=0 rtk bash scripts/package_macos_app.sh
+MACOS_ARCHS=x86_64 rtk bash scripts/package_macos_app.sh
 ```
 
-The package script assembles and verifies the new bundle under `target/macos-app` before promoting it to the canonical path. It rejects alternate `DIST_DIR` and `APP_NAME` values. After a successful promotion it removes stale `Negs.app` variants under `dist/negs-*`; the verifier fails if any extra app bundle remains under `dist`.
+The package script assembles and verifies the new bundle under `target/macos-app` before promoting it to the canonical path. It rejects alternate `DIST_DIR` and `APP_NAME` values. Local builds retain compiler caches by default; only set `CLEAN_BUILD_CACHE=1` when intentionally reclaiming storage. After a successful promotion it removes stale `Negs.app` variants under `dist/negs-*`; the verifier fails if any extra app bundle remains under `dist`.
+
+Run local Intel Swift tests with the same scratch path as the app runner, so tests reuse the app-module cache:
+
+```sh
+swift test --package-path macos \
+  --scratch-path target/macos-app/swift-x86_64-apple-macosx14.0 \
+  -c debug --triple x86_64-apple-macosx14.0 \
+  --filter PhotoLibraryWorkflowTests
+```
 
 ## UI acceptance
 

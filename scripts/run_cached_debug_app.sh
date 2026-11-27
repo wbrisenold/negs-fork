@@ -34,7 +34,7 @@ fi
 arch="x86_64"
 triple="x86_64-apple-macosx14.0"
 scratch="$repo_root/target/macos-app/swift-$triple"
-build_bin="$(swift build --package-path macos --scratch-path "$scratch" -c debug --triple "$triple" --show-bin-path)/NegsApp"
+build_bin="$scratch/x86_64-apple-macosx/debug/NegsApp"
 canonical_app="$repo_root/dist/negs-macos/Negs.app"
 dist_root="$repo_root/dist"
 running_app="$canonical_app"

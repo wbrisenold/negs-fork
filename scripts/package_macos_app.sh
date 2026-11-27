@@ -11,7 +11,9 @@ CANONICAL_APP_BUNDLE=""
 PYTHON="${PYTHON:-python3}"
 RELEASE_DIR="${RELEASE_DIR:-dist/releases}"
 MACOS_ARCHS="${MACOS_ARCHS:-x86_64}"
-CLEAN_BUILD_CACHE="${CLEAN_BUILD_CACHE:-1}"
+# Keep local compiler caches between builds. Disposable CI explicitly opts in
+# to cleanup; developers must request it when reclaiming disk space.
+CLEAN_BUILD_CACHE="${CLEAN_BUILD_CACHE:-0}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
