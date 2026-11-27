@@ -8,6 +8,7 @@
 - Core image processing belongs in the Rust crates. SwiftUI owns macOS presentation and interaction. Preserve the CLI, web, and non-macOS builds unless a task explicitly narrows scope.
 - Keep generated output (`target/`, `.build/`, `/dist/`), personal image assets, and locally licensed LUTs out of Git. Do not add user photos or local app bundles to commits.
 - The Referent LogC3 LUT is third-party material. Local packaging may bundle the copy installed by the developer, but source archives and public GitHub releases must not redistribute it without permission. The app can use a bundled local copy or the user's Resolve-installed/custom LUT.
+- When creating, updating, or reporting GitHub issues, follow [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md) so completion reflects merged PRs and their target branch.
 
 ## Preview performance contract
 
@@ -29,6 +30,7 @@
 ## Build and package
 
 - Read [`docs/macos-app-build.md`](docs/macos-app-build.md) before building or opening Negs. It defines the only supported source branch, build commands, canonical app path, promotion checks, and GitHub artifact gate.
+- For user-visible UI work, follow the fresh-app visual acceptance steps in [`docs/macos-app-build.md`](docs/macos-app-build.md); source changes and a successful build alone do not establish that the requested change is visible or usable.
 - Run `rtk scripts/run_cached_debug_app.sh` for iterative Intel UI work. It builds, verifies, promotes, and opens only `dist/negs-macos/Negs.app`.
 - Use `MACOS_ARCHS=x86_64 CLEAN_BUILD_CACHE=0 rtk bash scripts/package_macos_app.sh` for the optimized Intel release package. The package gate verifies feature strings, source revision, Intel architecture, signature, and the single canonical app bundle.
 - Serialize local builds: run only one Cargo, SwiftPM, or packaging build at a time. Do not start a second build while one is running, including from another terminal or agent.

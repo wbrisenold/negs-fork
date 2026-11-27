@@ -24,6 +24,17 @@ MACOS_ARCHS=x86_64 CLEAN_BUILD_CACHE=0 rtk bash scripts/package_macos_app.sh
 
 The package script assembles and verifies the new bundle under `target/macos-app` before promoting it to the canonical path. It rejects alternate `DIST_DIR` and `APP_NAME` values. After a successful promotion it removes stale `Negs.app` variants under `dist/negs-*`; the verifier fails if any extra app bundle remains under `dist`.
 
+## UI acceptance
+
+For every user-visible UI change:
+
+1. Commit and push the intended source on `studio-port-upstream-sync`, then run `rtk scripts/run_cached_debug_app.sh` from the source-of-truth checkout.
+2. Confirm the runner reports the expected source SHA, `x86_64`, and the canonical `dist/negs-macos/Negs.app` process path.
+3. Open the affected screen in that launched app. Capture a fresh screenshot under `target/macos-app/` and compare it with the accepted design/spec using the same view and representative content.
+4. Name the visible differences and exercise each changed control or workflow. If the screenshot or interaction check is unavailable, report that part as unverified; a compile, merged PR, or process launch is not visual acceptance.
+
+Keep screenshots in `target/`; they are verification artifacts, not source or release files.
+
 ## Regression gate and retained build
 
 `.github/workflows/source-of-truth-macos.yml` runs on every push to `studio-port-upstream-sync` on a native Intel macOS runner. It runs the RAW meter and preview-scale regression tests, the Swift preview-quality test, and the Intel package verification. It uploads the ZIP, DMG, build manifest, and package report under `negs-macos-intel-<commit-sha>` for 90 days. The app manifest records the exact source SHA, source branch, build mode, and `x86_64` architecture. The package gate checks the Intel executable and all four feature markers: `Saturation overlay`, `Skin tone overlay`, `Depth map preview`, and `Create Depth Mask`.
