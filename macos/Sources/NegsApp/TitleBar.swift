@@ -116,12 +116,13 @@ final class TitleBand: NSView {
         addSubview(name)
         workspaceSwitcher.setImage(NSImage(systemSymbolName: "square.grid.2x2", accessibilityDescription: "Library"), forSegment: 0)
         workspaceSwitcher.setImage(NSImage(systemSymbolName: "slider.horizontal.3", accessibilityDescription: "Develop"), forSegment: 1)
-        workspaceSwitcher.cell?.imagePosition = .imageLeading
         workspaceSwitcher.segmentStyle = .capsule
         workspaceSwitcher.controlSize = .small
-        workspaceSwitcher.contentTintColor = Theme.NS.accent
+        workspaceSwitcher.selectedSegmentBezelColor = Theme.NS.accent
         workspaceSwitcher.setWidth(88, forSegment: 0)
         workspaceSwitcher.setWidth(88, forSegment: 1)
+        workspaceSwitcher.setToolTip("Browse and organize photographs", forSegment: 0)
+        workspaceSwitcher.setToolTip("Develop the selected photograph", forSegment: 1)
         workspaceSwitcher.setAccessibilityLabel("Workspace")
         workspaceSwitcher.setAccessibilityIdentifier("workspace-switcher")
         workspaceSwitcher.toolTip = "Choose Library or Develop"
