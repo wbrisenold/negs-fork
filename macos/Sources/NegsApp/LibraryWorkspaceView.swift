@@ -555,7 +555,7 @@ struct LibraryWorkspaceView: View {
         Button {
             showingTopPickOptions = true
         } label: {
-            Text(cullFilters.contains(.topPicks) ? topPickLabel : "Top Picks…")
+            Text("Top Picks…")
         }
         .buttonStyle(StudioActionButtonStyle(kind: .secondary))
         .popover(isPresented: $showingTopPickOptions, arrowEdge: .bottom) {
@@ -624,8 +624,8 @@ struct LibraryWorkspaceView: View {
         return VStack(spacing: 0) {
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: StudioStyle.Space.standard) {
-                    review.frame(minWidth: 300, maxWidth: .infinity)
-                    selectionStep.frame(minWidth: 230, maxWidth: .infinity)
+                    review.frame(minWidth: 320, maxWidth: .infinity)
+                    selectionStep.frame(minWidth: 330, maxWidth: .infinity)
                     handoff.frame(minWidth: 270, maxWidth: .infinity)
                 }
                 VStack(spacing: StudioStyle.Space.standard) {
@@ -649,6 +649,17 @@ struct LibraryWorkspaceView: View {
         let hasAnalysis = scope.contains { $0.cull != nil }
         return VStack(alignment: .leading, spacing: StudioStyle.Space.standard) {
             libraryStepHeading("01", title: "REVIEW", detail: "Filter and rank this scope")
+            Button {
+                beginCullAnalysis(in: Set(scope.map(\.file.url)), replacingExisting: scope.allSatisfy { $0.cull != nil })
+            } label: {
+                Label(library.analyzingCull ? "Analyzing…" : hasAnalysis ? "Re-analyze with AI" : "Analyze with AI",
+                      systemImage: library.analyzingCull ? "hourglass" : "sparkles")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(StudioActionButtonStyle(kind: .secondary))
+            .disabled(library.analyzingCull || !hasOnlinePhotos)
+            .help("Analyze online photos in the current project scope. AI scores and Top Picks ranking rules are unchanged.")
+            .accessibilityLabel(library.analyzingCull ? "Photo analysis running" : hasAnalysis ? "Re-analyze photos with AI" : "Analyze photos with AI")
             Menu {
                 ForEach(LibrarySort.allCases) { sort in
                     Button {
@@ -664,17 +675,6 @@ struct LibraryWorkspaceView: View {
             .buttonStyle(StudioActionButtonStyle(kind: .secondary))
             .help("Sort photos in the current scope")
             libraryFilterStrip(workflowState: workflowState, topPickLabel: topPickLabel)
-            Button {
-                beginCullAnalysis(in: Set(scope.map(\.file.url)), replacingExisting: scope.allSatisfy { $0.cull != nil })
-            } label: {
-                Label(library.analyzingCull ? "Analyzing…" : hasAnalysis ? "Re-analyze with AI" : "Analyze with AI",
-                      systemImage: library.analyzingCull ? "hourglass" : "sparkles")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(StudioActionButtonStyle(kind: .secondary))
-            .disabled(library.analyzingCull || !hasOnlinePhotos)
-            .help("Analyze online photos in the current project scope. AI scores and Top Picks ranking rules are unchanged.")
-            .accessibilityLabel(library.analyzingCull ? "Photo analysis running" : hasAnalysis ? "Re-analyze photos with AI" : "Analyze photos with AI")
         }
         .padding(StudioStyle.Space.section)
         .frame(maxWidth: .infinity, alignment: .topLeading)
