@@ -10,7 +10,7 @@ import AppKit
     let band = TitleBand()
 
     init(split: NSSplitViewController, size: NSSize,
-         onSelectWorkspace: @escaping (EditorWorkspace) -> Void, onExport: @escaping (NSView) -> Void,
+         onSelectWorkspace: @escaping (EditorWorkspace) -> Bool, onExport: @escaping (NSView) -> Void,
          onShowAdjustments: @escaping () -> Void) {
         self.split = split
         super.init(nibName: nil, bundle: nil)
@@ -68,7 +68,7 @@ final class TitleBand: NSView {
     private let workspaceSwitcher = NSSegmentedControl(labels: ["Library", "Develop"], trackingMode: .selectOne, target: nil, action: nil)
     private let exportButton = NSButton(title: "Export", target: nil, action: nil)
     private let showAdjustmentsButton = NSButton(title: "Adjustments", target: nil, action: nil)
-    var onSelectWorkspace: ((EditorWorkspace) -> Void)?
+    var onSelectWorkspace: ((EditorWorkspace) -> Bool)?
     var onExport: ((NSView) -> Void)?
     var onShowAdjustments: (() -> Void)?
     var showsAdjustmentReopen = false {
@@ -162,11 +162,15 @@ final class TitleBand: NSView {
     }
 
     @objc private func selectWorkspace(_ sender: NSSegmentedControl) {
+        let requested: EditorWorkspace
         switch sender.selectedSegment {
-        case 0: onSelectWorkspace?(.library)
-        case 1: onSelectWorkspace?(.editor)
-        default: break
+        case 0: requested = .library
+        case 1: requested = .editor
+        default: return
         }
+        let previousSelection = showingLibrary ? 0 : 1
+        let transitionSucceeded = onSelectWorkspace?(requested) ?? false
+        sender.selectedSegment = transitionSucceeded ? (requested == .library ? 0 : 1) : previousSelection
     }
     @objc private func export(_ sender: NSButton) { onExport?(sender) }
     @objc private func showAdjustments() { onShowAdjustments?() }

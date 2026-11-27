@@ -140,9 +140,10 @@ final class EdgeSplitView: NSSplitView {
         Self.fitMinimum(of: window, width: inspector.isCollapsed ? canvasMinimum : columnsMinimum)
         editorFrame = EditorFrame(split: split, size: window.contentRect(forFrameRect: window.frame).size,
                                   onSelectWorkspace: { [weak model] workspace in
-            guard let model else { return }
+            guard let model else { return false }
             if workspace == .library { model.showLibrary() }
             else { Self.editFromCurrentWorkspace(model) }
+            return model.workspace == workspace
         }, onExport: { [weak model] anchor in
             guard let model else { return }
             if model.batch != nil {

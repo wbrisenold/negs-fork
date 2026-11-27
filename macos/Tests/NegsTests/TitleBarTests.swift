@@ -88,6 +88,26 @@ import XCTest
         XCTAssertTrue(libraryHost?.isHidden ?? false)
     }
 
+    func testDevelopDoesNotSelectWhenNoPhotoOrEditCanBeOpened() throws {
+        let model = EditorModel(sidecars: SidecarStore())
+        defer { model.shutdown() }
+        model.workspace = .library
+        let (controller, window) = try window(model)
+        window.setContentSize(NSSize(width: 1200, height: 800))
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+
+        let switcher = try XCTUnwrap(workspaceSwitcher(in: controller.editorFrame.band))
+        let libraryHost = view(identifier: NSUserInterfaceItemIdentifier("library-workspace"), in: controller.editorFrame.view)
+        XCTAssertTrue(libraryHost?.isHidden == false)
+
+        try click(segment: 1, in: switcher, window: window)
+
+        XCTAssertEqual(model.workspace, .library)
+        XCTAssertEqual(switcher.selectedSegment, 0, "the active segment reflects the workspace that actually opened")
+        XCTAssertFalse(libraryHost?.isHidden ?? true)
+    }
+
     func testNoToolbarAndTheNameBesideTheTrafficLights() throws {
         let model = EditorModel(sidecars: SidecarStore())
         defer { model.shutdown() }
