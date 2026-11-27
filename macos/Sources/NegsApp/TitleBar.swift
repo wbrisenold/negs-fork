@@ -142,7 +142,6 @@ final class TitleBand: NSView {
         showAdjustmentsButton.setAccessibilityLabel("Show Adjustments")
         showAdjustmentsButton.isHidden = true
         addSubview(showAdjustmentsButton)
-        styleWorkspaceButtons()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }

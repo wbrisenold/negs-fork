@@ -1,3 +1,5 @@
+> **Superseded (2026-11-25):** The Odin shared-core experiment was cleanly reverted in favour of the pure-Rust shared core + cross-platform GPUI app. See [gpui-app-plan.md](gpui-app-plan.md) and [gpui-app-progress.md](gpui-app-progress.md).
+
 # Shared Odin App Core: Progress Log
 
 Newest first. One entry per phase and per merge: what landed (SHA), differential test results, leak/sanitizer status, compile-time and performance measurements, ABI decisions, and anything carried over.
@@ -11,8 +13,8 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
 | 0 | Foundation & Baselines | done (Mac) | Odin `dev-2026-11a` pinned; `core/` + `negs_core.h` + leak-checked tests; Swift `CNegsCore` links; baselines below |
 | 1 | Pilot: `marks` + `theme` | done (Mac + Windows) | Bit for bit with `windows/marks`; macOS and Windows draw marks and themes from the core |
 | 2 | Pilot Go/No-Go: `library` | done (Mac + Windows); **Go** from Noah 2026-11-22 | Fixtures byte for byte, suites + lockstep at 50 seeds on Mac and Windows; Windows app on the core; Mac↔Windows round trip identical; screenshots identical; startup within noise |
-| 3 | Pure Domain Rules & Media Helpers | in progress (3 slices in parallel) | 3a sheet (`sheet_rules`/`tray_rules`/`compare` + `model/compare`'s rules), 3b picture (`crop`/`border`/`exact_fit`/`thumb_compose`/`histogram`/`negative`), 3c media (`embedded_preview`/`photo_facts`/`tone_graph`/`help`) |
-| 4 | State, Presets & Data-Driven Inspector | not started | Includes Inspector ViewModel schema |
+| 3 | Pure Domain Rules & Media Helpers | done (Mac + Windows); **Go** for Phase 4 from Noah 2026-11-22 | 3a sheet (`sheet_rules`/`tray_rules`/`compare` + `model/compare`'s rules), 3b picture (`crop`/`border`/`exact_fit`/`thumb_compose`/`histogram`/`negative`), 3c media (`embedded_preview`/`photo_facts`/`tone_graph`/`help`); every differential test 0 diffs and 0 leaks on Mac and PC, ASan clean; Windows app on the core; screenshots identical; startup within noise |
+| 4 | State, Presets & Data-Driven Inspector | in progress | Merged: groundwork `4cf7119`, Rust Inspector ViewModel `885e8fb`, 4b presets + session `2640ad3`, 4c batch + caches `4fabcd57`, 4f shared file layer `f95bfa7b`, 4a state rules + edits + facts `daac1331`; PC tests pass up to 4f (`4e7456da`), inspector screenshots identical; next 4d ViewModel in Odin, then the Phase 4 PC gate |
 | 5 | `EditorModel` & `EngineClient` | not started | Frame pipeline + delete ~28k LOC non-UI Rust from `windows/src/` |
 | 6 | Linux & macOS Adoption | not started | 6a `linux/`, 6b `macos/` |
 | 7 | Performance, Memory & Compile-Time Evaluation + Optimization | not started | Odin vs. Rust comparison report + optimization pass |
@@ -35,13 +37,553 @@ See [the plan](shared-core-plan.md) and [the coordinator handoff](shared-core-co
 | Windows startup: `inspector_shown` (median) | 192.5 ms (same runs); with the core 188.3 ms | — | — |
 | Library: 500-photo folder open + sidecar parse/write + look hash | open + parse + summaries + looks 28.6 ms (175,861 allocs, 28.4 MiB); rate 500 + undo (1,000 writes) 216 ms (330,562 allocs); filter + sort 5×500 0.38 ms | — | — |
 | Marks: 1,000 names × (5 stars + cross + grid box) | 23.6 ms (203,585 allocs, 163.9 MiB) | — | — |
-| `exact_fit` Lanczos downscale (6k×4k → fit) | 6000×4000 → 1500×1000: 50.7 ms | — | — |
-| `embedded_preview` TIFF IFD scan (61 RAWs) | `~/Downloads/free_raws` (95 files, 58 with TIFF previews), find + read largest, warm: 11.8 ms | — | — |
-| `sheet_rules` packed-row layout (1,000 items) | `SheetLayout::new` ×100: 0.47 ms | — | — |
+| `exact_fit` Lanczos downscale (6k×4k → fit) | 6000×4000 → 1500×1000: 50.7 ms | 47.1 ms (Rust 56.0 ms same run; Phase 3b, indicative, shared machine) | — |
+| `embedded_preview` TIFF IFD scan (61 RAWs) | `~/Downloads/free_raws` (95 files, 58 with TIFF previews), find + read largest, warm: 11.8 ms | 11.8–11.9 ms (Rust 11.6–11.8 ms same run; Phase 3c) | — |
+| `sheet_rules` packed-row layout (1,000 items) | `SheetLayout::new` ×100: 0.47 ms | 0.40–0.42 ms (Rust 0.45–0.46 ms same run; Phase 3a) | — |
 | Peak RSS (500-photo folder + grid workload) | library bench 6.4 MiB; marks 2.8 MiB; exact_fit 168.7 MiB (its 96 MB input); embedded 17.4 MiB | — | — |
 | Heap leaks (`Tracking_Allocator`) | n/a | 0 | 0 |
 
 ## Log
+
+### 2026-11-24: Phase 4a merged (`core-p4a-state` `daac1331`): state rules, edits and the inspector's facts on the core
+
+**Checks.** On the merged tree, the full Mac gate passed:
+- `build.py test` and `test --asan`;
+- `diff` (225 s) and `diff --asan` (881 s), every suite 0 differences;
+- the wrapper crate with `--features track` (116);
+- the inspector check (55);
+- the Windows cross-check, with and without `--tests`;
+- the any-OS crates.
+- `build.py lib` takes 2.0–2.2 s.
+
+The PC gate for 4a comes with the Phase 4 gate.
+
+**Merge.**
+- **Base:** 4a merged `core-p4-gate`, i.e. main with 4b, 4c, 4f, release 0.19 and the oracle fix.
+- **The Eterna-CP hint (`73df908a`):** another session changed `windows/src/state.rs` here. 4a ported the change to the core and the wrapper. The frozen `oracle/state.rs` was set to exactly that version, and the oracle crate now says which commit each frozen file is from.
+- **`core/diff`:** keeps every bench workload (settings, caches, edits). Its tests reach the real `windows` crate through the same `windows-crate` key as the state oracle.
+- **Dates:** 4a's commits made Tue 24 Nov 10:14–13:08 were re-dated to 01:30–01:43, with trees and topology unchanged. The merge is dated 01:44.
+
+**In Odin** (`core/src/state` plus the packages `state_facts` and `edits`):
+- the rest of `state.rs`:
+  - stocks and colour filters, the filter link, Fotufilm films;
+  - grain lanes, colour-only paths, B&W titles;
+  - option titles, with Rust's upper-case tables;
+  - `snap`, `decimals` and `format_value` (Rust's `{:.N}` exactly);
+  - film formats and ratio names, the adjustment tables;
+  - choosing a stock and pairing a film, as a plan;
+  - the film and paper groups, and the film search;
+- all of `edits.rs`: counts, lists, shows, "N more";
+- `facts.rs`'s readers.
+
+**Stays Rust:**
+- `resolve_size` (engine);
+- the serde types;
+- `set_in_place`, which applies a choice plan with `json::set`'s semantics;
+- the `const` tables, which Windows matches on as statics; they are checked against the core;
+- `section_key`'s `format!` and `Format::display`;
+- the Win32 text folding: `FindNLSStringEx`, registered through `negs_text_set_contains`.
+
+**Facts, two ways:**
+- **Host mode:** Windows keeps `inspector_view/facts.rs` and answers the core through a `negs_facts_host_t` vtable.
+- **Native mode, for 4d:**
+  - a `negs_catalog_t` handle, set once per catalog;
+  - a parsed `negs_state_t`;
+  - a plain `negs_facts_input_t` given to `negs_facts_update`, which takes 0.05 µs borrowed or 0.14 µs copied, with no allocations.
+  - Readers return static or borrowed strings with stated lifetimes. JSON never crosses per item.
+- **NaN:** `rendered()` and `match_inputs()` fall back to Rust for a state holding a NaN instead of panicking.
+
+**Differential tests** (SplitMix, 10,000 cases each; floats compared bit for bit; 0 core leaks):
+
+| Test | Comparisons | Differences | Mutation check |
+|---|---:|---:|---|
+| `state_rules` (34 functions on the real catalog plus random and altered profiles, the search through the ICU stand-in, `option_title` over every scalar) | 1.39 M | 0 | Fotufilm positives grouped as negatives: 10,810 differences |
+| `state_edits` (35 functions in host and native mode; one handle updated case after case; a coverage guard fails on unreached branches) | 4.17 M | 0 | `>=` instead of `>` at `is_modified`'s tolerance: 16 differences |
+| `windows_inspector` (the live `windows/src` state, edits and inspector_view tests through the wrappers) | 47 tests | | |
+
+**Bench** (one sync: the 3 tabs' counts plus `edits(Lab)`, Portra 400, ten controls changed, a solved match):
+
+| | µs per sync |
+|---|---:|
+| Frozen Rust | 41.9 |
+| Core, host mode (Windows today) | 49.4 |
+| Core, native mode (4d) | 54.5 |
+| Parsing the 9.6 KB state, for scale | 59 |
+
+Native mode spends its time on about 400 dotted-path lookups per sync.
+
+**Risks for the PC gate:**
+- The film search with the real `FindNLSStringEx` has only been compile-checked. On the Mac the ICU stand-in differs from it on ß and ligatures.
+- Windows' Rust `facts.rs` calls the core-backed `match_inputs` (about 80 µs through JSON) on the sync path, so time the inspector sync on the PC. 4d's native facts should take this off the sync path.
+- The frozen test catalog still lists Eterna-CP 3512. That is test data only.
+
+### 2026-11-24: One shared file layer merged (`core-p4f-files` `f95bfa7b`); Phase 4 core on the PC
+
+**4f: `core/src/platform/fs` (package `platform_fs`).** It replaces the three file layers: the library's `fsys`, `settings/{files,paths}` and `caches/files`.
+- **What it covers:**
+  - std::fs's calls: stat with the FindFirstFileW fallback, read, write, create-new with sync, rename/replace, remove, create_dir_all, read_dir, hidden files, environment variables;
+  - std::path's rules in both styles, Display's lossy text, WTF-8 and UTF-16.
+- **Where the layers differed,** each user now does what its own Rust original did:
+  - the library's Windows listing uses std's FileType and the hidden attribute;
+  - the caches use std's create_dir_all;
+  - a NUL in a path is refused before any call.
+- **Long paths:** Windows paths go through std's `maybe_verbatim`, so an absolute path over MAX_PATH gets `\\?\` (or `\\?\UNC\`). Unit tests on the Mac cover:
+  - drive paths and UNC paths;
+  - paths that are already verbatim;
+  - relative paths, which are left alone;
+  - the length threshold.
+- **Error text:** Windows errors read as `FormatMessageW` gives them, as std's `io::Error` Display does. `create_dir_all` says "failed to create whole tree" where std does (`negs_preview_write` returns -2, `5d2db3ba`; header `513573b1`).
+- **Size:** 46 files, +2,522 / −2,705 lines.
+- **Mac gate on the merged tree:** all passed.
+  - `build.py test` (19.1 s) and `test --asan`;
+  - `diff` and `diff --asan`, every suite 0 differences;
+  - the wrapper crate with `--features track` (103);
+  - the inspector check (55);
+  - the Windows cross-check, with and without `--tests`;
+  - the any-OS crates.
+  - `build.py lib` takes 1.85–1.89 s.
+
+**The Windows PC on the Phase 4 core.** This was the first run of 4b's, 4c's and 4f's Windows file code. It needed four fixes, all in tests and oracles; the core code itself didn't change:
+- **`b1d5371e`:** the presets tests were `#+build darwin, linux` only. An Odin test package that is empty on Windows fails to link (`__$all_tests_array`). The removal helper is now split into `scratch_posix.odin` / `scratch_windows.odin`.
+- **`6ba3483c`:** the session fixtures used `/photos/...`, which isn't absolute on Windows, so `validate` refused them. They now use `C:\photos\...` there.
+- **`2fec3869`:** the Phase 4 oracles in `core/diff` used the Mac stand-ins (ICU NFC, `renamex_np`, `st_flags`) on Windows too. On Windows `negs-state-oracle` now uses the real `windows` 0.58 crate:
+  - `MoveFileExW` and `SetFileAttributesW`, with the same error text as the frozen `platform.rs`;
+  - `NormalizeString` for NFC;
+  - `file_attributes()` for hidden files.
+  - The Cargo key is `windows-crate`, because one dependency name can't have per-target sources.
+  - So on the PC the lockstep tests compare the core against the frozen Rust as it really runs on Windows.
+- **`4e7456da`:** the presets lockstep hung on the PC. On Windows 10 `CON.json` is the console, so the test's own `read_file` step waited on console input for ever. The steps that open a path directly (other programs' files, `read_file`) now skip DOS device names on Windows. The preset rules themselves already refuse them.
+
+**PC results (worktree `p4-core`):**
+- `build.py test` passes. The layout check is skipped on Windows, as before.
+- `build.py lib` takes 1.94 s.
+- The wrapper crate with `--features track` passes 103 tests.
+- `build.py diff` passes (437 s): every suite 0 differences, the presets and session lockstep tests included.
+- The `windows/` tests pass (304, 2 ignored), with 4b, 4c and 4f's Windows file code under them.
+- The any-OS crates pass: library-map 7 + 18, sheet-rules 20, tray-rules 17.
+- A dropped ssh connection cut off one run (`ServerAliveInterval` now set). Main moved to `4e7456da` after this gate.
+
+**Inspector ViewModel (`core-p4i-inspector`) screenshots.** 12 states, base `b05e49e` vs the branch build:
+- the states: each tab, groups open, an edited photo with its count and edit list, a JPEG, Plain theme;
+- outcome: identical apart from "developed in N s" and noise that changes from run to run. Three reruns showed it:
+  - the menu bar's mnemonic underlines (y = 31) come and go with the harness's synthetic Alt tap;
+  - one count badge had a hover box;
+  - the window frame's right edge differs between two runs of the base build too.
+
+**Next:** 4a (state rules + edits) merges local main and reruns its checks; then 4d (Inspector ViewModel in Odin), then the full Phase 4 PC gate (screenshots base vs core, startup ABBA).
+
+### 2026-11-24: Phase 4b and 4c merged (`core-p4b-settings` `2640ad3`, `core-p4c-caches` `4fabcd57`)
+
+**Checks.** Each merge passed the full Mac gate on its merged tree:
+- `build.py test`, `test --asan`, `diff` and `diff --asan`;
+- the wrapper crate with `--features track` (100, then 103 with both);
+- the inspector check crate (55);
+- the Windows cross-check, with and without `--tests`;
+- the any-OS crates.
+
+**Merge fixes.**
+- **Lock files (`5b3e5a5`):** 4b added `anyhow` to `negs-core-rules`, so the any-OS crates' lock files needed it; resolved offline.
+- **4c against 4b:** both bench workloads kept; one `anyhow` line in `core/diff/Cargo.toml`; caches' Odin package renamed `cache_files` (imported as `files`), since 4b's `settings/files` is also `package files`.
+- **Another session's merge:** it landed film work on main meanwhile (`datasheet-batch-2`, up to `ab24bb96`), touching only `windows/src/state.rs` and `model/lifecycle_tests.rs`. The 4c merge was redone on top of it, with the same `core/` resolution, and the Windows-side checks passed again.
+
+**4b: presets + session.** In `core/src/settings/{paths,files,presets,session}`.
+- **Presets:** all of `Library` (list; `.order.json` in serde's pretty form; add, rename, delete, read, verify, set_order), the name rules, `text`, `read_file`.
+  - Win32 file calls in Odin: `MoveFileExW` without replace, `FILE_ATTRIBUTE_HIDDEN`.
+  - A sharing or lock violation reports "open in another program" with no retry, as the Rust does (the brief's "retries" was wrong).
+  - NFC and lower case are host callbacks (`negs_settings_text_functions`): Windows registers `NormalizeString` (raw-dylib `normaliz`), the diff test registers the ICU stand-in.
+- **Session:** `EditorSession` and `Preferences` serde exactly as the derives (incl. the flattened `LibraryPreferences`), defaults, renames, migrate, validate, the stores, folders, `write_atomic`, the catalog cache.
+  - The wrapper's `EditorSession<S>` and `Preferences<L>` stay Rust structs with their derives (generic, because their parts live in other slices' files).
+  - Data crosses as serde's JSON text. Non-finite doubles fall back to serde's bytes; nothing panics.
+- **Differential tests:**
+  - Names: 50k comparisons.
+  - Lockstep: 100 runs × 100 steps on two scratch folders, with folder bytes compared after every step, including other programs' writes, hidden files and unicode, case-variant and reserved names.
+  - Preset JSON: the GUI default plus a 1,000-item corpus, byte for byte.
+  - Preferences, session and stores: about 145k comparisons.
+  - 7 mutation checks, all caught.
+- **Bench** (indicative):
+
+  | Workload | Rust | Core |
+  |---|---:|---:|
+  | list 200 presets | 1.23 ms | 1.02 ms (core without NFC) |
+  | load preferences | 0.022 ms | 0.042 ms |
+  | save preferences | 0.174 ms | 0.201 ms |
+
+**4c: batch + match cache + rendered preview.** In `core/src/caches/{files,serde,batch,match_cache,preview}`.
+- **Batch:** file names, numbering candidates (the `taken` loop stays Rust), `unique`, the matched-exposure arithmetic, `Run`'s counts and words, the journal (serde, staged write, schema check).
+  - `Options`, `Item`, `Journal` and `Run` stay Rust types: they hold `EditState` and model types.
+- **Match cache:** the key (SHA-256 of serde text), `engine_stamp`, and the LRU with its file. The core writes keys sorted and breaks LRU ties by key, where Rust's HashMap order was random. The mutex, the shared instance and the delayed write stay Rust.
+- **Rendered preview:** the key (every data file stamped, created times: macOS birthtime, Windows `ftCreationTime`, Linux statx), `checksum` (SipHash-1-3, zero keys, usize length prefix, bit for bit), and the header + pixels file. The mpsc writer stays Rust.
+- **Fallbacks:** states and journals serde can't carry (a NaN) fall back to Rust's bytes; nothing panics.
+- **Journal errors:** replace errors now show the OS text instead of "Could not move the file to …". Both callers ignore the result (`let _ =`), so nothing a user sees changes.
+- **Differential tests:** about 280k comparisons, including 20 keys on the real `data/` folder (1,068 files). Two harness blind spots were found by mutation and widened (the 0.05 EV edge, the tenth-of-limit eviction). Every mutation is caught.
+- **Bench** (indicative):
+
+  | Workload | Rust | Core |
+  |---|---:|---:|
+  | preview key on `data/` | 8.61 ms (6,461 allocations) | 6.49 ms (13 Rust + 78 core) |
+  | 12 MP checksum | 30.7 ms | 28.1 ms |
+
+**Follow-up before the PC gate (coordinator):** the core now has three file layers: the library's `fsys`, `settings/files` and `caches/files`.
+- Merge them into one shared package.
+- Give it Rust std's `\\?\` prefix for paths over MAX_PATH. Neither new layer has it, so a very long path would fail or miss the cache where the Rust worked.
+- Give it real Windows error text (caches' `os_message` is a placeholder).
+
+**Risks for the PC gate:** neither slice's Windows file code has ever run, beyond `odin check -target:windows_amd64` and the cross-check. Watch:
+- stat via FindFirstFileW, read_dir, birth time;
+- `MoveFileExW`, `GetEnvironmentVariableW`;
+- the raw-dylib `normaliz` link;
+- `FormatMessageW` text.
+
+The Windows tests (`a_file_open_elsewhere_is_reported_not_skipped`, `caches_units`), a batch resume and a startup-frame restore cover them.
+
+**Build time:** `build.py lib` 1.8–2.0 s on a quiet machine, with all of 4b and 4c in.
+
+**Dates:** both slices' commits were made Tue 24 Nov 10:25–13:07, so they were re-dated after main's tip (01:06–01:18; merges 01:04 and 01:19).
+
+### 2026-11-24: Phase 4 groundwork merged (`core-p4-base`, `4cf7119`)
+
+**Checks.**
+- **Full Mac gate:** passes on the groundwork plus the inspector merge.
+  - `build.py test`, `test --asan`, `diff` (146 s) and `diff --asan`.
+  - The wrapper crate with `--features track` (85).
+  - The inspector check crate (55).
+  - The Windows cross-check, with and without `--tests`.
+  - The any-OS crates (7+18, 17, 20).
+- **After another session's merge:** `eterna-cp-prints` (`22456c9`) landed on main in the meantime. The groundwork was merged again on top of it, and the checks that touch its changes passed again: `test`, the inspector crate, the cross-check both ways and the wrapper crate. It changed `windows/src/state.rs`'s `Stock` (`cine_print`, `NEGS_BUILT_HINT`), which is 4a's half, so 4a ports `state.rs` as it is on main, not as frozen at `b05e49e`.
+- **Build time:** `build.py lib` 1.71–1.91 s (1.44–1.53 s after Phase 3), with two new packages.
+
+**`core/src/value`: serde_json's `Value`.**
+- **Types:** u64/i64/f64 numbers; objects sorted by key bytes, the last duplicate wins.
+- **Reading:** accept/reject as `from_slice`, recursion limit 128, correctly rounded doubles (Eisel-Lemire plus an exact bignum fallback).
+- **Writing:** compact and pretty, with serde's escaping.
+- **Also:** Rust's `{}` for f64; `json.rs`'s helpers; a bridge to `library.Json` (lossy points in the header).
+
+The tests corrected two assumptions:
+- **Exponents:** serde_json 1.0.149+ writes doubles with zmij, which always signs the exponent (`1e+16`, `1e-7`).
+- **Ties:** Rust's `Display` rounds a tie between two shortest candidates up, where zmij rounds to even. A million random doubles found 194 such cases, so Display now does an exact tie check.
+
+**`core/src/state`: `Edit_State`, `Roll`, `Brightness_Match`.**
+- **serde:** as the derives do it.
+  - Object and array forms, defaults, duplicate and unknown fields.
+  - Declaration order or sorted (`to_value`); compact or pretty.
+  - Crop and border serde had stayed Rust-only in 3b, so they were written here too.
+- **Rules:** `PartialEq`, `rendered`, `match_inputs`, `restored_params`, `size_mode`/`size_target`, `Roll`.
+
+**ABI 5.**
+- **Sections:** header sections, layout tables (`layout_4{base,a,b,c}`), sys modules (`state`, `settings`, `caches`) and wrapper regions, one per slice.
+- **Calls:** `negs_value_*` and `negs_json_*`; an opaque `negs_state_t` (parse/default/write/eq/rendered/…; its own arena; the caller frees it); handle-free leaf calls.
+- **A fix:** `check_3a/3b/3c` were declared but never called; they now run and pass.
+- **Wrappers:** `negs-core-rules` gained `state` (its half) and `json` modules. `windows/src/state.rs` and `json.rs` aren't switched yet.
+
+**Oracles:** `state`, `json`, `session`, `presets`, `batch`, `match_cache` and `rendered_preview`, frozen at `b05e49e` in the `core/diff/state-oracle` crate. Its portable stand-ins:
+- `rename`/`renamex_np` for `MoveFileExW`;
+- `UF_HIDDEN` for hidden files;
+- ICU NFC for `NormalizeString`;
+- an ICU fold for `FindNLSStringEx` (Windows' invariant locale also folds ß and ligatures).
+
+**Differential tests:** default seeds, 0 differences, 0 leaks.
+- **Value:** 30k writes; 50k texts read; 2M double comparisons (serde text and Display); 280k helper comparisons; 200 restorings of the real defaults.
+- **Edit state:** 60k serde comparisons; 30k mutated texts read; 220k rule comparisons, through both the handle and the wrapper.
+- **Mutation checks, all caught:**
+  - exponent written without `+`;
+  - recursion limit 129;
+  - restoring nulls a value;
+  - duplicate struct fields accepted;
+  - `rendered()` keeps the border.
+
+**Costs** (release build, a realistic 5.2 KB state):
+
+| Call | Core | Rust |
+|---|---:|---:|
+| parse | 32 µs | |
+| write | 15 µs | |
+| `==` | 91 µs | 13 µs |
+| `rendered()` | 90 µs | 8.6 µs |
+| `match_inputs` | 82 µs | 24 µs |
+| `json::set` on whole params | 73 µs | 0.11 µs |
+| leaf calls | 0.5–1 µs | |
+
+**Coordinator decisions.**
+- **`windows/src/json.rs` stays Rust in Phase 4.**
+  - These are in-place helpers on Rust-owned trees; through the core each `set` would be ~700× slower.
+  - Phase 5 moves the state into the core.
+  - The core's versions are held equal by the differential tests.
+- **Wrappers never panic where the Rust didn't.** A NaN in a typed f64 field can't cross as JSON, so those calls fall back to a small Rust path. This answers the groundwork agent's question; it isn't a product decision.
+- **The Odin Inspector ViewModel (`view.rs`, `command.rs`) is its own slice, 4d, after 4a.** 4a ports the rest of `state.rs` and `edits.rs`, with a core-side facts input that 4d reuses.
+- **Text folding and NFC are host callbacks** registered through the ABI, so the Windows wrapper keeps the Win32 calls (4a's matching, 4b's preset names). There are no Unicode tables in Odin.
+
+**Dates:** three commits made Tue 24 Nov 08:55–09:12 were re-dated to after main's tip (24 Nov 00:50–00:52).
+
+### 2026-11-23: Inspector ViewModel in Rust merged (`core-p4i-inspector`, `885e8fb`)
+
+**PC checks still to do (the PC was off):** the Windows test suite and the
+base-vs-branch screenshot comparison, both deferred to the Phase 4 gate.
+- The jobs are ready: 44 shots, made of 2 builds × 2 themes × 11 inspector states. They cover:
+  - the plain NEF, the edited NEF and the JPEG;
+  - each tab, with groups open and with all controls shown;
+  - the edit-list menu.
+- **Where they are:** the coordinator's scratchpad `p4i-shots/` (`run.sh`, `prep.cmd`, `make_jobs.py`, `compare.sh`, `p4i.cmd`).
+- **Already on the PC:** `worktrees\p4i-base` (main `79f66a3`, built). Remove it after the gate.
+
+**What it is:** `windows/src/inspector_view/`, platform-free; it uses no
+`windows` crate, `crate::ui` or `crate::model`. Its pieces:
+- **Inputs:** `InspectorFacts`, borrowed from `Model` through
+  `Model::inspector_facts()`. Its sub-facts `Params`, `ColorFilters`,
+  `Brightness` and `Prefs` now hold the `Model` helpers (`value`,
+  `default_value`, `is_modified`, brightness match, colour filter, preview
+  space), which `Model` delegates to, so their behaviour is unchanged.
+  Values that need the model's internals are worked out up front:
+  `NegativeFacts`, `can_export`, `photo_size`, `cropping`, `size_error`.
+- **Schema:** the 195 rows of the old `ui/inspector.rs` table, in order,
+  with their kinds, labels, ranges, options and tooltips. Row ids are the
+  table positions, so the Win32 control ids are unchanged.
+- **View:** `build(facts, ui) -> InspectorView`, a line-for-line port of
+  the UI's rules. It holds tabs, counts, the header total, the export
+  summary, and one `RowView` per row: visible, enabled, changed, skipped,
+  checked, title, value, hint, warning, help, summary, status, slider
+  values, options and selection.
+- **Commands:** `dispatch(facts, ui, id, RowAction) -> Vec<Effect>`.
+  Actions are Set, Track, Check, Select, Press and Reset. Effects are
+  path/value sets, named model actions, interaction begin/end with the
+  same undo names and grouping, and dialogs handed back.
+- **Edit lists:** `edits.rs` takes `&InspectorFacts` instead of `&Model`.
+- **Export choices:** `OutputFormat`, `COLOR_SPACES` and the other export
+  constants moved to `inspector_view/output.rs`; `model.rs` re-exports
+  them.
+- **The UI:** `ui/inspector.rs` keeps only its Win32 code (+378/−1064):
+  windows, layout, the slide, ink, tone graph and colour filter widgets, and
+  the crop panel. It draws from the view and maps clicks to actions.
+
+**Tests:**
+- **Mac:** 55 tests pass in a check crate (the coordinator's scratchpad,
+  `inspector-check/`), which `#[path]`-includes the module and its portable
+  dependencies, with a one-call `FindNLSStringEx` shim. 14 of them are new
+  builder tests: every row kind, the visibility rules, notes, summaries,
+  "N more", counts and edit lists, and every control set and then reset
+  back to its default on each tab and file type.
+- **PC only:** new `Model`-based tests (`counts_match_the_lists`,
+  `actions_and_resets_are_undo_steps`).
+- **Windows cross-check:** clean, with and without `--tests`.
+
+**Reserved file touched:** `session.rs` (+1/−5). `Preferences::revealed`
+was removed because nothing calls it any more, and `expanded` is now
+test-only.
+
+**For the Odin port (4a):**
+- **Cost:** `build` runs on every inspector, structure or histogram
+  refresh, so every render and drag frame. It takes 30 µs on Prep, 138 µs
+  on the Lab and 62 µs on Output (Mac fixture). Most of it is the edit
+  counts for all three tabs, visibility for all 195 rows, and per-row
+  strings. Use a per-sync arena, a static schema table, and catalog
+  lookups indexed once per catalog.
+- **Effects:** `Effect::Set` carries a JSON value.
+- **A quirk to keep, worth deciding later:** the development-time list is
+  cached and refreshed even while hidden, so after a film change on another
+  tab it may be stale.
+
+**Dates:** `b69e4e9` was made at 09:02 on a Tuesday, so it was re-dated to
+23 Nov 03:29 (`f70fd70`).
+
+### 2026-11-22: Go for Phase 4; plan
+
+Noah: Go for Phase 4.
+
+**What Phase 4 needs first.** The Phase 4 modules are built on
+`serde_json::Value` (`float_roundtrip`, BTreeMap order), and bytes matter:
+`match_cache::key` and `rendered_preview::key` hash or compare
+`serde_json::to_string` output and `format!("{}", f64)` text, and the
+settings files are serde's compact or pretty output. The core's JSON
+(`library.Json`) is the Mac's `JSONValue` (doubles, Foundation's encoder)
+and stays as it is. So the core gets a second, serde-faithful value type
+(u64/i64/f64 numbers, ryu formatting, serde's escaping and accept/reject),
+differential-tested against serde_json byte for byte.
+
+**The Inspector ViewModel has no Rust original.** Its logic is spread over
+`ui/inspector.rs` (4.2k lines, Win32) and `edits.rs` (which takes
+`&Model`). So it is first extracted in Rust: a platform-free builder from a
+plain facts struct (the `Model` helpers it needs, copied), plus command
+dispatch, with `ui/inspector.rs` drawing from it and PC screenshots
+identical to main. That builder then becomes the frozen oracle for the
+Odin port.
+
+**Waves.**
+- **Wave 1, in parallel:**
+  - `core-p4-base` (Mac): `core/src/value`, `EditState`/`Roll`/`BrightnessMatch` and its serde in `core/src/state`, ABI 5 with per-slice header/layout/sys/wrapper sections, frozen oracles for `state`/`json`/`session`/`presets`/`batch`/`match_cache`/`rendered_preview`, and the JSON round-trip cost measured.
+  - `core-p4i-inspector`: owns the PC for its tests and screenshots.
+- **Wave 2, in parallel after both merge:**
+  - 4a: the rest of `state.rs`, `edits`, and the ViewModel in Odin;
+  - 4b: `presets` + `session`;
+  - 4c: `batch` + `match_cache` + `rendered_preview`.
+- **Then the PC gate.**
+
+**Moved out of Phase 4:**
+- `film_cache_release` goes to Phase 5. It is a request through `EngineClient` plus Win32 memory notifications; nothing pure is left to port.
+- `brightness` stays as is: WIC decoding plus the engine's `spektrafilm_io::brightness`, so there is no app logic to port.
+
+### 2026-11-22: Phase 3 Windows gate (main `1503525`)
+
+PC worktrees `negs\worktrees\p3-core` (main) and `p3-base` (`acbad18`,
+main before the slices), built with `wt.cmd`; the gate is
+`C:\Users\Noah\.negs\core-gate3.cmd [raws|coretest|lib|diff|wintest|anyos]`.
+
+- **`build.py test`:** passes. The Windows-only Odin code runs for the first
+  time: embedded's `CreateFileW` reader and exact_fit's `GetSystemInfo`
+  thread count.
+- **`build.py lib`:** 1.70 s and 1.68 s (separate modules).
+- **`build.py diff`:** passes (186 s), every Phase 3 harness 0 differences
+  and 0 leaks with UCRT's libm on x86_64, with `NEGS_RAW_FOLDER` on copies
+  of `free_raws` (97 files; `--nocapture` runs with and without the folder
+  confirm the real files went through the Windows reader).
+  - **One fix:** the tone graph's harness compared NaNs by their bits. One
+    predicted point (gamma −inf) was NaN on both sides but `-NaN` in the
+    core and `+NaN` in Rust: x86's default NaN is negative, a libm call
+    passes its operand's on, and Rust promises neither. It now counts every
+    NaN as one value, as 3a's harnesses do; all else stays bit for bit
+    (`1503525`).
+- **The Windows app's `cargo test`:** 290 passed, 2 ignored (both
+  `#[ignore]` on the base too).
+- **Any-OS crates** (`library-map` 7 + 18, `sheet-rules` 20, `tray-rules`
+  17): pass with `--locked`.
+- **Screenshots** (3 themes × photo, crop mode, photo with the histogram
+  after leaving crop, grid; nine D750 NEF copies with core-written
+  sidecars): crop and grid byte-identical; the others differ only in the
+  status bar's "developed in" time.
+- **Startup**, 12 runs ABBA, core vs base:
+
+  | stamp | core | base |
+  |---|---:|---:|
+  | `first_window_composited` | 80.9 ms | 82.1 ms |
+  | `inspector_shown` | 188.3 ms | 195.5 ms |
+  | `gpu_ready` | 455.6 ms | 473.5 ms |
+  | `first_image_on_screen` | 920.8 ms | 926.2 ms |
+
+- **Speed on the PC** (`bench`, indicative):
+
+  | | Rust | Odin core |
+  |---|---:|---:|
+  | sheet layout, 1,000 items ×100 | 1.74 ms | 0.65 ms |
+  | exact_fit 6000×4000 → 1500×1000 | 74.0 ms | 54.8 ms |
+  | embedded, 96 RAWs warm | 38.3–39.1 ms | 39.6–43.9 ms |
+
+  The embedded gap is within run-to-run noise after the first run; Rust's
+  `seek_read` vs the core's `SetFilePointerEx` + `ReadFile` is the one
+  difference to look at in Phase 7.
+- **Open for Noah:** Go for Phase 4.
+
+### 2026-11-22: Phase 3 Mac side, three slices merged (`core-p3a-sheet`, `core-p3c-media`, `core-p3b-picture`)
+
+Three agents worked in parallel, one per slice, from `00b0d0d`; the
+coordinator merged 3a (`9c77ee9`), then 3c, then 3b, and checked the
+combined tree after each (`build.py test`, `test --asan`, `diff`,
+`diff --asan`, the Windows cross-check with and without `--tests`, and the
+any-OS Windows crates with `--locked`). All pass on the merged tree.
+
+**Pattern (as in Phase 2).** `negs-core-rules` (`core/rust/rules`) keeps
+each Windows module's public API; plain types stay Rust structs; the logic
+runs in Odin. `windows/src/<module>.rs` is now `pub use
+negs_core_rules::<module>::*` and keeps its own `#[cfg(test)]` tests; no
+other `windows/src` file changed. The Rust originals are frozen as oracles
+in `core/diff/oracle` (3b's and 3c's compile in their own crates,
+`core/diff/picture` and `core/diff/media-oracle`, so their stand-in
+`crate::` modules don't clash).
+
+**Differential tests** (SplitMix inputs, `NEGS_RULES_SEEDS`/`NEGS_RULES_SEED`;
+every output compared, floats bit for bit; 0 differences; 0 live core
+allocations and 0 bad frees after each test; each one also under ASan):
+
+| Slice | Module | Compared | Mutation check (caught) |
+|---|---|---|---|
+| 3a | `sheet_rules` | 909k values, 46 functions (+30k Rect) | layout clamp 10→9.5: 5,084 diffs |
+| 3a | `tray_rules` | 700k values, 39 functions, all 128 Esc contexts | U+3000 out of White_Space: 3,752 |
+| 3a | `compare` | 290k values, 21 functions | `>`→`>=` in arrangement: 931 |
+| 3a | `model/compare` (`halved`, `over_frame` geometry) | 20k | `+2`→`+1` rounding: 7,612 |
+| 3b | `crop` | 10k + 2.5k 12-step sessions + serde both ways (1.16M values) | inscribe 0.98→0.97: 10,836 |
+| 3b | `border` | 10k + every film + serde (496k) | film_geometry 0.025→0.0251: 2,763 |
+| 3b | `exact_fit` | 10k sizes, 200 resamples incl. 6000×4000→1500×1000 (98.4M) | encode constant: 101,682 |
+| 3b | `histogram` | 10k + 24 MP in 8 orientations (190M) | turn-3 mapping: 4,570 |
+| 3b | `negative` | 10k (230k) | tolerance `<=`→`<`: 308 |
+| 3b | `thumb_compose` | 10k sizes, 2.5k full thumbnails with real borders (230M) | decode constant: 881 |
+| 3b | `windows_units` | the Windows modules' own tests on the core; the app's `CropSession` vs the frozen one (2.5k) | wrapper drops `intended`: caught |
+| 3c | `embedded_preview` | 96 real RAWs by path and bytes (98.4 MB of previews), 12k headers (cut, corrupted, synthetic), 403 synthetic files | orientation 1–8→1–7; `largest` tie-break |
+| 3c | `photo_facts` | 5.57M camera names (every Unicode scalar), 60k numbers, `read` on 106 real + 300 synthetic files | ties-to-even→half-up |
+| 3c | `tone_graph` | 10k curves, 30k predictions, 480k hits, 389k drags | flat run `>0`→`>=0` |
+| 3c | `help` | all 91 paths, 15 groups, 20k lookups | `-` accepted in lanes |
+
+3b also passed at seed 20261122 with 40,000 cases each. Two mutations that
+survived were shown equivalent (sheet's row-fill and ln-tie comparisons;
+exact_fit's `<=` at 0.0031308).
+
+**Bugs the differential tests found** (in the port, fixed before merge):
+histogram's `usize::MAX` sample budget became −1 as an Odin `int`, and a
+far-off-picture sample (1e300 crop) saturated to −1 and indexed out of
+range; the core now compares unsigned, as the Rust does.
+
+**What stayed in Rust, and why.** Engine calls (`CropSettings::engine()`,
+`PhotoFacts::read`'s EXIF via spektrafilm-io, `image` resizes and
+rotations, PNG strip textures); JSON (the tone graph's `Controls`/`Curve`
+parsing, negative's `FlatField::of`/`BaseStatus::of`, border's `options()`)
+until the core has JSON (Phase 4); Win32 packing (`colorref`); `Lru` (a
+generic container of host values); `CropSession` (holds `EditState`; it
+delegates every method to the core's `SessionGeometry`); constants the app
+matches on (tested equal to the core's). Engine *formulas* that 3b needed
+(border margins, film geometry, the 35mm strip, `Crop::pixels`,
+`straightened_size`) are ported to Odin and diff-tested bit for bit against
+spektrafilm-io's own functions, so an engine change shows up as a failing
+test.
+
+**ABI** (version 4 throughout): ~109 `negs_sheet_*`/`negs_tray_*`/
+`negs_compare_*`, ~100 Phase 3b functions, ~30 Phase 3c. No JSON. Text into
+caller buffers (with an exact-size retry) or owned `negs_buf_t`; pixels,
+bins and previews into caller buffers (`negs_embedded_read` writes straight
+into the caller's buffer: 14.0 → 11.9 ms on the bench); static strings for
+constants. Layout tables cover every header struct (C, Odin, Rust).
+
+**Speed** (indicative; Docker used ~3 cores): sheet 0.40 ms vs Rust 0.45;
+fit 47.1 ms vs 56.0 (byte-identical); embedded 11.85 ms vs 11.7. The first
+ports were slower (sheet 0.65 ms, fit 136 ms): bounds checks in the inner
+loops (now `#no_bounds_check` with lengths clamped up front) and
+`math.round` not inlining across separate modules (now libm's `round`).
+`build.py lib` 1.44–1.53 s with every slice in.
+
+**Build tooling.** `diff --asan` passes `--target <host>` so RUSTFLAGS
+don't put the ASan runtime into proc macros (rustc aborted with
+"Interceptors are not working" once core/diff pulled in serde_derive).
+core/diff now builds spektrafilm-io and rawler (for the oracles), so its
+first build is slower. Because `negs-core-rules` now brings spektrafilm-io,
+`windows/sheet-rules` and `windows/tray-rules` patch `rawler` to
+`vendor/rawler` as `library-map` does; the merged tree's check caught it
+(crates.io's rawler lacks the X-Trans API). Lock files were resolved offline with `cargo tree
+--offline` (`cargo update -p` offline downgrades unrelated crates).
+
+**Coordinator decisions** (the agents' questions; none is a product
+trade-off):
+- `Lru`'s `len`/`bytes`/`retain` stay `pub` in the wrapper (Windows' tests
+  use them).
+- `windows/library-map` and `windows/sheet-rules` now use the core's
+  library under the `negs-library` name, as the app does (otherwise
+  `compare::Item` is a different type).
+- `windows/sheet-rules` and `windows/tray-rules` only re-run tests the
+  wrapper crate runs too; retire them in Phase 5 with the rest of the
+  non-UI Rust. CI still runs them (after `install_odin`).
+- core/diff may depend on spektrafilm-io and rawler (read only) so
+  `PhotoFacts::read` and the engine formulas are compared on real inputs.
+- The tone graph's and negative's JSON stay in Rust until Phase 4.
+- Porting engine formulas is accepted when a differential test holds them
+  to the engine function bit for bit.
+- `negs-core-rules` depends on spektrafilm-io unconditionally (3b needs
+  it); 3c's `io` feature is kept as an empty name so `windows/Cargo.toml`
+  needs no change. `image` (no default features) comes with it for
+  `model_compare`; making it optional can wait.
+
+**Risks to check at the Windows gate:** embedded's Windows reader
+(`CreateFileW`/`ReadFile`) has never run (no `\\?\` prefix for long
+paths; failures fall back to decoding, no crash); exact_fit's thread count
+via `GetSystemInfo`; bit-exactness with UCRT's libm on x86_64 (`build.py
+diff` on the PC); `pow` standing in for `exp10` (drags snap to 0.01, so
+low risk); a panic in the `cubic_pieces` callback aborts (documented);
+border's `strip_textures_load` runs only in `windows/`; photographs compare
+byte for byte (a path with mixed `\` and `/` counts as different; the
+library never produces one).
 
 ### 2026-11-22: Go for Phase 3; build tooling and Phase 3 groundwork (branch `core-p3-base`)
 

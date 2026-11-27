@@ -96,6 +96,46 @@ pub fn apply_reference(
     encoded: bool,
     settings: &crate::post::HncsParams,
 ) {
+    apply_reference_with_options(image, output_space, encoded, settings, false, None);
+}
+
+/// Port of `brands.hasselblad.look.apply_hncs()` with its measured defaults.
+/// It intentionally uses full CLAHE, no additional skin protection, and
+/// NumPy-style truncation of the film-curve LUT. Lab conversion remains a
+/// Rust approximation of OpenCV's 8-bit conversion.
+pub fn apply_hncs_python(image: &mut ImageBuf, output_space: &str, encoded: bool) {
+    let settings = crate::post::HncsParams {
+        clahe_strength: 100.0,
+        skin_protection: 0.0,
+    };
+    apply_reference_with_options(image, output_space, encoded, &settings, true, None);
+}
+
+/// Canon population-fit look; EOS R5 contributes 25 of the pooled 115 SOOC JPEGs.
+/// It is not an R5-only profile or RAW sensor calibration.
+pub fn apply_canon_r5_population(image: &mut ImageBuf, output_space: &str, encoded: bool) {
+    let settings = crate::post::HncsParams {
+        clahe_strength: 100.0,
+        skin_protection: 0.0,
+    };
+    apply_reference_with_options(
+        image,
+        output_space,
+        encoded,
+        &settings,
+        true,
+        Some((15.0 / 255.0, 0.78, 239.1 / 255.0, 1.25)),
+    );
+}
+
+fn apply_reference_with_options(
+    image: &mut ImageBuf,
+    output_space: &str,
+    encoded: bool,
+    settings: &crate::post::HncsParams,
+    python_compat: bool,
+    population_fit: Option<(f64, f64, f64, f64)>,
+) {
     let source = RgbColourspace::output(output_space);
     let srgb = RgbColourspace::output("sRGB");
     let srgb_xyz_to_rgb = colorspace::mat3_inverse(&srgb.rgb_to_xyz);
@@ -127,11 +167,18 @@ pub fn apply_reference(
 
     let original_lightness: Vec<u8> = lab.par_iter().map(|pixel| pixel[0]).collect();
     let mut lightness = original_lightness.clone();
-    lightness.par_iter_mut().for_each(|value| {
-        *value = ((*value as f64 / 255.0).powf(0.8) * 255.0).clamp(0.0, 255.0) as u8;
-    });
+    if population_fit.is_none() {
+        lightness.par_iter_mut().for_each(|value| {
+            *value = ((*value as f64 / 255.0).powf(0.8) * 255.0).clamp(0.0, 255.0) as u8;
+        });
+    }
     let lifted = lightness.clone();
-    clahe_reference(&mut lightness, w, h);
+    clahe_reference(
+        &mut lightness,
+        w,
+        h,
+        population_fit.map_or(REFERENCE_CLIP_LIMIT, |p| p.3),
+    );
     lightness
         .par_iter_mut()
         .zip(lifted.par_iter())
@@ -139,7 +186,17 @@ pub fn apply_reference(
             let clahe = *lifted as f64 / 255.0
                 + (*local as f64 / 255.0 - *lifted as f64 / 255.0)
                     * (settings.clahe_strength.clamp(0.0, 100.0) / 100.0) as f64;
-            *local = (film_curve(clahe) * 255.0).round().clamp(0.0, 255.0) as u8;
+            let curve = if let Some((toe, shoulder, white, _)) = population_fit {
+                population_film_curve(clahe, toe, shoulder, white)
+            } else {
+                film_curve(clahe)
+            };
+            let value = (curve * 255.0).clamp(0.0, 255.0);
+            *local = if python_compat {
+                value as u8
+            } else {
+                value.round() as u8
+            };
         });
 
     image
@@ -150,15 +207,22 @@ pub fn apply_reference(
             let original_l = pixel[0] as f64 / 255.0;
             let a = pixel[1] as f64 - 128.0;
             let b = pixel[2] as f64 - 128.0;
-            let target_l = protect_hncs_lift(
-                original_l,
-                *light as f64 / 255.0,
-                a,
-                b,
-                settings.skin_protection,
-            );
-            let linear =
-                lab_to_gamut_rgb_srgb(target_l * 100.0, a, b, &srgb_xyz_to_rgb, srgb_white);
+            let target_l = if python_compat {
+                *light as f64 / 255.0
+            } else {
+                protect_hncs_lift(
+                    original_l,
+                    *light as f64 / 255.0,
+                    a,
+                    b,
+                    settings.skin_protection,
+                )
+            };
+            let linear = if python_compat {
+                lab_to_rgb_srgb_clipped(target_l * 100.0, a, b, &srgb_xyz_to_rgb, srgb_white)
+            } else {
+                lab_to_gamut_rgb_srgb(target_l * 100.0, a, b, &srgb_xyz_to_rgb, srgb_white)
+            };
             let output = colorspace::mat3_vec_f64(&from_srgb, linear);
             for channel in 0..3 {
                 output_pixel[channel] = from_f64(if encoded {
@@ -168,6 +232,22 @@ pub fn apply_reference(
                 });
             }
         });
+}
+
+fn lab_to_rgb_srgb_clipped(
+    l_star: f64,
+    a: f64,
+    b: f64,
+    xyz_to_rgb: &[[f64; 3]; 3],
+    white: [f64; 3],
+) -> [f64; 3] {
+    let fy = (l_star + 16.0) / 116.0;
+    let xyz = [
+        white[0] * lab_f_inverse(fy + a / 500.0),
+        white[1] * lab_f_inverse(fy),
+        white[2] * lab_f_inverse(fy - b / 200.0),
+    ];
+    colorspace::mat3_vec_f64(xyz_to_rgb, xyz).map(|v| v.clamp(0.0, 1.0))
 }
 
 fn smoothstep(edge0: f64, edge1: f64, x: f64) -> f64 {
@@ -266,7 +346,7 @@ fn lab_to_gamut_rgb_srgb(
     convert(low).map(|v| v.clamp(0.0, 1.0))
 }
 
-fn clahe_reference(image: &mut [u8], width: usize, height: usize) {
+fn clahe_reference(image: &mut [u8], width: usize, height: usize, clip_limit: f64) {
     let tile_w = width.div_ceil(REFERENCE_TILE_GRID).max(1);
     let tile_h = height.div_ceil(REFERENCE_TILE_GRID).max(1);
     let padded_w = tile_w * REFERENCE_TILE_GRID;
@@ -283,7 +363,7 @@ fn clahe_reference(image: &mut [u8], width: usize, height: usize) {
         });
 
     let tile_area = tile_w * tile_h;
-    let limit = ((REFERENCE_CLIP_LIMIT * tile_area as f64 / 256.0).floor() as u32).max(1);
+    let limit = ((clip_limit * tile_area as f64 / 256.0).floor() as u32).max(1);
     let mut maps = vec![[0u8; 256]; REFERENCE_TILE_GRID * REFERENCE_TILE_GRID];
     maps.par_iter_mut().enumerate().for_each(|(tile, map)| {
         let ty = tile / REFERENCE_TILE_GRID;
@@ -407,6 +487,22 @@ fn film_curve(x: f64) -> f64 {
         let t = (x - 0.5) * 2.0;
         0.5 + (t * t * (3.0 - 2.0 * t)) * 0.5
     }
+}
+
+#[inline]
+fn population_film_curve(x: f64, toe_lift: f64, shoulder_start: f64, white_point: f64) -> f64 {
+    let x = x.clamp(0.0, 1.0);
+    let toe_lift = toe_lift.min(0.099);
+    let shoulder_start = shoulder_start.min(0.999);
+    if x < 0.1 {
+        toe_lift + (x / 0.1) * (0.1 - toe_lift)
+    } else if x <= shoulder_start {
+        x
+    } else {
+        let t = (x - shoulder_start) / (1.0 - shoulder_start);
+        shoulder_start + t * t * (3.0 - 2.0 * t) * (white_point - shoulder_start)
+    }
+    .clamp(0.0, 1.0)
 }
 
 #[cfg(test)]

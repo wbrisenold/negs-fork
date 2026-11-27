@@ -844,6 +844,20 @@ impl Pipeline {
                     &self.params.post.hncs,
                 );
             }
+            crate::params::RenderLook::HasselbladHncsPython => {
+                crate::hncs::apply_hncs_python(
+                    &mut image,
+                    &self.params.io.output_color_space,
+                    self.params.io.output_cctf_encoding,
+                );
+            }
+            crate::params::RenderLook::CanonR5Population => {
+                crate::hncs::apply_canon_r5_population(
+                    &mut image,
+                    &self.params.io.output_color_space,
+                    self.params.io.output_cctf_encoding,
+                );
+            }
             crate::params::RenderLook::HasselbladHncsSmooth
             | crate::params::RenderLook::ReferentOutputHncsSmoothTone => {
                 crate::hncs::apply(
@@ -865,6 +879,14 @@ impl Pipeline {
                 &self.params.io.output_color_space,
             )
             .apply(&mut image);
+        }
+        if self.params.io.effective_render_look() == crate::params::RenderLook::AcesSdrHillFit {
+            crate::output_tone::apply_aces_sdr_hill_fit(
+                &mut image,
+                self.params.io.output_cctf_encoding,
+                &self.params.io.output_color_space,
+            );
+            clip_to_display(&mut image, self.params.io.output_cctf_encoding);
         }
         image
     }
@@ -919,6 +941,9 @@ impl Pipeline {
         image: ImageBuf,
         backend: &'a dyn ComputeBackend,
     ) -> Result<(ImageBuf, &'a str), SizeError> {
+        if self.params.workflow.converts_film() {
+            return self.process_convert(image, backend);
+        }
         let stage_timings = stage_timings_enabled();
         // Working-resolution rescale (Image Size, or the legacy
         // io.upscale_factor) — mirrors Python's ResizingService.crop_and_rescale.
@@ -1093,6 +1118,122 @@ impl Pipeline {
         Ok((result, backend.name()))
     }
 
+    /// Convert an already scanned negative to film density, then print and
+    /// scan it through the ordinary output path. Conversion currently runs
+    /// on CPU because this checkout's GPU backends do not expose the
+    /// convert-film pass.
+    fn process_convert<'a>(
+        &self,
+        image: ImageBuf,
+        backend: &'a dyn ComputeBackend,
+    ) -> Result<(ImageBuf, &'a str), SizeError> {
+        let mut image = self.rescale_working(image)?;
+        let converter = self.film_converter();
+        stages::filming::decode_input_cctf(&mut image, &self.params);
+        converter.convert_image(&mut image);
+
+        static CPU: spektrafilm_gpu::cpu_backend::CpuBackend =
+            spektrafilm_gpu::cpu_backend::CpuBackend;
+        let backend: &dyn ComputeBackend =
+            if backend.image_capacity(image.width, image.height).is_ok() {
+                backend
+            } else {
+                &CPU
+            };
+        let color_ref = crate::color_reference::ColorReference::compute(
+            &self.film,
+            &self.print,
+            &self.params,
+            &self.print_illuminant,
+            self.print_exposure_factor,
+            self.preflash_raw,
+        );
+        let image = self.print_and_scan(image, backend, &color_ref);
+        Ok((image, backend.name()))
+    }
+
+    fn print_and_scan(
+        &self,
+        filmed: ImageBuf,
+        backend: &dyn ComputeBackend,
+        color_ref: &crate::color_reference::ColorReference,
+    ) -> ImageBuf {
+        let printed = stages::printing::process_with_calibration(
+            filmed,
+            &self.film,
+            &self.print,
+            &self.params,
+            backend,
+            &self.print_illuminant,
+            self.print_exposure_factor,
+            self.preflash_raw,
+            color_ref.printing_exposure_correction,
+        );
+        stages::scanning::process(
+            printed,
+            &self.print,
+            &self.params,
+            backend,
+            color_ref,
+            &self.output_gamut,
+        )
+    }
+
+    /// Convert the input scan from its configured transfer function to film
+    /// dye density, in place.
+    pub fn convert_film(&self, image: &mut ImageBuf) {
+        stages::filming::decode_input_cctf(image, &self.params);
+        self.film_converter().convert_image(image);
+    }
+
+    pub fn film_converter(&self) -> crate::convert::FilmConverter {
+        crate::convert::FilmConverter::new(&self.film, &self.params).unwrap_or_else(|error| {
+            tracing::error!(%error, "invalid film converter settings; using default scan illuminant");
+            let mut params = self.params.clone();
+            params.film_render.convert = Default::default();
+            crate::convert::FilmConverter::new(&self.film, &params)
+                .expect("default scan illuminant must be valid")
+        })
+    }
+
+    pub fn print_film_density(&self, cmy: ImageBuf) -> ImageBuf {
+        static CPU: spektrafilm_gpu::cpu_backend::CpuBackend =
+            spektrafilm_gpu::cpu_backend::CpuBackend;
+        let color_ref = crate::color_reference::ColorReference::compute(
+            &self.film,
+            &self.print,
+            &self.params,
+            &self.print_illuminant,
+            self.print_exposure_factor,
+            self.preflash_raw,
+        );
+        self.print_and_scan(cmy, &CPU, &color_ref)
+    }
+
+    pub fn film_scene(&self, image: ImageBuf) -> ImageBuf {
+        static CPU: spektrafilm_gpu::cpu_backend::CpuBackend =
+            spektrafilm_gpu::cpu_backend::CpuBackend;
+        let color_ref = crate::color_reference::ColorReference::compute(
+            &self.film,
+            &self.print,
+            &self.params,
+            &self.print_illuminant,
+            self.print_exposure_factor,
+            self.preflash_raw,
+        );
+        let log_raw = stages::filming::expose(
+            image,
+            &self.film,
+            &self.params,
+            &CPU,
+            self.tc_lut.as_ref(),
+            &select_illuminant(&self.front_illuminant),
+            color_ref.filming_exposure_correction,
+            0.0,
+        );
+        stages::filming::develop(log_raw, &self.film, &self.params, &CPU)
+    }
+
     /// The CPU chain on a small image, keeping its taps: the film's log10
     /// exposure, the paper's log10 exposure (`None` when the film is
     /// scanned directly), and the scan. For the tone graph
@@ -1145,7 +1286,9 @@ impl Pipeline {
             if matches!(
                 render_look,
                 crate::params::RenderLook::HasselbladHncs
+                    | crate::params::RenderLook::HasselbladHncsPython
                     | crate::params::RenderLook::HasselbladHncsSmooth
+                    | crate::params::RenderLook::CanonR5Population
                     | crate::params::RenderLook::ReferentColorHncs
                     | crate::params::RenderLook::ReferentOutputHncsTone
                     | crate::params::RenderLook::ReferentOutputHncsSmoothTone
@@ -1169,6 +1312,18 @@ impl Pipeline {
                         &render_params.io.output_color_space,
                         encoded,
                         &render_params.post.hncs,
+                    );
+                } else if render_look == crate::params::RenderLook::HasselbladHncsPython {
+                    crate::hncs::apply_hncs_python(
+                        &mut scan,
+                        &render_params.io.output_color_space,
+                        encoded,
+                    );
+                } else if render_look == crate::params::RenderLook::CanonR5Population {
+                    crate::hncs::apply_canon_r5_population(
+                        &mut scan,
+                        &render_params.io.output_color_space,
+                        encoded,
                     );
                 } else {
                     crate::hncs::apply_reference(
@@ -1363,7 +1518,10 @@ impl Pipeline {
             && !matches!(
                 self.params.io.effective_render_look(),
                 crate::params::RenderLook::ReferentOutput
+                    | crate::params::RenderLook::AcesSdrHillFit
+                    | crate::params::RenderLook::CanonR5Population
                     | crate::params::RenderLook::HasselbladHncs
+                    | crate::params::RenderLook::HasselbladHncsPython
                     | crate::params::RenderLook::HasselbladHncsSmooth
                     | crate::params::RenderLook::ReferentColorHncs
                     | crate::params::RenderLook::ReferentOutputHncsTone

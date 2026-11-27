@@ -28,6 +28,9 @@ pub fn catalog(
         profiles.push(json!({
             "id": stock, "name": p.info.name.as_ref().unwrap_or(&stock),
             "paper": p.info.support == "paper" || p.info.stage == "printing",
+            // A motion-picture print film (film printed onto, as Kodak 2383 and
+            // the Eterna-CP prints), for the pickers' Motion Picture Print group.
+            "cine_print": p.info.support == "film" && p.info.stage == "printing",
             "positive": p.is_positive(), "bw": p.is_bw(),
             "target_print": p.info.target_print, "development_times": p.data.development_time,
             // Where the profile comes from, for Settings' Fotufilm films choice.

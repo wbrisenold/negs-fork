@@ -226,6 +226,16 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
     /// that border is chosen.
     private(set) var filmStrip: FilmStrip?
     private(set) var stocks: [Stock] = []
+    private(set) var colorFilters: [ColorFilter] = []
+    var colorFilter: String { value(ColorFilter.path).string }
+    var showNegsBuiltFilms: Bool { UserDefaults.standard.bool(forKey: NegsBuiltFilms.key) }
+    var imageFlip: Bool { value("io.flip").bool }
+    var loadingOriginal: Bool { originalLoad != nil }
+    var lightroomApps = Lightroom.remembered
+    var lightroomWords: String?
+    @ObservationIgnored var lightroomDetected: Date?
+    @ObservationIgnored var lightroomCleanup: Task<Void, Never>?
+    @ObservationIgnored var lightroomHandingOver = false
     private(set) var source: URL?
     /// Exact camera-reported RAW white-balance multipliers, read off the UI thread.
     private(set) var asShotWhiteBalance: [Double?]?
@@ -546,6 +556,8 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
     /// Grid thumbnails waiting while the grid opens or folds: a flyer is
     /// carrying them, or they fade in after.
     var sheetWaiting: Set<URL> = []
+    var sheetCarried: Set<URL> = []
+    var sheetBoxesWaiting: Set<URL> = []
     /// Where the strip's frames and the grid's thumbnails are drawn, for
     /// the flight between them.
     @ObservationIgnored let places = ThumbnailPlaces()
@@ -722,7 +734,13 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
         films.filter { fotufilmFilms.lists($0) || kept.contains($0.id) }
     }
     var filmGroups: [StockGroup] { StockGroup.films(listedFilms, papers: papers) }
-    var paperGroups: [StockGroup] { StockGroup.papers(papers) }
+    /// The papers the menus and the tray list (Show Negs-built films hides
+    /// the Negs-built print films), keeping the one in use as for films.
+    var listedPapers: [Stock] { listedPapers(keeping: [paper, tray?.before.paper].compactMap { $0 }) }
+    func listedPapers(keeping kept: [String]) -> [Stock] {
+        papers.filter { NegsBuiltFilms.lists($0, shown: showNegsBuiltFilms) || kept.contains($0.id) }
+    }
+    var paperGroups: [StockGroup] { StockGroup.papers(listedPapers) }
     var filmName: String { films.first { $0.id == film }?.name ?? film }
     var paperName: String { papers.first { $0.id == paper }?.name ?? paper }
     var canSave: Bool { !closing && previewCurrent && image != nil && !rendering && !saving && !exporting && !cropping }
@@ -946,6 +964,7 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
         sidecarWrite?.cancel(); sidecarWrite = nil
         self.catalog = catalog
         stocks = catalog["profiles"].array.map(Stock.init)
+        colorFilters = catalog["color_filters"].array.map(ColorFilter.init)
         defaults = catalog["defaults"]
         defaults["settings.rgb_to_raw_method"] = .string(newPhotoSpectralMethod)
         // The engine leaves lens correction off for params from before it, so
@@ -1057,6 +1076,10 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
     func set(_ path: String, _ value: JSONValue) {
         var next = state; next.params[path] = value
         apply(next, action: "Change Adjustment")
+    }
+    func setColorFilter(_ key: String) { set(ColorFilter.path, .string(key)) }
+    func colorFilterStops(_ key: String) -> Double? {
+        stocks.first { $0.id == film }?.filterStops[key]
     }
     func setWhiteBalanceMode(_ mode: String) {
         var next = state
@@ -4363,6 +4386,7 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
         let interactiveOverlay = mode == .clipping || mode == .saturation || mode == .skinTone
         let coalesceSliderUpdates = interactiveOverlay && interacting
         let priority: TaskPriority = interactiveOverlay ? .userInitiated : .utility
+        let saturationMode = saturationOverlayMode
         diagnosticOverlayTask = Task.detached(priority: priority) { [weak self] in
             if coalesceSliderUpdates {
                 try? await Task.sleep(for: .milliseconds(45))
@@ -4375,7 +4399,7 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
                 image, low: lowThreshold, high: highThreshold, clippedHighlights: clippedHighlights)
             case .falseColor: overlay = ImageScopes.falseColorOverlay(image)
             case .saturation:
-                switch self?.saturationOverlayMode ?? .monoBalance {
+                switch saturationMode {
                 case .monoBalance: overlay = ImageScopes.saturationFalseColorOverlay(image)
                 case .ciecam02: overlay = ImageScopes.ciecam02SaturationOverlay(image)
                 }
@@ -4912,7 +4936,10 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
             let listed = Set(listedFilms.map(\.id))
             entries += previews.filmsFavoritesFirst.filter { listed.contains($0.stock.id) }
         }
-        if previews.paperOpen, previews.paperShown, !scanning { entries += previews.papersFavoritesFirst }
+        if previews.paperOpen, previews.paperShown, !scanning {
+            let listed = Set(listedPapers.map(\.id))
+            entries += previews.papersFavoritesFirst.filter { listed.contains($0.stock.id) }
+        }
         for entry in entries {
             let command = PreviewRules.request(for: entry.stock, keepPaper: previews.keepPaper, state: rendered, stocks: stocks,
                                                source: source, generation: generation)
@@ -5844,7 +5871,7 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
     }
 
     /// One exporter at a time: not during a single export either.
-    private var canStartBatch: Bool { !closing && !saving && !batchRunning && !exporting && hasCatalog && engine != nil }
+    var canStartBatch: Bool { !closing && !saving && !batchRunning && !exporting && hasCatalog && engine != nil }
 
     /// Each target's edits as they are now, and the name it gets.
     func batchItems(_ targets: [URL], options: BatchOptions) -> [BatchItem] {

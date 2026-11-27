@@ -925,8 +925,8 @@ struct TabRow: View {
         HStack(alignment: .center, spacing: 2) {
             ForEach(InspectorTab.focusOrder, id: \.self) { item in
                 TabWord(title: item.title, symbol: item.symbol, chosen: tab == item, count: counts[item] ?? 0,
-                        tab: item,
-                        edits: edits.map { make in { dismiss in make(item, dismiss) } }) { tab = item }
+                        edits: edits.map { make in { dismiss in make(item, dismiss) } },
+                        tab: item) { tab = item }
             }
         }
         .padding(.horizontal, 10)
@@ -980,39 +980,48 @@ struct TabWord: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            Button(action: choose) {
-                VStack(spacing: 3) {
-                    Image(systemName: symbol).font(.system(size: 12, weight: .medium))
-                    Text(title).font(Theme.text(9.5, weight: chosen ? 600 : 500))
-                        .lineLimit(1).minimumScaleFactor(0.8)
-                }
-                .frame(maxWidth: .infinity, minHeight: 38, maxHeight: 38)
-                .foregroundStyle(chosen ? Theme.accent : hovered ? Theme.paper : Theme.label)
-                .padding(.horizontal, 2).padding(.vertical, 5)
-                .background(chosen ? Theme.accent.opacity(0.13) : .clear,
-                            in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .overlay {
-                    if chosen {
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .strokeBorder(Theme.accent.opacity(0.32), lineWidth: 1)
-                    }
-                }
-            }
+            tabButton.frame(maxWidth: .infinity)
+            if count > 0 { countMark.padding(.top, 2).padding(.trailing, 4) }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var tabButton: some View {
+        Button(action: choose) { tabLabel }
             .buttonStyle(InkPressStyle())
             .onHover { hovered = $0 }
             .inkFocus(activate: choose)
             .modifier(TaskTabKeyboardShortcut(tab: tab))
-            .accessibilityLabel(tab?.accessibilityLabel(editCount: count) ?? (count > 0 ? "\(title), \(count) \(count == 1 ? "edit" : "edits")" : title))
-            .accessibilityValue(tab?.accessibilityValue(isSelected: chosen, editCount: count))
+            .accessibilityLabel(accessibilityTitle)
+            .accessibilityValue(tab?.accessibilityValue(isSelected: chosen, editCount: count) ?? "")
             .accessibilityHint(tab?.accessibilityHint ?? "")
             .help(tab?.accessibilityHint ?? "")
             .accessibilityAddTraits(chosen ? [.isSelected, .isButton] : .isButton)
-            .frame(maxWidth: .infinity)
-            if count > 0 {
-                countMark.padding(.top, 2).padding(.trailing, 4)
+    }
+
+    private var tabLabel: some View {
+        VStack(spacing: 3) {
+            Image(systemName: symbol).font(.system(size: 12, weight: .medium))
+            Text(title).font(Theme.text(9.5, weight: chosen ? 600 : 500))
+                .lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, minHeight: 38, maxHeight: 38)
+        .foregroundStyle(chosen ? Theme.accent : hovered ? Theme.paper : Theme.label)
+        .padding(.horizontal, 2).padding(.vertical, 5)
+        .background(chosen ? Theme.accent.opacity(0.13) : .clear,
+                    in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .overlay {
+            if chosen {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .strokeBorder(Theme.accent.opacity(0.32), lineWidth: 1)
             }
         }
-        .frame(maxWidth: .infinity)
+    }
+
+    private var accessibilityTitle: String {
+        if let tab { return tab.accessibilityLabel(editCount: count) }
+        guard count > 0 else { return title }
+        return "\(title), \(count) \(count == 1 ? "edit" : "edits")"
     }
 
     @ViewBuilder private var countMark: some View {
@@ -1035,7 +1044,7 @@ private struct TaskTabKeyboardShortcut: ViewModifier {
 
     @ViewBuilder func body(content: Content) -> some View {
         if let tab {
-            content.keyboardShortcut(KeyEquivalent(tab.shortcutKey), modifiers: tab.shortcutModifiers)
+            content.keyboardShortcut(KeyEquivalent(tab.shortcutKey.first ?? "1"), modifiers: tab.shortcutModifiers)
         } else {
             content
         }
@@ -1856,7 +1865,7 @@ struct AdjustmentInspector: View {
         let renderLookPath = "io.render_look"
         let legacyReferentEnabled = "io.referent_logc3_enabled"
         let renderLookValue = model.value(renderLookPath).string
-        let renderLook = ["off", "hasselblad_hncs", "hasselblad_hncs_smooth", "referent_output", "referent_output_hncs_tone", "referent_output_hncs_smooth_tone"].contains(renderLookValue)
+        let renderLook = ["off", "aces_sdr_hill_fit", "hasselblad_hncs", "hasselblad_hncs_python", "hasselblad_hncs_smooth", "referent_output", "referent_output_hncs_tone", "referent_output_hncs_smooth_tone"].contains(renderLookValue)
             ? renderLookValue
             : "referent_output"
         let referentPath = model.value("io.referent_logc3_path").string
@@ -1866,7 +1875,9 @@ struct AdjustmentInspector: View {
             ChoiceRow(title: "Output look",
                       items: [
                         .option("Original Tone Mapper", tag: "off"),
+                        .option("ACES SDR (Hill fit)", tag: "aces_sdr_hill_fit"),
                         .option("HNCS Reference", tag: "hasselblad_hncs"),
+                        .option("HNCS Python Baseline", tag: "hasselblad_hncs_python"),
                         .option("HNCS Smooth", tag: "hasselblad_hncs_smooth"),
                         .option("Full Output Transform", tag: "referent_output"),
                         .option("Full Output + HNCS", tag: "referent_output_hncs_tone"),
@@ -1891,19 +1902,23 @@ struct AdjustmentInspector: View {
                 }
             } else if renderLook == "off" {
                 HintText("Uses Negs’ original output path without the Referent transform or HNCS tone mapping.")
+            } else if renderLook == "aces_sdr_hill_fit" {
+                HintText("Applies the fitted ACES RRT/SDR ODT approximation in linear Rec.709 after the film scan and finishing edits.")
+            } else if renderLook == "hasselblad_hncs_python" {
+                HintText("Ports the Python apply_hncs() baseline: 8-bit Lab, exposure lift, full 8×8 CLAHE, and film curve; fixed reference settings, without extra skin protection.")
             } else if renderLook == "hasselblad_hncs" || renderLook == "hasselblad_hncs_smooth" {
                 HintText(renderLook == "hasselblad_hncs"
                          ? "Applies the reference HNCS-style gamma lift, local CLAHE contrast, and film curve to finished-image luminance."
                          : "Applies a smooth global HNCS-style gamma lift and film curve to finished-image luminance, without tile-local contrast.")
             }
-            if renderLook.contains("hncs") && !renderLook.contains("smooth") {
+            if renderLook.contains("hncs") && !renderLook.contains("smooth") && renderLook != "hasselblad_hncs_python" {
                 LabeledSlider(title: "Local contrast", value: model.number("post.hncs.clahe_strength", range: 0...100, step: 1),
                               range: 0...100, step: 1, unit: "%", defaultValue: 55,
                               modified: model.isModified("post.hncs.clahe_strength"), reset: { model.resetValue("post.hncs.clahe_strength") },
                               editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Adjust HNCS") },
                               help: "Controls how strongly the reference HNCS option uses local CLAHE contrast.")
             }
-            if renderLook.contains("hncs") {
+            if renderLook.contains("hncs") && renderLook != "hasselblad_hncs_python" {
                 LabeledSlider(title: "Skin / highlight protection", value: model.number("post.hncs.skin_protection", range: 0...100, step: 1),
                               range: 0...100, step: 1, unit: "%", defaultValue: 55,
                               modified: model.isModified("post.hncs.skin_protection"), reset: { model.resetValue("post.hncs.skin_protection") },
@@ -2133,19 +2148,130 @@ private struct ColorCorrectionWheel: View {
     @State private var eventStarted = false
     private let path = "prep.color_correction_offset"
 
+    private var rawWhiteBalance: Bool { model.isRaw }
+    private var values: [JSONValue] { model.value(path).array }
+    private var hue: Double {
+        rawWhiteBalance ? model.whiteBalanceWheelPosition().hue : values.first?.double ?? 0
+    }
+    private var strength: Double {
+        rawWhiteBalance ? model.whiteBalanceWheelPosition().strength : values.dropFirst().first?.double ?? 0
+    }
+    private var wbMode: String { model.value("io.raw_white_balance.mode").string }
+    private var temperature: Double {
+        wbMode == "custom" ? model.value("io.raw_white_balance.temperature").double : wbMode == "tungsten" ? 2850 : 6504
+    }
+    private var tint: Double {
+        model.whiteBalanceTintAmount(for: wbMode == "custom" ? model.value("io.raw_white_balance.tint").double : 1)
+    }
+    private var whiteBalanceModified: Bool {
+        rawWhiteBalance && ["io.raw_white_balance.mode", "io.raw_white_balance.temperature", "io.raw_white_balance.tint"]
+            .contains(where: model.isModified)
+    }
+
     var body: some View {
-        let values = model.value(path).array
-        let rawWhiteBalance = model.isRaw
-        let whiteBalanceWheel = model.whiteBalanceWheelPosition()
-        let hue = rawWhiteBalance ? whiteBalanceWheel.hue : values.first?.double ?? 0
-        let strength = rawWhiteBalance ? whiteBalanceWheel.strength : values.dropFirst().first?.double ?? 0
-        let mode = model.value("io.raw_white_balance.mode").string
-        let temperature = mode == "custom" ? model.value("io.raw_white_balance.temperature").double
-            : mode == "tungsten" ? 2850 : 6504
-        let tint = model.whiteBalanceTintAmount(for: mode == "custom" ? model.value("io.raw_white_balance.tint").double : 1)
-        let whiteBalanceModified = rawWhiteBalance && [
-            "io.raw_white_balance.mode", "io.raw_white_balance.temperature", "io.raw_white_balance.tint"
-        ].contains(where: model.isModified)
+        VStack(spacing: 10) {
+            header
+            wheelRow
+            strengthControl
+        }
+        .padding(.horizontal, Theme.Size.gutter)
+        .padding(.vertical, 8)
+    }
+
+    private var header: some View {
+        HStack {
+            Text(rawWhiteBalance ? "RAW balance · before film" : "Color offset · before film scan")
+                .font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.dim)
+            Spacer()
+            Button("Reset") {
+                model.beginInteraction()
+                if rawWhiteBalance { model.resetColorCorrection() }
+                else {
+                    model.set(path, .array([.number(0), .number(0)]))
+                    model.resetValue("prep.color_correction_saturation")
+                }
+                model.endInteraction(action: "Reset Color Correction")
+            }
+            .buttonStyle(InkPressStyle())
+            .disabled(hue == 0 && strength == 0 && !whiteBalanceModified
+                      && !model.isModified(path) && !model.isModified("prep.color_correction_saturation"))
+            .accessibilityLabel("Reset color correction")
+        }
+    }
+
+    private var wheelRow: some View {
+        HStack(alignment: .center, spacing: 12) {
+            wheel.frame(width: 168, height: 168)
+            wheelReadout
+            Spacer(minLength: 0)
+        }
+        .frame(height: 168)
+    }
+
+    private var wheelReadout: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if rawWhiteBalance {
+                Text("\(Int(temperature.rounded())) K  ·  Tint \(Int(tint.rounded()))")
+                    .font(Theme.metadata(11, weight: .medium)).foregroundStyle(Theme.paper)
+                Text("Temperature  ← →   ·   Tint  ↑ ↓").foregroundStyle(Theme.dim)
+            } else {
+                Text("Hue \(Int(hue.rounded()))°  ·  \(Int(strength.rounded()))%")
+                    .font(Theme.metadata(11, weight: .medium)).foregroundStyle(Theme.paper)
+                Text("Wheel: hue  ·  Strength: amount").foregroundStyle(Theme.dim)
+            }
+        }
+        .font(Theme.ui(11))
+    }
+
+    private var wheel: some View {
+        GeometryReader { geometry in
+            wheelContent(side: min(geometry.size.width, geometry.size.height))
+        }
+    }
+
+    @ViewBuilder private func wheelContent(side: CGFloat) -> some View {
+        let radius = side / 2 - 9
+        let radians = hue * .pi / 180
+        if rawWhiteBalance {
+            let dominant = max(abs(cos(radians)), abs(sin(radians)))
+            RawWhiteBalancePad(model: model, temperature: temperature, tint: tint,
+                               temperatureOffset: dominant > 0 ? cos(radians) / dominant * strength : 0,
+                               tintOffset: dominant > 0 ? sin(radians) / dominant * strength : 0)
+        } else {
+            colorWheel(side: side, radius: radius, radians: radians)
+        }
+    }
+
+    private func colorWheel(side: CGFloat, radius: CGFloat, radians: Double) -> some View {
+        let marker = CGPoint(x: side / 2 + cos(radians) * radius * strength / 100,
+                             y: side / 2 + sin(radians) * radius * strength / 100)
+        return ZStack {
+            Circle()
+                .fill(AngularGradient(colors: [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .red], center: .center))
+                .overlay(Circle().fill(RadialGradient(colors: [.white, .clear], center: .center, startRadius: 0, endRadius: radius)))
+            ForEach([0.25, 0.5, 0.75, 1.0], id: \.self) { fraction in
+                Circle().stroke(.white.opacity(fraction == 1 ? 0.72 : 0.25), lineWidth: fraction == 1 ? 1.2 : 0.6)
+                    .scaleEffect(fraction)
+            }
+            Circle().fill(.white).frame(width: 11, height: 11)
+                .overlay(Circle().stroke(.black.opacity(0.8), lineWidth: 1.5)).position(marker)
+        }
+        .frame(width: side, height: side)
+        .contentShape(Circle())
+        .gesture(DragGesture(minimumDistance: 0)
+            .onChanged { event in
+                if !eventStarted { eventStarted = true; model.beginInteraction() }
+                let dx = event.location.x - side / 2
+                let dy = event.location.y - side / 2
+                if hypot(dx, dy) > radius * 0.12 {
+                    let angle = (atan2(dy, dx) * 180 / .pi + 360).truncatingRemainder(dividingBy: 360)
+                    model.set(path, .array([.number(Double(angle)), .number(strength)]))
+                }
+            }
+            .onEnded { _ in eventStarted = false; model.endInteraction(action: "Color Correction") })
+    }
+
+    private var strengthControl: some View {
         let strengthBinding = Binding<Double>(
             get: {
                 let raw = rawWhiteBalance ? model.whiteBalanceWheelPosition().strength : model.value(path).array.dropFirst().first?.double ?? 0
@@ -2159,87 +2285,7 @@ private struct ColorCorrectionWheel: View {
                     model.set(path, .array([current.first ?? .number(0), .number(amount)]))
                 }
             })
-        VStack(spacing: 10) {
-            HStack {
-                Text(rawWhiteBalance ? "RAW balance · before film" : "Color offset · before film scan")
-                    .font(Theme.ui(11, weight: .medium)).foregroundStyle(Theme.dim)
-                Spacer()
-                Button("Reset") {
-                    model.beginInteraction()
-                    if rawWhiteBalance {
-                        model.resetColorCorrection()
-                    } else {
-                        model.set(path, .array([.number(0), .number(0)]))
-                        model.resetValue("prep.color_correction_saturation")
-                    }
-                    model.endInteraction(action: "Reset Color Correction")
-                }
-                .buttonStyle(InkPressStyle())
-                .disabled(hue == 0 && strength == 0 && !whiteBalanceModified
-                          && !model.isModified(path) && !model.isModified("prep.color_correction_saturation"))
-                .accessibilityLabel("Reset color correction")
-            }
-            HStack(alignment: .center, spacing: 12) {
-                GeometryReader { geometry in
-                    let side = min(geometry.size.width, geometry.size.height)
-                    let radius = side / 2 - 9
-                    let radians = hue * .pi / 180
-                    let marker = CGPoint(x: side / 2 + cos(radians) * radius * strength / 100,
-                                         y: side / 2 + sin(radians) * radius * strength / 100)
-                    if rawWhiteBalance {
-                        let dominant = max(abs(cos(radians)), abs(sin(radians)))
-                        let temperatureOffset = dominant > 0 ? cos(radians) / dominant * strength : 0
-                        let tintOffset = dominant > 0 ? sin(radians) / dominant * strength : 0
-                        RawWhiteBalancePad(model: model, temperature: temperature, tint: tint,
-                                           temperatureOffset: temperatureOffset, tintOffset: tintOffset)
-                    } else {
-                        ZStack {
-                            Circle()
-                                .fill(AngularGradient(colors: [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .red], center: .center))
-                                .overlay(Circle().fill(RadialGradient(colors: [.white, .clear], center: .center, startRadius: 0, endRadius: radius)))
-                            ForEach([0.25, 0.5, 0.75, 1.0], id: \.self) { fraction in
-                                Circle().stroke(.white.opacity(fraction == 1 ? 0.72 : 0.25), lineWidth: fraction == 1 ? 1.2 : 0.6)
-                                    .scaleEffect(fraction)
-                            }
-                            Circle().fill(.white).frame(width: 11, height: 11)
-                                .overlay(Circle().stroke(.black.opacity(0.8), lineWidth: 1.5))
-                                .position(marker)
-                        }
-                        .frame(width: side, height: side)
-                        .contentShape(Circle())
-                        .gesture(DragGesture(minimumDistance: 0)
-                            .onChanged { event in
-                                if !eventStarted { eventStarted = true; model.beginInteraction() }
-                                let dx = event.location.x - side / 2
-                                let dy = event.location.y - side / 2
-                                if hypot(dx, dy) > radius * 0.12 {
-                                    let angle = (atan2(dy, dx) * 180 / .pi + 360).truncatingRemainder(dividingBy: 360)
-                                    model.set(path, .array([.number(Double(angle)), .number(strength)]))
-                                }
-                            }
-                            .onEnded { _ in eventStarted = false; model.endInteraction(action: "Color Correction") })
-                    }
-                }
-                .frame(width: 168, height: 168)
-
-                VStack(alignment: .leading, spacing: 5) {
-                    if rawWhiteBalance {
-                        Text("\(Int(temperature.rounded())) K  ·  Tint \(Int(tint.rounded()))")
-                            .font(Theme.metadata(11, weight: .medium)).foregroundStyle(Theme.paper)
-                        Text("Temperature  ← →   ·   Tint  ↑ ↓")
-                            .foregroundStyle(Theme.dim)
-                    } else {
-                        Text("Hue \(Int(hue.rounded()))°  ·  \(Int(strength.rounded()))%")
-                            .font(Theme.metadata(11, weight: .medium)).foregroundStyle(Theme.paper)
-                        Text("Wheel: hue  ·  Strength: amount")
-                            .foregroundStyle(Theme.dim)
-                    }
-                }
-                .font(Theme.ui(11))
-                Spacer(minLength: 0)
-            }
-            .frame(height: 168)
-            LabeledSlider(title: rawWhiteBalance ? "WB amount" : "Strength", value: strengthBinding,
+        return LabeledSlider(title: rawWhiteBalance ? "WB amount" : "Strength", value: strengthBinding,
                           range: 0...100, step: 0.1, unit: "%", defaultValue: 0,
                           modified: rawWhiteBalance ? whiteBalanceModified : model.isModified(path),
                           reset: {
@@ -2254,9 +2300,6 @@ private struct ColorCorrectionWheel: View {
                           help: rawWhiteBalance
                             ? "Make smaller WB changes near neutral. The full temperature and tint range remains available at the ends; changing amount preserves the selected direction."
                             : "Adjust the global color correction strength from neutral. The response is finer near zero and ramps up smoothly; changing strength does not alter the selected hue.")
-        }
-        .padding(.horizontal, Theme.Size.gutter)
-        .padding(.vertical, 8)
     }
 }
 

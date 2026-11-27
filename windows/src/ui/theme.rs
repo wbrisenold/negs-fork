@@ -13,9 +13,6 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::sync::LazyLock;
-
-use negs_core_sys::theme as core;
 
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Dwm::*;
@@ -26,6 +23,8 @@ use windows::Win32::UI::Accessibility::{HIGHCONTRASTW, HCF_HIGHCONTRASTON};
 use windows::Win32::UI::Controls::{COMBOBOXINFO, GetComboBoxInfo, SetWindowTheme};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{PCSTR, PCWSTR, w};
+
+pub use negs_app::theme::*;
 
 /// A GDI colour, 0x00bbggrr.
 pub type Color = u32;
@@ -132,7 +131,7 @@ thread_local! {
     static CHOSEN: Cell<ThemeName> = const { Cell::new(ThemeName::Darkroom) };
     /// The tokens the window is drawn with: the shown theme's, or the
     /// system's colours in high contrast.
-    static TOKENS: Cell<Tokens> = const { Cell::new(UNSET) };
+    static TOKENS: Cell<Tokens> = const { Cell::new(DARKROOM) };
     static BRUSHES: RefCell<HashMap<Color, isize>> = RefCell::new(HashMap::new());
 }
 
@@ -282,15 +281,6 @@ fn high_contrast_tokens(p: &Palette) -> Tokens {
     Tokens { hex: h, dark: luminance(h.bg) < 0.5, highlighter: false, plain: true, film: h }
 }
 
-/// The relative luminance of 0xRRGGBB (WCAG).
-pub fn luminance(rgb: u32) -> f64 {
-    unsafe { core::negs_theme_luminance(rgb) }
-}
-
-pub fn contrast(a: u32, b: u32) -> f64 {
-    unsafe { core::negs_theme_contrast(a, b) }
-}
-
 fn high_contrast() -> bool {
     let mut info = HIGHCONTRASTW { cbSize: std::mem::size_of::<HIGHCONTRASTW>() as u32, ..Default::default() };
     let ok = unsafe { SystemParametersInfoW(SPI_GETHIGHCONTRAST, info.cbSize, Some(&mut info as *mut _ as *mut _), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0)) }.is_ok();
@@ -312,12 +302,6 @@ fn apps_use_dark() -> bool {
         )
     };
     status == ERROR_SUCCESS && value == 0
-}
-
-/// `a` moved towards `b` by `t`.
-pub fn mix(a: Color, b: Color, t: f64) -> Color {
-    // Channel by channel, so a GDI colour (0x00bbggrr) mixes as well as a token.
-    unsafe { core::negs_theme_mix(a, b, t) }
 }
 
 /// A solid brush for `color`, kept for the life of the thread.
@@ -510,285 +494,9 @@ pub fn apply_all() {
     }
 }
 
-// MARK: The redesign's themes
-
-// The macOS app's five themes (round 28), one token table each, exactly as
-// `AppTheme.swift` and `Theme.swift` have them (design/proposals/
-// IMPLEMENTATION-THEMES.md, IMPLEMENTATION.md §2.1). The title bar, the
-// status line, the empty window, the alert card and the canvas draw with
-// them directly; the rest reads the palette made from them (`palette_of`).
-
-/// A built-in theme. Darkroom is the default. On Windows, Plain follows
-/// Windows' light or dark setting (`resolved`); Plain dark is dark always.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ThemeName {
-    Darkroom,
-    ContactSheet,
-    LightTable,
-    Daylight,
-    Plain,
-    PlainDark,
-}
-
-impl ThemeName {
-    pub const ALL: [ThemeName; 6] = [Self::Darkroom, Self::ContactSheet, Self::LightTable, Self::Daylight, Self::Plain, Self::PlainDark];
-
-    /// The core's id (`NEGS_THEME_*`): the cases are in its order.
-    fn id(self) -> usize {
-        self as usize
-    }
-
-    /// The stored name, as the macOS app's `AppTheme` raw value.
-    pub fn key(self) -> &'static str {
-        NAMES[self.id()].0
-    }
-
-    /// A stored name or a title, any case, with or without spaces.
-    pub fn parse(text: &str) -> Option<Self> {
-        let id = unsafe { core::negs_theme_parse(text.as_ptr().cast(), text.len()) };
-        Self::ALL.get(usize::try_from(id).ok()?).copied()
-    }
-
-    pub fn title(self) -> &'static str {
-        NAMES[self.id()].1
-    }
-
-    /// The line under the swatches in Settings › Look.
-    pub fn hint(self) -> &'static str {
-        NAMES[self.id()].2
-    }
-
-    pub fn tokens(self) -> &'static Tokens {
-        &TABLE[self.id()]
-    }
-}
-
-/// One theme's colours as 0xRRGGBB, sRGB (Swift's `Palette.Hex`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Hex {
-    /// The sheet the photograph lies on, and the title band.
-    pub bg: u32,
-    /// The inspector, Settings and the alert.
-    pub panel: u32,
-    /// The strip, the tray and the leader.
-    pub film: u32,
-    /// Behind the grid.
-    pub grid: u32,
-    /// Rules between sections and modules.
-    pub line: u32,
-    /// Slider track, outlines, separators, outlined buttons.
-    pub track: u32,
-    /// Values at their default, hints, secondary words.
-    pub dim: u32,
-    /// Control labels.
-    pub label: u32,
-    /// What's being read: names, changed values, the focus box.
-    pub paper: u32,
-    /// The pencil's thin marks: rings, dots, fills, lines. Never words.
-    pub accent: u32,
-    /// The Export and Done buttons, and the words on them.
-    pub fill: u32,
-    pub on_fill: u32,
-    /// Errors and warnings, always as words.
-    pub warn: u32,
-    /// A tile not yet developed.
-    pub blank: u32,
-}
-
-impl Hex {
-    /// Every token with its Swift name, for swatches and checks.
-    pub fn named(&self) -> [(&'static str, u32); 14] {
-        [
-            ("bg", self.bg),
-            ("panel", self.panel),
-            ("film", self.film),
-            ("grid", self.grid),
-            ("line", self.line),
-            ("track", self.track),
-            ("dim", self.dim),
-            ("label", self.label),
-            ("paper", self.paper),
-            ("accent", self.accent),
-            ("fill", self.fill),
-            ("onFill", self.on_fill),
-            ("warn", self.warn),
-            ("blank", self.blank),
-        ]
-    }
-}
-
-/// A theme: its colours, the inks on its film, and how its marks are drawn.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Tokens {
-    pub hex: Hex,
-    /// Light ink on dark: menus and pop-ups are drawn dark.
-    pub dark: bool,
-    /// The pencil under a word is a highlighter swiped behind its lower
-    /// half (Light table); strikes stay a pencil line in `accent`.
-    pub highlighter: bool,
-    /// The system font for the serif, and straight, upright pencil marks.
-    pub plain: bool,
-    /// The words and marks on the film (strip, tray, leader): the theme's
-    /// own, except where the film is dark under light panels (Contact sheet).
-    pub film: Hex,
-}
-
-/// Before the first `detect`, which sets the shown theme's.
-const UNSET_HEX: Hex = Hex {
-    bg: 0,
-    panel: 0,
-    film: 0,
-    grid: 0,
-    line: 0,
-    track: 0,
-    dim: 0,
-    label: 0,
-    paper: 0,
-    accent: 0,
-    fill: 0,
-    on_fill: 0,
-    warn: 0,
-    blank: 0,
-};
-const UNSET: Tokens = Tokens { hex: UNSET_HEX, dark: true, highlighter: false, plain: false, film: UNSET_HEX };
-
-fn hex_of(h: &core::negs_theme_hex_t) -> Hex {
-    Hex {
-        bg: h.bg,
-        panel: h.panel,
-        film: h.film,
-        grid: h.grid,
-        line: h.line,
-        track: h.track,
-        dim: h.dim,
-        label: h.label,
-        paper: h.paper,
-        accent: h.accent,
-        fill: h.fill,
-        on_fill: h.on_fill,
-        warn: h.warn,
-        blank: h.blank,
-    }
-}
-
-fn core_theme(id: usize) -> core::negs_theme_t {
-    let mut t = core::negs_theme_t::default();
-    assert_eq!(unsafe { core::negs_theme_get(id as u32, &mut t) }, 1, "the core has no theme {id}");
-    t
-}
-
-fn static_str(p: *const std::os::raw::c_char) -> &'static str {
-    // The core's names and hints are static, NUL-terminated UTF-8.
-    unsafe { std::ffi::CStr::from_ptr(p) }.to_str().expect("UTF-8 from the core")
-}
-
-/// The six themes' tokens, from the shared core (core/src/theme), in
-/// `ThemeName` order: the same tables the macOS app draws with.
-static TABLE: LazyLock<[Tokens; 6]> = LazyLock::new(|| {
-    assert_eq!(unsafe { core::negs_theme_count() } as usize, ThemeName::ALL.len());
-    std::array::from_fn(|id| {
-        let t = core_theme(id);
-        Tokens { hex: hex_of(&t.hex), dark: t.dark != 0, highlighter: t.highlighter != 0, plain: t.plain != 0, film: hex_of(&t.film) }
-    })
-});
-
-/// Each theme's key, title and Windows hint, from the core.
-static NAMES: LazyLock<[(&'static str, &'static str, &'static str); 6]> = LazyLock::new(|| {
-    std::array::from_fn(|id| {
-        let t = core_theme(id);
-        (static_str(t.key), static_str(t.title), static_str(unsafe { core::negs_theme_hint(id as u32, core::NEGS_PLATFORM_WINDOWS) }))
-    })
-});
-
-/// The T2 · Label tokens (IMPLEMENTATION.md §2.1).
-pub static DARKROOM: LazyLock<Tokens> = LazyLock::new(|| TABLE[0]);
-/// Ivory paper and the red grease pencil; the strip stays black film.
-#[cfg(test)]
-pub static CONTACT_SHEET: LazyLock<Tokens> = LazyLock::new(|| TABLE[1]);
-/// Soft warm grey with an amber pencil.
-#[cfg(test)]
-pub static DAYLIGHT: LazyLock<Tokens> = LazyLock::new(|| TABLE[3]);
-
-/// The highlighter's yellow and strength (Light table).
-pub const HIGHLIGHTER_INK: u32 = 0xffd23f;
-pub const HIGHLIGHTER_OPACITY: f32 = 0.85;
-/// Text selection: the pencil at this opacity, never the system blue (§4.9).
-pub const SELECTION_OPACITY: f32 = 0.32;
-/// Outside the crop box the photograph darkens with this, at `CROP_SHADE_OPACITY` (§4.10).
-pub const CROP_SHADE: u32 = 0x080706;
-pub const CROP_SHADE_OPACITY: f32 = 0.6;
-/// Disabled controls fade to this opacity (§2.1: 0.35–0.38).
-pub const DISABLED_OPACITY: f32 = 0.36;
-/// Strip frames other than the current one (§4.4).
-pub const STRIP_DIM: f32 = 0.42;
-
-impl Tokens {
-    /// What dims the window under an alert: black at 0.28 on a dark theme, a
-    /// warm brown at 0.12 on a light one (r28-light.html).
-    pub fn dimming(&self) -> (u32, f32) {
-        // sRGB 0.24, 0.16, 0.08.
-        if self.dark { (0x000000, 0.28) } else { (0x3d2914, 0.12) }
-    }
-    /// Words on a dark badge laid over a photograph: Darkroom's `paper` in
-    /// every theme, since the badge stays dark.
-    pub fn on_photo(&self) -> u32 {
-        DARKROOM.hex.paper
-    }
-    /// The strength of shadows under alerts and tags: softer on a light theme.
-    pub fn shadow_strength(&self) -> f32 {
-        if self.dark { 1.0 } else { 0.3 }
-    }
-}
+// MARK: The redesign's themes (pure-Rust definitions live in `negs_app::theme`)
 
 /// A token as a GDI colour (0x00bbggrr).
 pub fn gdi(hex: u32) -> Color {
     rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
-}
-
-#[cfg(test)]
-mod core_tests {
-    use super::*;
-
-    /// The constants still written here are the core's.
-    #[test]
-    fn constants_are_the_cores() {
-        let mut c = core::negs_theme_constants_t::default();
-        unsafe { core::negs_theme_constants(&mut c) };
-        assert_eq!(HIGHLIGHTER_INK, c.highlighter_ink);
-        assert_eq!(CROP_SHADE, c.crop_shade);
-        for (here, core) in [
-            (HIGHLIGHTER_OPACITY, c.highlighter_opacity),
-            (SELECTION_OPACITY, c.selection_opacity),
-            (CROP_SHADE_OPACITY, c.crop_shade_opacity),
-            (DISABLED_OPACITY, c.disabled_opacity),
-            (STRIP_DIM, c.strip_dim),
-        ] {
-            assert_eq!(here, core as f32);
-        }
-        for dark in [true, false] {
-            let t = Tokens { dark, ..*DARKROOM };
-            let (rgb, alpha) = t.dimming();
-            let d = if dark { c.dimming_dark } else { c.dimming_light };
-            let channel = |shift: u32| ((rgb >> shift) & 0xff) as f64;
-            assert_eq!([channel(16), channel(8), channel(0)], [d[0], d[1], d[2]].map(|v| (v * 255.0).round()));
-            assert_eq!(alpha, d[3] as f32);
-            assert_eq!(t.shadow_strength(), (if dark { c.shadow_dark } else { c.shadow_light }) as f32);
-        }
-    }
-
-    #[test]
-    fn names_and_tables_come_from_the_core() {
-        for (i, theme) in ThemeName::ALL.into_iter().enumerate() {
-            assert_eq!(theme as usize, i);
-            assert_eq!(ThemeName::parse(theme.key()), Some(theme));
-            assert_eq!(ThemeName::parse(theme.title()), Some(theme));
-            assert!(!theme.hint().is_empty());
-        }
-        assert_eq!(ThemeName::parse("neon"), None);
-        assert_eq!(DARKROOM.hex.accent, 0xffd23f);
-        assert_eq!(CONTACT_SHEET.film.accent, 0xe2492f);
-        assert_eq!(ThemeName::Plain.hint(), "Black on light grey in the system font, with plain blue marks. The easiest to read. The default when Windows is light.");
-        assert_eq!(mix(0x000000, 0xffffff, 0.5), 0x808080);
-        assert!((contrast(0xffffff, 0x000000) - 21.0).abs() < 1e-12);
-    }
 }

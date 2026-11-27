@@ -6,6 +6,12 @@ import SwiftUI
 /// The Negs studio design tokens. Keep the chrome neutral around the image;
 /// use the warm Omarchy accent for navigation and selection, never image data.
 enum Theme {
+    /// AppKit views and layers refresh their one-time colours after the theme changes.
+    static let didChange = Notification.Name("NegsThemeDidChange")
+    static var palette: Palette { ThemeStore.shared.palette }
+    static var colorScheme: ColorScheme { palette.dark ? .dark : .light }
+    static var appearance: NSAppearance? { NSAppearance(named: palette.dark ? .darkAqua : .aqua) }
+
     // MARK: Colour, sRGB
 
     /// The colour tokens as 0xRRGGBB, for the contrast tests and the hex

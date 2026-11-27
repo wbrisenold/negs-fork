@@ -6,9 +6,11 @@ cd "$repo_root"
 
 arch="x86_64"
 triple="x86_64-apple-macosx14.0"
+swift_platform_triple="${triple%14.0}"
 rust_target="x86_64-apple-darwin"
 scratch="$repo_root/target/macos-app/swift-$triple"
-build_bin="$scratch/$triple/debug/NegsApp"
+build_bin="$scratch/$swift_platform_triple/debug/NegsApp"
+helper_bin="$repo_root/target/macos-app/$rust_target/debug/spektrafilm-native"
 core_lib="$repo_root/target/negs-core/libnegs_core.a"
 source_app="$repo_root/dist/negs-macos/Negs.app"
 running_app="$repo_root/target/macos-app/debug-app/Negs.app"
@@ -27,6 +29,19 @@ else
     echo "Reusing cached native core: $core_lib"
 fi
 
+echo "Building the cached $arch Rust engine helper..."
+PATH="$HOME/.cargo/bin:$PATH" \
+SDKROOT="$(xcrun --sdk macosx --show-sdk-path)" \
+MACOSX_DEPLOYMENT_TARGET=14.0 \
+cargo build --locked --target "$rust_target" -p spektrafilm-native \
+    --target-dir "$repo_root/target/macos-app"
+[[ -x "$helper_bin" ]] || { echo "Cargo did not produce $helper_bin" >&2; exit 2; }
+helper_architectures="$(lipo -archs "$helper_bin")"
+[[ " $helper_architectures " == *" $arch "* ]] || {
+    echo "Rust helper has unexpected architectures: $helper_architectures" >&2
+    exit 2
+}
+
 echo "Building the cached $arch debug app..."
 swift build --package-path macos --scratch-path "$scratch" -c debug --triple "$triple" \
     -Xlinker "-L$repo_root/target/negs-core"
@@ -38,6 +53,7 @@ mkdir -p "$(dirname "$running_app")"
 rm -rf "$running_app"
 ditto "$source_app" "$running_app"
 cp "$build_bin" "$running_app/Contents/MacOS/NegsApp"
+mv -f "$helper_bin" "$running_app/Contents/MacOS/spektrafilm-native"
 codesign --force --deep --sign - "$running_app"
 
 # Replace the old process so the source change is actually loaded.

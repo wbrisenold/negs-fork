@@ -603,7 +603,8 @@ struct CanvasArea: View {
     /// Developing or Updating, at the top centre of the photograph's visible part.
     @ViewBuilder private var developTag: some View {
         let title = DevelopTagTitle.title(source: model.source != nil, failed: model.renderFailed,
-                                          developed: model.image != nil, slow: model.showsActivity)
+                                          developed: model.image != nil, slow: model.showsActivity,
+                                          loadingOriginal: model.loadingOriginal)
         ZStack {
             if let title, !dropping, !model.cropping {
                 GeometryReader { proxy in
@@ -670,7 +671,7 @@ struct CanvasArea: View {
             // Not zoomed in: the corners are off the canvas then (§4.3).
             // Nor in Image Only, which crops nothing.
             if !geometry.zoomed, !model.imageOnly, model.image != nil, model.developFailure == nil {
-                CropTrimMarks(print: print, lit: overPrint, crop: model.beginCrop)
+                CropTrimMarks(model: model, print: print, lit: overPrint, crop: model.beginCrop)
             }
         }
     }

@@ -2,6 +2,39 @@
   "attribution": "Profile metadata derived from Spektrafilm profiles by Andrea Volpato and contributors, and from Fotufilm film profiles by MUAStudio Inc. (https://fotufilm.com), both CC BY-SA 4.0. See data/profiles, SPEKTRAFILM_LICENSE.txt and FOTUFILM_LICENSE.txt. Metadata extraction only; no modifications to profile values.",
   "profiles": [
     {
+      "id": "agfa_portrait_xps_160",
+      "name": "Agfa Portrait XPS 160",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Color Negative",
+      "target": "kodak_portra_endura",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          3.5,
+          3.5,
+          3.5
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      },
+      "negs_built": true
+    },
+    {
       "id": "cinestill_400d",
       "name": "CineStill 400D",
       "paper": false,
@@ -251,6 +284,39 @@
           5.0,
           5.0,
           5.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      },
+      "negs_built": true
+    },
+    {
+      "id": "fujifilm_reala_ace",
+      "name": "Fujifilm Reala Ace",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Color Negative",
+      "target": "fujifilm_crystal_archive_typeii",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          4.0,
+          4.0,
+          4.0
         ],
         "uniformity": [
           0.97,
@@ -647,6 +713,72 @@
       }
     },
     {
+      "id": "kodak_portra_400nc",
+      "name": "Kodak Portra 400NC",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Color Negative",
+      "target": "kodak_portra_endura",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          4.5,
+          4.5,
+          4.5
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      },
+      "negs_built": true
+    },
+    {
+      "id": "kodak_portra_400vc",
+      "name": "Kodak Portra 400VC",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Color Negative",
+      "target": "kodak_portra_endura",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          4.5,
+          4.5,
+          4.5
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      },
+      "negs_built": true
+    },
+    {
       "id": "kodak_portra_800",
       "name": "Kodak Portra 800",
       "paper": false,
@@ -773,6 +905,39 @@
           0.97
         ]
       }
+    },
+    {
+      "id": "konica_professional_160",
+      "name": "Konica Minolta Professional 160",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Color Negative",
+      "target": "kodak_portra_endura",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          4.0,
+          4.0,
+          4.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      },
+      "negs_built": true
     },
     {
       "id": "lomography_lomochrome_metropolis",
@@ -1811,6 +1976,39 @@
       }
     },
     {
+      "id": "kodak_exr_100t",
+      "name": "Kodak EXR 100T",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Motion Picture",
+      "target": "kodak_2383",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          5.0,
+          7.9,
+          10.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      },
+      "negs_built": true
+    },
+    {
       "id": "kodak_verita_200d",
       "name": "Kodak Verita 200D",
       "paper": false,
@@ -2315,6 +2513,50 @@
       "group": "Color Paper",
       "target": "",
       "times": []
+    },
+    {
+      "id": "fujifilm_eterna_cp_3513di",
+      "name": "Fujifilm Eterna-CP 3513DI",
+      "paper": true,
+      "positive": false,
+      "bw": false,
+      "group": "Motion Picture Print",
+      "target": "",
+      "times": [],
+      "negs_built": true
+    },
+    {
+      "id": "fujifilm_eterna_cp_3514di",
+      "name": "Fujifilm Eterna-CP 3514DI",
+      "paper": true,
+      "positive": false,
+      "bw": false,
+      "group": "Motion Picture Print",
+      "target": "",
+      "times": [],
+      "negs_built": true
+    },
+    {
+      "id": "fujifilm_eterna_cp_3521xd",
+      "name": "Fujifilm Eterna-CP 3521XD",
+      "paper": true,
+      "positive": false,
+      "bw": false,
+      "group": "Motion Picture Print",
+      "target": "",
+      "times": [],
+      "negs_built": true
+    },
+    {
+      "id": "fujifilm_eterna_cp_3523xd",
+      "name": "Fujifilm Eterna-CP 3523XD",
+      "paper": true,
+      "positive": false,
+      "bw": false,
+      "group": "Motion Picture Print",
+      "target": "",
+      "times": [],
+      "negs_built": true
     },
     {
       "id": "kodak_2383",

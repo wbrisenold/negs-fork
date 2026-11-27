@@ -94,8 +94,11 @@ struct PrintLabel: View {
 
 private enum RenderLook: String, CaseIterable, Identifiable {
     case original = "off"
+    case acesSdrHillFit = "aces_sdr_hill_fit"
     case hncs = "hasselblad_hncs"
+    case hncsPython = "hasselblad_hncs_python"
     case hncsSmooth = "hasselblad_hncs_smooth"
+    case canonR5Population = "canon_r5_population"
     case referentOutput = "referent_output"
     case referentOutputHNCS = "referent_output_hncs_tone"
     case referentOutputHNCSSmooth = "referent_output_hncs_smooth_tone"
@@ -104,8 +107,11 @@ private enum RenderLook: String, CaseIterable, Identifiable {
     var compactTitle: String {
         switch self {
         case .original: "Original Tone"
+        case .acesSdrHillFit: "ACES SDR · Hill fit"
         case .hncs: "HNCS · Reference"
+        case .hncsPython: "HNCS · Python"
         case .hncsSmooth: "HNCS · Smooth"
+        case .canonR5Population: "Canon · Population fit (R5 included)"
         case .referentOutput: "Full Output"
         case .referentOutputHNCS: "Full Output + HNCS · Reference"
         case .referentOutputHNCSSmooth: "Full Output + HNCS · Smooth"
@@ -114,8 +120,11 @@ private enum RenderLook: String, CaseIterable, Identifiable {
     var menuTitle: String {
         switch self {
         case .original: "Original Tone Mapper"
+        case .acesSdrHillFit: "ACES SDR (Hill fit)"
         case .hncs: "HNCS Lightness Look · Reference (CLAHE)"
+        case .hncsPython: "HNCS `apply_hncs()` Python Baseline"
         case .hncsSmooth: "HNCS Lightness Look · Smooth (no local contrast)"
+        case .canonR5Population: "Canon Population Fit · pooled SOOC JPEGs (EOS R5 included; not RAW calibration)"
         case .referentOutput: "Referent Full Output Transform"
         case .referentOutputHNCS: "Referent Full Output + HNCS Tone · Reference (CLAHE)"
         case .referentOutputHNCSSmooth: "Referent Full Output + HNCS Tone · Smooth"

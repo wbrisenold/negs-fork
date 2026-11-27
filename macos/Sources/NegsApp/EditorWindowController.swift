@@ -612,14 +612,14 @@ final class EdgeSplitView: NSSplitView {
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
-        case #selector(selectAll(_:)): selecting && model.alert == nil
+        case #selector(selectAll(_:)): return selecting && model.alert == nil
         case #selector(deselectAll(_:)):
             item.title = model.workspace == .library ? "Deselect Others" : "Deselect All"
             return selecting && model.alert == nil
         // Not while a sheet or another window has the keys, as for Photo › Copy Edits.
-        case #selector(copy(_:)): model.workspace == .editor && model.canCopyEdits && MainMenu.takesRatingKeys(NSApp.keyWindow)
-        case #selector(paste(_:)): model.workspace == .editor && model.canPasteEdits && MainMenu.takesRatingKeys(NSApp.keyWindow)
-        default: true
+        case #selector(copy(_:)): return model.workspace == .editor && model.canCopyEdits && MainMenu.takesRatingKeys(NSApp.keyWindow)
+        case #selector(paste(_:)): return model.workspace == .editor && model.canPasteEdits && MainMenu.takesRatingKeys(NSApp.keyWindow)
+        default: return true
         }
     }
 }

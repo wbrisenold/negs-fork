@@ -48,7 +48,7 @@ private struct ThemeSwatch: View {
                             PencilRing().stroke(Theme.accent, style: StrokeStyle(lineWidth: PencilRing.lineWidth, lineCap: .round))
                                 .padding(.horizontal, -PencilRing.outset.width)
                                 .padding(.vertical, -PencilRing.outset.height)
-                                .rotationEffect(PencilRing.tilt(-1))
+                                .rotationEffect(.degrees(-1))
                                 .allowsHitTesting(false)
                         }
                     }
@@ -65,7 +65,7 @@ private struct ThemeSwatch: View {
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity, alignment: .leading)
         .onHover { hovered = $0 }
-        .inkFocus(activate: choose, row: true)
+        .inkFocus(activate: choose)
         .help(theme.hint)
         .accessibilityLabel(theme.title)
         .accessibilityHint(theme.hint)

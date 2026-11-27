@@ -191,3 +191,91 @@ by Andrea Volpato; measurement data (c) FUJIFILM Corporation):
   Existing sections unchanged.
 - borders/35mm/: edge-print strips for the 7 new slides,
   crates/spektrafilm-io/src/film35.rs.
+
+2026-11-24: four Fujifilm Eterna-CP colour print films prepared from
+Fujifilm's brochures (CC BY-SA 4.0; method from spektrafilm by Andrea
+Volpato; measurement data (c) FUJIFILM Corporation):
+
+- profiles/: fujifilm_eterna_cp_3513di, fujifilm_eterna_cp_3521xd,
+  fujifilm_eterna_cp_3514di and fujifilm_eterna_cp_3523xd, built by tools/film_profiles (build_print.py)
+  with spektrafilm's public-era steps for papers and print films, a neutral
+  pre-alignment before the unmixing, and the author's print normalisation
+  (#557: TH-KG3 through Y50 M50 and Vision3 250D's mid-scale neutral gives
+  raw 1, as the shipped 2383). Fujifilm's dye curves carry the film base,
+  which is taken off; their undrawn ends and the sensitivities' undrawn
+  tails are filled as each profile's datasource says (3513DI's dyes, Kodak
+  2383's sensitivity shape). Kodak 2383 and 2393 were rebuilt from
+  spektrafilm's public raw data only for calibration; their shipped
+  profiles are unchanged. Document, pages, SHA-256 and every choice in each
+  profile's datasource and in profile-sources/fujifilm-print/. No existing
+  profile changed.
+- filters/neutral_print_filters.json: TH-KG3 entries for every film in the
+  2383 table on each new print, from solve_neutral_filters; the twelve
+  films 2383 stores at C0 M50 Y50 (slides, Tri-X Reversal) get the same.
+  Existing entries unchanged.
+- borders/35mm/: edge-print strips for the five prints,
+  crates/spektrafilm-io/src/film35.rs.
+
+2026-11-24: one Fujifilm still negative from Fujifilm Japan's data sheets
+and two Kodak still negatives from Kodak's E-190 (CC BY-SA 4.0; method and
+generic dye spectra from spektrafilm by Andrea Volpato; measurement data
+(c) FUJIFILM Corporation and (c) Eastman Kodak Company):
+
+- profiles/: fujifilm_reala_ace, built by tools/film_profiles as the
+  2026-11-20 entry from Fujifilm Japan's Reala Ace data sheet (013Ai158A),
+  through fujifilm_crystal_archive_typeii; kodak_portra_400nc and
+  kodak_portra_400vc, built the same way from KODAK PROFESSIONAL PORTRA Films technical data E-190,
+  November 1998, through kodak_portra_endura. Document, pages, SHA-256 and
+  every choice in each profile's datasource and in
+  profile-sources/fujifilm-jp/ and profile-sources/kodak-e190/. No existing
+  profile changed.
+- filters/neutral_print_filters.json: TH-KG3 entries for the 3 new films on
+  every colour paper and Eterna-CP print, from solve_neutral_filters.
+  Existing entries unchanged.
+- presets/grain.toml: grain sections for the 3 new films in two Negs-only
+  blocks at the end (Reala Ace: the sheet's RMS granularity on every layer;
+  the Portras: the shipped Portra of the same speed, as E-190 gives only a
+  Print Grain Index). Existing sections unchanged.
+- borders/35mm/: edge-print strips for the 3 new films,
+  crates/spektrafilm-io/src/film35.rs.
+
+2026-11-24: one Kodak motion-picture negative from Kodak's technical data
+H-1-7248 (CC BY-SA 4.0; method and generic dye spectra from spektrafilm by
+Andrea Volpato; measurement data (c) Eastman Kodak Company):
+
+- profiles/: kodak_exr_100t (EASTMAN EXR 100T 5248/7248), built by
+  tools/film_profiles as the 2026-11-14 entry from H-1-7248, March 1999,
+  through kodak_2383, with reference illuminant T as the tungsten Eternas.
+  Document, page, SHA-256 and every choice in the profile's datasource and
+  in profile-sources/kodak-cine/. No existing profile changed.
+- filters/neutral_print_filters.json: TH-KG3 entries for kodak_exr_100t on
+  every colour paper and Eterna-CP print, from solve_neutral_filters.
+  Existing entries unchanged.
+- presets/grain.toml: a kodak_exr_100t section in a Negs-only block at the
+  end (the sheet's "less than 5" through the Fujifilm cine rule). Existing
+  sections unchanged.
+- borders/35mm/: edge-print strips for kodak_exr_100t,
+  crates/spektrafilm-io/src/film35.rs.
+
+2026-11-24: two 160-ISO portrait still negatives prepared from Agfa's and
+Konica Minolta's datasheets (CC BY-SA 4.0; method and generic dye spectra
+from spektrafilm by Andrea Volpato; measurement data (c) Agfa-Gevaert AG
+and (c) Konica Minolta Photo Imaging, Inc.):
+
+- profiles/: agfa_portrait_xps_160, built by tools/film_profiles from Agfa
+  Technical Data PF, Range of Professional Films, 1st edition, 09/1998,
+  PDF page 8; and konica_professional_160, built the same way from the
+  Konica Minolta PROFESSIONAL 160 for Color Print brochure (AB3 0407T02M6),
+  April 2004, PDF page 4; both refined through kodak_portra_endura.
+  Document, pages, SHA-256 and every choice in each profile's datasource
+  and in profile-sources/agfa-pf/ and profile-sources/konica-pro160/. No
+  existing profile changed.
+- filters/neutral_print_filters.json: TH-KG3 entries for the 2 new films on
+  every colour paper and Eterna-CP print, from solve_neutral_filters.
+  Existing entries unchanged.
+- presets/grain.toml: grain sections for the 2 new films in a Negs-only
+  block at the end (Agfa Portrait XPS 160: RMS 3.5 from Technical Data PF;
+  Konica Minolta Professional 160: RMS 4.0 cross-verified from fresh-era
+  datasheet compilations). Existing sections unchanged.
+- borders/35mm/: edge-print strips for the 2 new films,
+  crates/spektrafilm-io/src/film35.rs.

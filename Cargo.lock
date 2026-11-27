@@ -1435,11 +1435,11 @@ dependencies = [
 
 [[package]]
 name = "negs-library"
-version = "0.18.0"
+version = "0.20.1"
 
 [[package]]
 name = "negs-libraw"
-version = "0.18.0"
+version = "0.20.1"
 dependencies = [
  "cc",
 ]
@@ -2158,7 +2158,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "spektrafilm-cli"
-version = "0.18.0"
+version = "0.20.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -2175,7 +2175,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-core"
-version = "0.18.0"
+version = "0.20.1"
 dependencies = [
  "base64",
  "blas-src",
@@ -2198,7 +2198,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-gpu"
-version = "0.18.0"
+version = "0.20.1"
 dependencies = [
  "accelerate-src",
  "blas-src",
@@ -2220,7 +2220,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-io"
-version = "0.18.0"
+version = "0.20.1"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -2237,7 +2237,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-math"
-version = "0.18.0"
+version = "0.20.1"
 dependencies = [
  "byteorder",
  "half",
@@ -2251,7 +2251,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-model"
-version = "0.18.0"
+version = "0.20.1"
 dependencies = [
  "rand",
  "rand_distr",
@@ -2264,7 +2264,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-native"
-version = "0.18.0"
+version = "0.20.1"
 dependencies = [
  "anyhow",
  "image",
@@ -2279,7 +2279,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-wasm"
-version = "0.18.0"
+version = "0.20.1"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",

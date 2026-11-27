@@ -6,6 +6,7 @@ This fork currently follows `noahhaasis/negs` `main` for new app features. The o
 
 - Start from the custom app branch until its integration is promoted. For routine syncs, use `origin/main` after that promotion.
 - The custom base is authoritative for a conflicted file. `scripts/start_upstream_sync.sh` keeps the custom version for each conflicted path and preserves upstream's non-conflicting files and hunks.
+- Also review upstream deletions that do not conflict: a file unchanged on the custom branch can still be a required dependency of custom build or app code. Check deleted paths referenced by custom scripts (for example `core/ODIN_VERSION` consumed by `core/build.py`) and restore them from the custom base when still required.
 - Review the merge diff and record the base SHA and upstream SHA. The helper leaves the merge uncommitted for review.
 
 Run a sync locally:

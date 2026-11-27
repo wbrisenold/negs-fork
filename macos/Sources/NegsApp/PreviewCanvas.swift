@@ -598,7 +598,7 @@ final class PhotographView: NSView {
     /// turned as the exporter does, centred on `center`. The edited
     /// thumbnails use it too. `cut`: the photograph's image is the crop
     /// already, straightened.
-    static func layout(clip: CALayer, photo: CALayer, size: CGSize, crop: CropSettings, rotation: Int, center: CGPoint, cut: Bool = false) {
+    static func layout(clip: CALayer, photo: CALayer, size: CGSize, crop: CropSettings, rotation: Int, flip: Bool = false, center: CGPoint, cut: Bool = false) {
         // The crop's pixels, as the exporter cuts them. Layers are y-up, so
         // the rectangle's top-left origin flips, and clockwise is negative.
         let pixels = crop.pixels(in: size)
@@ -613,7 +613,8 @@ final class PhotographView: NSView {
         }
         photo.bounds = CGRect(origin: .zero, size: size)
         photo.position = CGPoint(x: size.width / 2 - pixels.minX, y: pixels.height - (size.height / 2 - pixels.minY))
-        photo.setAffineTransform(CGAffineTransform(rotationAngle: -crop.angle * .pi / 180))
+        let mirror = CGAffineTransform(scaleX: flip ? -1 : 1, y: 1)
+        photo.setAffineTransform(mirror.concatenating(CGAffineTransform(rotationAngle: -crop.angle * .pi / 180)))
     }
 
     private var grabbing = false

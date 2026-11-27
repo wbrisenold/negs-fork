@@ -194,8 +194,7 @@ struct PlaceReport: ViewModifier {
 
     // MARK: Folding
 
-    /// Folds the sheet back into the strip, then hides it. Into compare,
-    /// which has no strip, the two photographs fly to their places instead.
+    /// Folds the sheet back into the strip, then hides it.
     func fold() {
         generation += 1
         cancelFlight()
@@ -203,10 +202,6 @@ struct PlaceReport: ViewModifier {
         guard !Self.reduceMotion, !container.isHidden else { return finishFold() }
         let viewport = root.convert(sheet.bounds, from: sheet)
         let grid = places(model.places.sheet, in: sheet).filter { $0.value.rect.intersects(viewport) }
-        if let comparison = model.comparison {
-            let compared = [comparison.first, comparison.second].compactMap { $0.isOriginal ? nil : $0.item }
-            return afterCompareLaid(out: compared, generation, waited: 0) { [weak self] in self?.foldIntoCompare(grid: grid, generation) }
-        }
         // The strip moves to the photograph opened; it's laid out under the sheet.
         afterLayout { [weak self] in
             guard let self, self.generation == generation else { return }
@@ -243,45 +238,6 @@ struct PlaceReport: ViewModifier {
                 }
             }
             self.after(Self.duration, generation) { [weak self] in self?.finishFold() }
-        }
-    }
-
-    /// The two fly from their cells to their places in compare as the sheet
-    /// fades over it. Shrunk into the strip's band, it was a black bar that
-    /// then vanished, as compare has no strip.
-    private func foldIntoCompare(grid: [URL: ThumbnailPlaces.Place], _ generation: Int) {
-        let compare = places(model.places.compare, in: canvas)
-        let carried = Set(grid.keys).intersection(compare.keys)
-        model.sheetWaiting = carried
-        model.sheetCarried = carried
-        withAnimation(.easeOut(duration: Self.duration * 0.4)) { model.sheetBoxesWaiting = carried }
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        for url in carried {
-            guard let from = grid[url], let to = compare[url], let image = from.image ?? to.image else { continue }
-            _ = flyer(image: image, from: from.rect, to: to.rect, opacity: (gridOpacity(url), 1), delay: 0)
-        }
-        CATransaction.commit()
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = Self.duration * 0.6
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            container.animator().alphaValue = 0
-        }
-        after(Self.duration, generation) { [weak self] in self?.finishFold() }
-    }
-
-    /// Once both compared photographs have something to show, so they don't
-    /// move after the flight lands; at most a few frames (the sheet still
-    /// covers them).
-    private func afterCompareLaid(out compared: [URL], _ generation: Int, waited: Int, _ work: @escaping @MainActor () -> Void) {
-        afterLayout { [weak self] in
-            guard let self, self.generation == generation else { return }
-            let laid = compared.allSatisfy { self.model.places.compare[$0] != nil }
-                && self.model.comparison.map { [$0.first, $0.second].allSatisfy { self.model.comparePicture($0) != nil } } == true
-            if laid || waited >= 12 { return work() }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) {
-                MainActor.assumeIsolated { self.afterCompareLaid(out: compared, generation, waited: waited + 1, work) }
-            }
         }
     }
 

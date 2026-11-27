@@ -27,7 +27,9 @@
 //! of the picture when there is none.
 
 use rayon::prelude::*;
-use spektrafilm_math::colorspace::{chromatic_adaptation_matrix_f64, xy_to_xyz_f64, RgbColourspace};
+use spektrafilm_math::colorspace::{
+    RgbColourspace, chromatic_adaptation_matrix_f64, xy_to_xyz_f64,
+};
 use spektrafilm_math::image::ImageBuf;
 use spektrafilm_math::precision::{from_f64, to_f64};
 use spektrafilm_math::spectral::{CMF_X_F64, CMF_Y_F64, CMF_Z_F64, N_WAVELENGTHS};
@@ -75,8 +77,14 @@ struct ScanModel {
 }
 
 impl ScanModel {
-    fn new(film: &Profile, illuminant: &[f64], colourspace: &RgbColourspace) -> Result<Self, String> {
-        let n = N_WAVELENGTHS.min(illuminant.len()).min(film.data.channel_density.len());
+    fn new(
+        film: &Profile,
+        illuminant: &[f64],
+        colourspace: &RgbColourspace,
+    ) -> Result<Self, String> {
+        let n = N_WAVELENGTHS
+            .min(illuminant.len())
+            .min(film.data.channel_density.len());
         if n == 0 {
             return Err("the film has no dye spectra".into());
         }
@@ -93,7 +101,14 @@ impl ScanModel {
         let illuminant_xyz = xy_to_xyz_f64(white[0] / sum, white[1] / sum);
         let cat = chromatic_adaptation_matrix_f64(illuminant_xyz, colourspace.whitepoint_xyz);
         let m = mul(&colourspace.xyz_to_rgb, &cat);
-        let mut model = Self { illum: Vec::new(), cmf: Vec::new(), dye: Vec::new(), index: Vec::new(), norm, m };
+        let mut model = Self {
+            illum: Vec::new(),
+            cmf: Vec::new(),
+            dye: Vec::new(),
+            index: Vec::new(),
+            norm,
+            m,
+        };
         for w in 0..n {
             let row = &film.data.channel_density[w];
             let dye = [0, 1, 2].map(|c| row.get(c).copied().unwrap_or(f64::NAN));
@@ -115,13 +130,15 @@ impl ScanModel {
             .index
             .iter()
             .enumerate()
-            .map(|(i, &w)| match base.get(w).copied().filter(|v| v.is_finite()) {
-                Some(v) => v,
-                None => {
-                    illum[i] = 0.0;
-                    0.0
-                }
-            })
+            .map(
+                |(i, &w)| match base.get(w).copied().filter(|v| v.is_finite()) {
+                    Some(v) => v,
+                    None => {
+                        illum[i] = 0.0;
+                        0.0
+                    }
+                },
+            )
             .collect();
         (illum, offset)
     }
@@ -160,7 +177,8 @@ impl FilmConverter {
         let illuminant = crate::illuminants::standard_illuminant_f64(&convert.scan_illuminant)?;
         let colourspace = RgbColourspace::input(&params.io.input_color_space);
         let model = ScanModel::new(film, &illuminant, colourspace)?;
-        let tuned = crate::bases::tuned_film_base(&film.data.base_density, &params.film_render.base);
+        let tuned =
+            crate::bases::tuned_film_base(&film.data.base_density, &params.film_render.base);
         let (illum, base) = model.base_at(&tuned);
         // The cmy domain: each channel's density range on the film's curves,
         // what develop puts out.
@@ -204,7 +222,10 @@ impl FilmConverter {
     fn seed(&self, rgb: [f64; 3]) -> [f64; 3] {
         let d = [0, 1, 2].map(|j| self.logrgb0[j] - rgb[j].max(1e-12).log10());
         [0, 1, 2].map(|i| {
-            let v = self.cmy0[i] + self.ginv[i][0] * d[0] + self.ginv[i][1] * d[1] + self.ginv[i][2] * d[2];
+            let v = self.cmy0[i]
+                + self.ginv[i][0] * d[0]
+                + self.ginv[i][1] * d[1]
+                + self.ginv[i][2] * d[2];
             v.clamp(0.0, self.x_hi[i])
         })
     }
@@ -237,7 +258,8 @@ impl FilmConverter {
         let mut j = [[0.0; 3]; 3];
         for i in 0..3 {
             for c in 0..3 {
-                j[i][c] = scale * (m.m[i][0] * dxyz[0][c] + m.m[i][1] * dxyz[1][c] + m.m[i][2] * dxyz[2][c]);
+                j[i][c] = scale
+                    * (m.m[i][0] * dxyz[0][c] + m.m[i][1] * dxyz[1][c] + m.m[i][2] * dxyz[2][c]);
             }
         }
         (rgb, j)
@@ -290,31 +312,6 @@ impl FilmConverter {
         self.invert(self.pretransform(rgb))
     }
 
-    /// The convert front pass of the GPU-resident chain: the same solve,
-    /// with each wavelength's illuminant, colour matching and XYZ → RGB
-    /// folded into one weight.
-    pub fn gpu_params(&self) -> spektrafilm_gpu::ConvertGpuParams {
-        let m = &self.model;
-        let c = &self.calibration;
-        let pretransform = [0, 1, 2].map(|j| [0, 1, 2].map(|i| c[i][j] * self.gain));
-        let weights = (0..m.illum.len())
-            .map(|i| {
-                let light = m.cmf[i].map(|v| self.illum[i] * v / m.norm);
-                apply(&m.m, light)
-            })
-            .collect();
-        let dye_base = (0..m.illum.len()).map(|i| [m.dye[i][0], m.dye[i][1], m.dye[i][2], self.base[i]]).collect();
-        spektrafilm_gpu::ConvertGpuParams {
-            pretransform,
-            cmy0: self.cmy0,
-            logrgb0: self.logrgb0,
-            ginv: self.ginv,
-            x_hi: self.x_hi,
-            dye_base,
-            weights,
-        }
-    }
-
     /// Converts a linear input image to film density, in place.
     pub fn convert_image(&self, image: &mut ImageBuf) {
         image.data.par_chunks_mut(3 * 64).for_each(|chunk| {
@@ -334,7 +331,11 @@ impl FilmConverter {
 pub fn sample_base_rgb(pixels: &[[f64; 3]], percentile: f64) -> [f64; 3] {
     let (bright, _) = brightest(pixels, percentile);
     let set: Vec<[f64; 3]> = if bright.is_empty() {
-        pixels.iter().copied().filter(|p| p.iter().all(|v| v.is_finite())).collect()
+        pixels
+            .iter()
+            .copied()
+            .filter(|p| p.iter().all(|v| v.is_finite()))
+            .collect()
     } else {
         bright.iter().map(|&i| pixels[i]).collect()
     };
@@ -344,7 +345,9 @@ pub fn sample_base_rgb(pixels: &[[f64; 3]], percentile: f64) -> [f64; 3] {
 /// The indices of the pixels at or above the luminance `percentile`, and the threshold.
 fn brightest(pixels: &[[f64; 3]], percentile: f64) -> (Vec<usize>, f64) {
     let lum = |p: &[f64; 3]| 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2];
-    let finite: Vec<usize> = (0..pixels.len()).filter(|&i| pixels[i].iter().all(|v| v.is_finite())).collect();
+    let finite: Vec<usize> = (0..pixels.len())
+        .filter(|&i| pixels[i].iter().all(|v| v.is_finite()))
+        .collect();
     if finite.is_empty() {
         return (Vec::new(), f64::NAN);
     }
@@ -352,8 +355,18 @@ fn brightest(pixels: &[[f64; 3]], percentile: f64) -> (Vec<usize>, f64) {
     sorted.sort_by(f64::total_cmp);
     let q = percentile.clamp(0.0, 100.0) / 100.0 * (sorted.len() - 1) as f64;
     let (lo, frac) = (q.floor() as usize, q - q.floor());
-    let threshold = if lo + 1 < sorted.len() { sorted[lo] + frac * (sorted[lo + 1] - sorted[lo]) } else { sorted[lo] };
-    (finite.into_iter().filter(|&i| lum(&pixels[i]) >= threshold).collect(), threshold)
+    let threshold = if lo + 1 < sorted.len() {
+        sorted[lo] + frac * (sorted[lo + 1] - sorted[lo])
+    } else {
+        sorted[lo]
+    };
+    (
+        finite
+            .into_iter()
+            .filter(|&i| lum(&pixels[i]) >= threshold)
+            .collect(),
+        threshold,
+    )
 }
 
 fn mean(set: &[[f64; 3]]) -> [f64; 3] {
@@ -372,13 +385,27 @@ fn mean(set: &[[f64; 3]]) -> [f64; 3] {
 /// film `target`, so unexposed film reads as density 0. Upstream's
 /// least-squares Levenberg–Marquardt on the same residuals (and the same
 /// ridge toward 1) converges to the same fit.
-pub fn fit_base_params(target: [f64; 3], film: &Profile, params: &RuntimeParams) -> Result<(FilmBaseParams, f64), String> {
+pub fn fit_base_params(
+    target: [f64; 3],
+    film: &Profile,
+    params: &RuntimeParams,
+) -> Result<(FilmBaseParams, f64), String> {
     const W_RIDGE: f64 = 0.02;
     let convert = &params.film_render.convert;
     let illuminant = crate::illuminants::standard_illuminant_f64(&convert.scan_illuminant)?;
-    let model = ScanModel::new(film, &illuminant, RgbColourspace::input(&params.io.input_color_space))?;
+    let model = ScanModel::new(
+        film,
+        &illuminant,
+        RgbColourspace::input(&params.io.input_color_space),
+    )?;
     let start = &params.film_render.base;
-    let tuned = |x: &[f64]| FilmBaseParams { active: true, cyan: x[0], magenta: x[1], yellow: x[2], ..start.clone() };
+    let tuned = |x: &[f64]| FilmBaseParams {
+        active: true,
+        cyan: x[0],
+        magenta: x[1],
+        yellow: x[2],
+        ..start.clone()
+    };
     let forward_zero = |x: &[f64]| {
         let base = crate::bases::tuned_film_base(&film.data.base_density, &tuned(x));
         let (illum, offset) = model.base_at(&base);
@@ -387,7 +414,11 @@ pub fn fit_base_params(target: [f64; 3], film: &Profile, params: &RuntimeParams)
     let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
     let gain_for = |f: [f64; 3]| {
         let denominator = dot(target, target);
-        if denominator > 0.0 { dot(f, target) / denominator } else { 1.0 }
+        if denominator > 0.0 {
+            dot(f, target) / denominator
+        } else {
+            1.0
+        }
     };
     let residual = |x: &[f64]| -> Vec<f64> {
         let f = forward_zero(x);
@@ -401,7 +432,12 @@ pub fn fit_base_params(target: [f64; 3], film: &Profile, params: &RuntimeParams)
             W_RIDGE * (x[2] - 1.0),
         ]
     };
-    let x = levenberg_marquardt(residual, vec![start.cyan, start.magenta, start.yellow], 1e-6, 200);
+    let x = levenberg_marquardt(
+        residual,
+        vec![start.cyan, start.magenta, start.yellow],
+        1e-6,
+        200,
+    );
     let ev = gain_for(forward_zero(&x)).max(1e-9).log2();
     Ok((tuned(&x), ev))
 }
@@ -458,8 +494,18 @@ pub fn base_verdict(image: &ImageBuf, percentile: f64) -> BaseVerdict {
             picture: found.picture,
         },
         None => {
-            let pixels: Vec<[f64; 3]> = image.data.chunks_exact(3).map(|p| [to_f64(p[0]), to_f64(p[1]), to_f64(p[2])]).collect();
-            BaseVerdict { rgb: sample_base_rgb(&pixels, percentile), found: false, edge: None, edges: Vec::new(), picture: None }
+            let pixels: Vec<[f64; 3]> = image
+                .data
+                .chunks_exact(3)
+                .map(|p| [to_f64(p[0]), to_f64(p[1]), to_f64(p[2])])
+                .collect();
+            BaseVerdict {
+                rgb: sample_base_rgb(&pixels, percentile),
+                found: false,
+                edge: None,
+                edges: Vec::new(),
+                picture: None,
+            }
         }
     }
 }
@@ -624,7 +670,8 @@ fn apply(m: &Mat3, v: [f64; 3]) -> [f64; 3] {
 }
 
 fn invert3(m: &Mat3) -> Option<Mat3> {
-    let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+    let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+        - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
         + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
     if !det.is_finite() || det.abs() < 1e-300 {
         return None;
@@ -661,7 +708,10 @@ mod tests {
     #[test]
     fn calibration_parses_nine_numbers_or_is_the_identity() {
         assert_eq!(parse_calibration_matrix("1 0 0  0 1 0  0 0 1"), IDENTITY);
-        assert_eq!(parse_calibration_matrix("[[2, 0, 0], [0, 1, 0], [0, 0, 1]]")[0][0], 2.0);
+        assert_eq!(
+            parse_calibration_matrix("[[2, 0, 0], [0, 1, 0], [0, 0, 1]]")[0][0],
+            2.0
+        );
         assert_eq!(parse_calibration_matrix("1 2 3"), IDENTITY);
         assert_eq!(parse_calibration_matrix("a b c d e f g h i"), IDENTITY);
     }
@@ -671,15 +721,26 @@ mod tests {
         let film = portra();
         let params = RuntimeParams::default();
         let converter = FilmConverter::new(&film, &params).unwrap();
-        for cmy in [[0.0, 0.0, 0.0], [0.3, 0.6, 0.9], [1.2, 1.0, 0.8], [0.05, 1.5, 0.4]] {
+        for cmy in [
+            [0.0, 0.0, 0.0],
+            [0.3, 0.6, 0.9],
+            [1.2, 1.0, 0.8],
+            [0.05, 1.5, 0.4],
+        ] {
             // Upstream stops at a scan residual of 1e-6, which dense film
             // magnifies in density.
             let rgb = converter.forward(cmy);
             let back = converter.convert(rgb);
             let again = converter.forward(back);
             for c in 0..3 {
-                assert!((back[c] - cmy[c]).abs() < 1e-5, "{cmy:?} came back as {back:?}");
-                assert!((again[c] - rgb[c]).abs() < 1e-6, "{rgb:?} scanned back as {again:?}");
+                assert!(
+                    (back[c] - cmy[c]).abs() < 1e-5,
+                    "{cmy:?} came back as {back:?}"
+                );
+                assert!(
+                    (again[c] - rgb[c]).abs() < 1e-6,
+                    "{rgb:?} scanned back as {again:?}"
+                );
             }
         }
     }
@@ -695,7 +756,10 @@ mod tests {
         params.film_render.convert.exposure_compensation_ev = ev;
         let converter = FilmConverter::new(&film, &params).unwrap();
         let cmy = converter.convert(target);
-        assert!(cmy.iter().all(|v| v.abs() < 0.02), "clear film read as {cmy:?}");
+        assert!(
+            cmy.iter().all(|v| v.abs() < 0.02),
+            "clear film read as {cmy:?}"
+        );
     }
 
     #[test]
@@ -705,7 +769,11 @@ mod tests {
         for y in 0..h {
             for x in 0..w {
                 let i = ((y * w + x) * 3) as usize;
-                let rgb = if x < 6 { [0.8, 0.45, 0.25] } else { [0.3 + 0.002 * x as f64, 0.15, 0.05 + 0.001 * y as f64] };
+                let rgb = if x < 6 {
+                    [0.8, 0.45, 0.25]
+                } else {
+                    [0.3 + 0.002 * x as f64, 0.15, 0.05 + 0.001 * y as f64]
+                };
                 for c in 0..3 {
                     image.data[i + c] = from_f64(rgb[c]);
                 }
@@ -722,7 +790,11 @@ mod tests {
             for x in 0..w {
                 let i = ((y * w + x) * 3) as usize;
                 let t = ((x as f64 - 50.0).powi(2) + (y as f64 - 30.0).powi(2)).sqrt() / 60.0;
-                let rgb = [0.6 - 0.3 * t, 0.3 - 0.1 * t * (x as f64 / 100.0), 0.1 + 0.05 * (y as f64 / 60.0)];
+                let rgb = [
+                    0.6 - 0.3 * t,
+                    0.3 - 0.1 * t * (x as f64 / 100.0),
+                    0.1 + 0.05 * (y as f64 / 60.0),
+                ];
                 for c in 0..3 {
                     picture.data[i + c] = from_f64(rgb[c]);
                 }
@@ -733,7 +805,15 @@ mod tests {
 
     #[test]
     fn levenberg_marquardt_finds_a_least_squares_minimum() {
-        let x = levenberg_marquardt(|x| vec![x[0] - 2.0, 10.0 * (x[1] + 1.0), x[0] * x[1] + 2.0], vec![0.0, 0.0], 1e-12, 200);
-        assert!((x[0] - 2.0).abs() < 1e-6 && (x[1] + 1.0).abs() < 1e-6, "{x:?}");
+        let x = levenberg_marquardt(
+            |x| vec![x[0] - 2.0, 10.0 * (x[1] + 1.0), x[0] * x[1] + 2.0],
+            vec![0.0, 0.0],
+            1e-12,
+            200,
+        );
+        assert!(
+            (x[0] - 2.0).abs() < 1e-6 && (x[1] + 1.0).abs() < 1e-6,
+            "{x:?}"
+        );
     }
 }

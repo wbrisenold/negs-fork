@@ -21,7 +21,9 @@ use std::path::Path;
 use spektrafilm_math::image::ImageBuf;
 use spektrafilm_math::precision::{from_f64, to_f64};
 
-use crate::convert::{base_verdict, fit_base_params, levenberg_marquardt_with_step, sample_point_rgb, BaseVerdict};
+use crate::convert::{
+    BaseVerdict, base_verdict, fit_base_params, levenberg_marquardt_with_step, sample_point_rgb,
+};
 use crate::params::{FilmBaseParams, RuntimeParams};
 use crate::pipeline::Pipeline;
 use crate::print_balance::MIDGRAY;
@@ -66,7 +68,12 @@ pub struct DetectedBase {
 /// Finds the clear film in `frame` (the whole photograph, small, still in
 /// its input CCTF), or reads it at `point` (fractions of the frame), and
 /// fits the base to it. `film` is the resolved film profile.
-pub fn detect_base(film: &Profile, params: &RuntimeParams, frame: &ImageBuf, point: Option<(f64, f64)>) -> Result<DetectedBase, String> {
+pub fn detect_base(
+    film: &Profile,
+    params: &RuntimeParams,
+    frame: &ImageBuf,
+    point: Option<(f64, f64)>,
+) -> Result<DetectedBase, String> {
     let mut linear = frame.clone();
     crate::stages::filming::decode_input_cctf(&mut linear, params);
     let verdict = base_verdict(&linear, params.film_render.convert.base_percentile);
@@ -79,14 +86,26 @@ pub fn detect_base(film: &Profile, params: &RuntimeParams, frame: &ImageBuf, poi
     }
     // Fitted from neutral, so detecting again gives the same base.
     let mut start = params.clone();
-    start.film_render.base = FilmBaseParams { active: true, cyan: 1.0, magenta: 1.0, yellow: 1.0, ..params.film_render.base.clone() };
+    start.film_render.base = FilmBaseParams {
+        active: true,
+        cyan: 1.0,
+        magenta: 1.0,
+        yellow: 1.0,
+        ..params.film_render.base.clone()
+    };
     let (base, exposure_ev) = fit_base_params(target, film, &start)?;
     let mut fitted = start;
     fitted.film_render.base = base.clone();
     fitted.film_render.convert.exposure_compensation_ev = exposure_ev;
     let converter = crate::convert::FilmConverter::new(film, &fitted)?;
     let looks_negative = looks_negative(&converter, target, &linear);
-    Ok(DetectedBase { base, exposure_ev, verdict, picked: point.is_some(), looks_negative })
+    Ok(DetectedBase {
+        base,
+        exposure_ev,
+        verdict,
+        picked: point.is_some(),
+        looks_negative,
+    })
 }
 
 /// The clear film is orange at least this much: blue under red (log10) ...
@@ -107,16 +126,27 @@ const GAMUT_SHARE: f64 = 0.1;
 /// The orange shows when the scan is white-balanced for the light (or
 /// daylight); a scan white-balanced on the film base itself reads as not
 /// a negative.
-pub fn looks_negative(converter: &crate::convert::FilmConverter, base_rgb: [f64; 3], linear: &ImageBuf) -> bool {
+pub fn looks_negative(
+    converter: &crate::convert::FilmConverter,
+    base_rgb: [f64; 3],
+    linear: &ImageBuf,
+) -> bool {
     let l = base_rgb.map(|v| v.max(1e-9).log10());
-    let orange = l[0] - l[2] >= ORANGE_RED_BLUE && l[0] - l[1] >= ORANGE_STEP && l[1] - l[2] >= ORANGE_STEP;
+    let orange =
+        l[0] - l[2] >= ORANGE_RED_BLUE && l[0] - l[1] >= ORANGE_STEP && l[1] - l[2] >= ORANGE_STEP;
     if !orange {
         return false;
     }
     let (w, h) = (linear.width, linear.height);
-    let (mx, my) = ((w as f64 * AUTO_MARGIN) as u32, (h as f64 * AUTO_MARGIN) as u32);
+    let (mx, my) = (
+        (w as f64 * AUTO_MARGIN) as u32,
+        (h as f64 * AUTO_MARGIN) as u32,
+    );
     // About 8000 pixels, evenly.
-    let step = ((((w - 2 * mx) as f64 * (h - 2 * my) as f64) / 8000.0).sqrt().floor() as u32).max(1);
+    let step = ((((w - 2 * mx) as f64 * (h - 2 * my) as f64) / 8000.0)
+        .sqrt()
+        .floor() as u32)
+        .max(1);
     let (mut n, mut off) = (0usize, 0usize);
     for y in (my..h - my).step_by(step as usize) {
         for x in (mx..w - mx).step_by(step as usize) {
@@ -127,7 +157,9 @@ pub fn looks_negative(converter: &crate::convert::FilmConverter, base_rgb: [f64;
             }
             let wanted = converter.pretransform(rgb);
             let back = converter.forward(converter.convert(rgb));
-            let worst = (0..3).map(|c| (back[c].max(1e-9).log10() - wanted[c].max(1e-9).log10()).abs()).fold(0.0, f64::max);
+            let worst = (0..3)
+                .map(|c| (back[c].max(1e-9).log10() - wanted[c].max(1e-9).log10()).abs())
+                .fold(0.0, f64::max);
             n += 1;
             off += (worst > GAMUT_OFF) as usize;
         }
@@ -146,7 +178,12 @@ pub struct PrintSettings {
 /// The pipeline the balances print with: as [`crate::print_balance`]'s,
 /// the enlarger read directly, linear output with no gamut compressor, and
 /// grain, glare and the crop and post edits off.
-fn balance_pipeline(film: Profile, print: Profile, params: &RuntimeParams, data_dir: &Path) -> Result<Pipeline, String> {
+fn balance_pipeline(
+    film: Profile,
+    print: Profile,
+    params: &RuntimeParams,
+    data_dir: &Path,
+) -> Result<Pipeline, String> {
     let mut p = params.clone();
     p.io.scan_film = false;
     p.settings.use_enlarger_lut = false;
@@ -184,29 +221,50 @@ pub struct PictureBounds {
 
 impl Default for PictureBounds {
     fn default() -> Self {
-        Self { left: AUTO_MARGIN, top: AUTO_MARGIN, right: 1.0 - AUTO_MARGIN, bottom: 1.0 - AUTO_MARGIN }
+        Self {
+            left: AUTO_MARGIN,
+            top: AUTO_MARGIN,
+            right: 1.0 - AUTO_MARGIN,
+            bottom: 1.0 - AUTO_MARGIN,
+        }
     }
 }
 
 impl PictureBounds {
     /// From `[left, top, right, bottom]`, checked.
     pub fn new([left, top, right, bottom]: [f64; 4]) -> Result<Self, String> {
-        let ok = [left, top, right, bottom].iter().all(|v| (0.0..=1.0).contains(v)) && left < right && top < bottom;
+        let ok = [left, top, right, bottom]
+            .iter()
+            .all(|v| (0.0..=1.0).contains(v))
+            && left < right
+            && top < bottom;
         if !ok {
             return Err("The picture's bounds aren't inside the photograph".into());
         }
-        Ok(Self { left, top, right, bottom })
+        Ok(Self {
+            left,
+            top,
+            right,
+            bottom,
+        })
     }
 
     /// The pixel rows and columns of a `width` × `height` frame inside the
     /// bounds; at least one of each.
-    fn pixels(&self, width: usize, height: usize) -> (std::ops::Range<usize>, std::ops::Range<usize>) {
+    fn pixels(
+        &self,
+        width: usize,
+        height: usize,
+    ) -> (std::ops::Range<usize>, std::ops::Range<usize>) {
         let span = |lo: f64, hi: f64, n: usize| {
             let a = ((lo * n as f64).round() as usize).min(n.saturating_sub(1));
             let b = ((hi * n as f64).round() as usize).clamp(a + 1, n.max(a + 1));
             a..b
         };
-        (span(self.left, self.right, width), span(self.top, self.bottom, height))
+        (
+            span(self.left, self.right, width),
+            span(self.top, self.bottom, height),
+        )
     }
 }
 
@@ -290,7 +348,12 @@ impl NeutralAxis {
     /// `density` read as exposure, in stops per layer, inside `bounds`,
     /// leaving out clear film and film too dense to read: what the tone
     /// graph's histogram counts on a negative.
-    pub fn picture_stops(&self, density: &ImageBuf, density_range: [f64; 3], bounds: &PictureBounds) -> Vec<[f32; 3]> {
+    pub fn picture_stops(
+        &self,
+        density: &ImageBuf,
+        density_range: [f64; 3],
+        bounds: &PictureBounds,
+    ) -> Vec<[f32; 3]> {
         let (w, h) = (density.width as usize, density.height as usize);
         let (xs, ys) = bounds.pixels(w, h);
         let mut stops = Vec::with_capacity(xs.len() * ys.len());
@@ -316,7 +379,12 @@ impl NeutralAxis {
 pub fn film_stops(pipeline: &Pipeline, frame: &ImageBuf) -> Vec<[f32; 3]> {
     let axis = NeutralAxis::new(pipeline);
     let density = frame_density(pipeline, frame);
-    let whole = PictureBounds { left: 0.0, top: 0.0, right: 1.0, bottom: 1.0 };
+    let whole = PictureBounds {
+        left: 0.0,
+        top: 0.0,
+        right: 1.0,
+        bottom: 1.0,
+    };
     axis.picture_stops(&density, pipeline.film_converter().density_range(), &whole)
 }
 
@@ -378,7 +446,12 @@ pub struct Metered {
 /// suppression), while a cast from the light, which shifts every zone,
 /// still does. On the neutral axis a cast is the same shift in every zone
 /// whatever its density, which it isn't in density.
-pub fn meter(axis: &NeutralAxis, density: &ImageBuf, density_range: [f64; 3], bounds: &PictureBounds) -> Result<Metered, String> {
+pub fn meter(
+    axis: &NeutralAxis,
+    density: &ImageBuf,
+    density_range: [f64; 3],
+    bounds: &PictureBounds,
+) -> Result<Metered, String> {
     let (w, h) = (density.width as usize, density.height as usize);
     let (xs, ys) = bounds.pixels(w, h);
     let side = (xs.len().max(ys.len()) / ZONES_LONG_SIDE).max(1);
@@ -414,7 +487,11 @@ pub fn meter(axis: &NeutralAxis, density: &ImageBuf, density_range: [f64; 3], bo
     let mut tones: Vec<f64> = zones.iter().map(tone).collect();
     let mid = tones.len() / 2;
     let middle = *tones.select_nth_unstable_by(mid, f64::total_cmp).1;
-    let key = zones.iter().map(|s| tone(s).clamp(middle - KEY_RANGE, middle + KEY_RANGE)).sum::<f64>() / zones.len() as f64;
+    let key = zones
+        .iter()
+        .map(|s| tone(s).clamp(middle - KEY_RANGE, middle + KEY_RANGE))
+        .sum::<f64>()
+        / zones.len() as f64;
     let (mut colour, mut weight) = ([0.0; 3], 0.0);
     for s in &zones {
         let grey = (s[0] + s[1] + s[2]) / 3.0;
@@ -427,16 +504,28 @@ pub fn meter(axis: &NeutralAxis, density: &ImageBuf, density_range: [f64; 3], bo
         weight += wz;
     }
     let colour = colour.map(|v| if weight > 0.0 { v / weight } else { 0.0 });
-    Ok(Metered { key, colour, zones: zones.len() })
+    Ok(Metered {
+        key,
+        colour,
+        zones: zones.len(),
+    })
 }
 
 /// The neutral axis and the frame's density for `pipeline`.
 fn read_frame(pipeline: &Pipeline, frame: &ImageBuf) -> (NeutralAxis, ImageBuf, [f64; 3]) {
-    (NeutralAxis::new(pipeline), frame_density(pipeline, frame), pipeline.film_converter().density_range())
+    (
+        NeutralAxis::new(pipeline),
+        frame_density(pipeline, frame),
+        pipeline.film_converter().density_range(),
+    )
 }
 
 fn patch(cmy: [f64; 3]) -> ImageBuf {
-    ImageBuf::from_data(2, 2, [cmy; 4].iter().flatten().map(|v| from_f64(*v)).collect())
+    ImageBuf::from_data(
+        2,
+        2,
+        [cmy; 4].iter().flatten().map(|v| from_f64(*v)).collect(),
+    )
 }
 
 fn mean_rgb(image: &ImageBuf) -> [f64; 3] {
@@ -488,7 +577,12 @@ pub fn auto_print(
 /// paper's toe or shoulder, where the paper's own white or black passes for
 /// neutral at almost any filtration. It always starts from no filtration:
 /// the answer doesn't depend on the frame's enlarger settings.
-pub fn neutral_balance(film: Profile, print: Profile, params: &RuntimeParams, data_dir: &Path) -> Result<PrintSettings, String> {
+pub fn neutral_balance(
+    film: Profile,
+    print: Profile,
+    params: &RuntimeParams,
+    data_dir: &Path,
+) -> Result<PrintSettings, String> {
     let mut pipeline = balance_pipeline(film, print, params, data_dir)?;
     let target = patch(NeutralAxis::new(&pipeline).density([0.0; 3]));
     Ok(print_grey(&mut pipeline, target, [0.0, 0.0, 1.0]))
@@ -512,7 +606,11 @@ fn print_grey(pipeline: &mut Pipeline, target: ImageBuf, x0: [f64; 3]) -> PrintS
         50,
         Some(0.05),
     );
-    PrintSettings { m_filter_shift: x[0], y_filter_shift: x[1], print_exposure: x[2].exp2() }
+    PrintSettings {
+        m_filter_shift: x[0],
+        y_filter_shift: x[1],
+        print_exposure: x[2].exp2(),
+    }
 }
 
 /// The print exposure for `frame`, metered inside `bounds` as
@@ -563,7 +661,10 @@ pub fn neutral_print(
     let mut pipeline = balance_pipeline(film, print, params, data_dir)?;
     let density = frame_density(&pipeline, frame);
     let target = patch(sample_point_rgb(&density, point.0, point.1, POINT_SIZE));
-    let x0 = vec![params.enlarger.m_filter_shift as f64, params.enlarger.y_filter_shift as f64];
+    let x0 = vec![
+        params.enlarger.m_filter_shift as f64,
+        params.enlarger.y_filter_shift as f64,
+    ];
     let x = levenberg_marquardt_with_step(
         |x| {
             pipeline.set_print_filter_shifts(x[0], x[1]);
@@ -576,7 +677,11 @@ pub fn neutral_print(
         50,
         Some(0.05),
     );
-    Ok(PrintSettings { m_filter_shift: x[0], y_filter_shift: x[1], print_exposure: params.enlarger.print_exposure as f64 })
+    Ok(PrintSettings {
+        m_filter_shift: x[0],
+        y_filter_shift: x[1],
+        print_exposure: params.enlarger.print_exposure as f64,
+    })
 }
 
 #[cfg(test)]
@@ -604,7 +709,11 @@ mod tests {
                     [0.0; 3]
                 } else {
                     let t = x as f64 / w as f64;
-                    [0.5 + 0.6 * t, 0.7 + 0.3 * (y as f64 / h as f64), 0.9 - 0.2 * t]
+                    [
+                        0.5 + 0.6 * t,
+                        0.7 + 0.3 * (y as f64 / h as f64),
+                        0.9 - 0.2 * t,
+                    ]
                 };
                 let rgb = converter.forward(cmy).map(|v| v * 0.6);
                 let i = ((y * w + x) * 3) as usize;
@@ -632,45 +741,76 @@ mod tests {
         assert!(found.verdict.found, "{:?}", found.verdict);
         assert_eq!(found.verdict.edge, Some(crate::convert::Edge::Left));
         // The scan was 0.6 of the model's light: about +0.74 EV.
-        assert!((found.exposure_ev - (1.0f64 / 0.6).log2()).abs() < 0.02, "{}", found.exposure_ev);
+        assert!(
+            (found.exposure_ev - (1.0f64 / 0.6).log2()).abs() < 0.02,
+            "{}",
+            found.exposure_ev
+        );
         let picked = detect_base(&film, &params, &frame, Some((0.02, 0.5))).unwrap();
         assert!(picked.picked);
         assert!((picked.exposure_ev - found.exposure_ev).abs() < 0.02);
         // The strip bounds the picture on the left, cut a little inside.
         let picture = found.verdict.picture.expect("picture");
         assert_eq!(picture.edges, vec![crate::convert::Edge::Left]);
-        assert!((picture.x0 - (5.0 / 80.0 + crate::film_edge::INSET)).abs() < 0.003, "{picture:?}");
+        assert!(
+            (picture.x0 - (5.0 / 80.0 + crate::film_edge::INSET)).abs() < 0.003,
+            "{picture:?}"
+        );
     }
 
     #[test]
     fn a_scanned_negative_looks_like_one_and_a_photograph_does_not() {
         let params = linear_params();
         let film = load("kodak_portra_400");
-        assert!(detect_base(&film, &params, &scanned_negative(&params), None).unwrap().looks_negative);
+        assert!(
+            detect_base(&film, &params, &scanned_negative(&params), None)
+                .unwrap()
+                .looks_negative
+        );
         // A photograph: white highlights over coloured, darker parts.
         let (w, h) = (80u32, 50u32);
         let mut photo = ImageBuf::new(w, h);
         for y in 0..h {
             for x in 0..w {
                 let (t, s) = (x as f64 / w as f64, y as f64 / h as f64);
-                let rgb = if t > 0.9 { [0.95, 0.95, 0.95] } else { [0.05 + 0.6 * t, 0.1 + 0.5 * s, 0.4 - 0.3 * t * s] };
+                let rgb = if t > 0.9 {
+                    [0.95, 0.95, 0.95]
+                } else {
+                    [0.05 + 0.6 * t, 0.1 + 0.5 * s, 0.4 - 0.3 * t * s]
+                };
                 let i = ((y * w + x) * 3) as usize;
                 for c in 0..3 {
                     photo.data[i + c] = from_f64(rgb[c]);
                 }
             }
         }
-        assert!(!detect_base(&film, &params, &photo, None).unwrap().looks_negative);
+        assert!(
+            !detect_base(&film, &params, &photo, None)
+                .unwrap()
+                .looks_negative
+        );
     }
 
     fn portra(params: &RuntimeParams) -> Pipeline {
-        balance_pipeline(load("kodak_portra_400"), load("kodak_portra_endura"), params, &data()).unwrap()
+        balance_pipeline(
+            load("kodak_portra_400"),
+            load("kodak_portra_endura"),
+            params,
+            &data(),
+        )
+        .unwrap()
     }
 
     /// A scene (linear RGB per pixel) filmed on Portra 400 and scanned back
     /// through the scan model: a negative whose true scene is known. Clear
     /// film down the left fifth when `rebate`.
-    fn negative_of(params: &RuntimeParams, w: u32, h: u32, rebate: bool, scene: impl Fn(u32, u32) -> [f64; 3]) -> ImageBuf {
+    fn negative_of(
+        params: &RuntimeParams,
+        w: u32,
+        h: u32,
+        rebate: bool,
+        scene: impl Fn(u32, u32) -> [f64; 3],
+    ) -> ImageBuf {
         let pipeline = portra(params);
         let mut rgb = ImageBuf::new(w, h);
         for y in 0..h {
@@ -688,7 +828,11 @@ mod tests {
         for y in 0..h {
             for x in 0..w {
                 let i = ((y * w + x) * 3) as usize;
-                let cmy = if rebate && x < w / 5 { [0.0; 3] } else { [0, 1, 2].map(|c| to_f64(density.data[i + c])) };
+                let cmy = if rebate && x < w / 5 {
+                    [0.0; 3]
+                } else {
+                    [0, 1, 2].map(|c| to_f64(density.data[i + c]))
+                };
                 let scan = converter.forward(cmy);
                 for c in 0..3 {
                     image.data[i + c] = from_f64(scan[c]);
@@ -704,7 +848,15 @@ mod tests {
     }
 
     fn auto(params: &RuntimeParams, frame: &ImageBuf) -> PrintSettings {
-        auto_print(load("kodak_portra_400"), load("kodak_portra_endura"), params, &data(), frame, &PictureBounds::default()).unwrap()
+        auto_print(
+            load("kodak_portra_400"),
+            load("kodak_portra_endura"),
+            params,
+            &data(),
+            frame,
+            &PictureBounds::default(),
+        )
+        .unwrap()
     }
 
     /// The print's RGB of film density `cmy` with `settings`.
@@ -725,9 +877,15 @@ mod tests {
             let grey = from_f64(MIDGRAY * f64::exp2(stops));
             let density = mean_rgb(&pipeline.film_scene(ImageBuf::from_data(2, 2, vec![grey; 12])));
             let read = axis.stops(density);
-            assert!(read.iter().all(|s| (s - stops).abs() < 0.01), "{stops}: {read:?}");
+            assert!(
+                read.iter().all(|s| (s - stops).abs() < 0.01),
+                "{stops}: {read:?}"
+            );
             let back = axis.density([stops; 3]);
-            assert!((0..3).all(|c| (back[c] - density[c]).abs() < 0.005), "{back:?} {density:?}");
+            assert!(
+                (0..3).all(|c| (back[c] - density[c]).abs() < 0.005),
+                "{back:?} {density:?}"
+            );
         }
         assert_eq!(axis.stops([0.0; 3]), [STOPS.0; 3]);
         assert_eq!(axis.stops([10.0; 3]), [STOPS.1; 3]);
@@ -748,7 +906,10 @@ mod tests {
         params.enlarger.y_filter_shift = y as f32;
         let frame = negative_of(&params, 60, 40, false, greys(0.0));
         let settings = auto(&params, &frame);
-        assert!((settings.m_filter_shift - m).abs() < 0.3 && (settings.y_filter_shift - y).abs() < 0.3, "{settings:?} {m} {y}");
+        assert!(
+            (settings.m_filter_shift - m).abs() < 0.3 && (settings.y_filter_shift - y).abs() < 0.3,
+            "{settings:?} {m} {y}"
+        );
         assert!((settings.print_exposure - 1.0).abs() < 0.03, "{settings:?}");
     }
 
@@ -767,10 +928,23 @@ mod tests {
             }
         });
         let settings = auto(&params, &lawn);
-        let card = printed(&params, &settings, NeutralAxis::new(&portra(&params)).density([0.0; 3]));
+        let card = printed(
+            &params,
+            &settings,
+            NeutralAxis::new(&portra(&params)).density([0.0; 3]),
+        );
         let cast = [(card[0] / card[1]).log2(), (card[2] / card[1]).log2()];
-        assert!(cast.iter().all(|c| c.abs() < 0.1), "the grey card prints {cast:?} with {settings:?}");
-        assert!((settings.print_exposure / neutral.print_exposure).log2().abs() < 0.35, "{settings:?} {neutral:?}");
+        assert!(
+            cast.iter().all(|c| c.abs() < 0.1),
+            "the grey card prints {cast:?} with {settings:?}"
+        );
+        assert!(
+            (settings.print_exposure / neutral.print_exposure)
+                .log2()
+                .abs()
+                < 0.35,
+            "{settings:?} {neutral:?}"
+        );
     }
 
     #[test]
@@ -784,26 +958,41 @@ mod tests {
         let settings = auto(&params, &negative_of(&params, 60, 40, false, warm));
         // A grey card under the warm light, printed as balanced and by Auto.
         let warm_card = [MIDGRAY * 1.4, MIDGRAY, MIDGRAY * 0.7].map(from_f64);
-        let card = mean_rgb(&portra(&params).film_scene(ImageBuf::from_data(2, 2, warm_card.repeat(4))));
+        let card =
+            mean_rgb(&portra(&params).film_scene(ImageBuf::from_data(2, 2, warm_card.repeat(4))));
         let cast = |rgb: [f64; 3]| [(rgb[0] / rgb[1]).log2(), (rgb[2] / rgb[1]).log2()];
         let before = cast(printed(&params, &neutral, card));
         let after = cast(printed(&params, &settings, card));
         assert!(before[0] > 0.2 && before[1] < -0.2, "{before:?}");
         for c in 0..2 {
-            assert!(after[c].abs() < 0.5 * before[c].abs(), "{before:?} → {after:?}");
+            assert!(
+                after[c].abs() < 0.5 * before[c].abs(),
+                "{before:?} → {after:?}"
+            );
         }
     }
 
-    const PAPERS: [&str; 5] =
-        ["kodak_portra_endura", "kodak_endura_premier", "kodak_ultra_endura", "kodak_supra_endura", "fujifilm_crystal_archive_typeii"];
+    const PAPERS: [&str; 5] = [
+        "kodak_portra_endura",
+        "kodak_endura_premier",
+        "kodak_ultra_endura",
+        "kodak_supra_endura",
+        "fujifilm_crystal_archive_typeii",
+    ];
 
     /// The print's RGB of film density `cmy` on `paper` with `settings`.
-    fn printed_on(paper: &str, params: &RuntimeParams, settings: &PrintSettings, cmy: [f64; 3]) -> [f64; 3] {
+    fn printed_on(
+        paper: &str,
+        params: &RuntimeParams,
+        settings: &PrintSettings,
+        cmy: [f64; 3],
+    ) -> [f64; 3] {
         let mut params = params.clone();
         params.enlarger.m_filter_shift = settings.m_filter_shift as f32;
         params.enlarger.y_filter_shift = settings.y_filter_shift as f32;
         params.enlarger.print_exposure = settings.print_exposure as f32;
-        let pipeline = balance_pipeline(load("kodak_portra_400"), load(paper), &params, &data()).unwrap();
+        let pipeline =
+            balance_pipeline(load("kodak_portra_400"), load(paper), &params, &data()).unwrap();
         mean_rgb(&pipeline.print_film_density(patch(cmy)))
     }
 
@@ -815,16 +1004,28 @@ mod tests {
         let params = linear_params();
         let grey = NeutralAxis::new(&portra(&params)).density([0.0; 3]);
         for paper in PAPERS {
-            let neutral = neutral_balance(load("kodak_portra_400"), load(paper), &params, &data()).unwrap();
+            let neutral =
+                neutral_balance(load("kodak_portra_400"), load(paper), &params, &data()).unwrap();
             let rgb = printed_on(paper, &params, &neutral, grey);
             let cast = [(rgb[0] / rgb[1]).log2(), (rgb[2] / rgb[1]).log2()];
-            assert!(cast.iter().all(|c| c.abs() < 0.005), "{paper}: {cast:?} with {neutral:?}");
+            assert!(
+                cast.iter().all(|c| c.abs() < 0.005),
+                "{paper}: {cast:?} with {neutral:?}"
+            );
             assert!(((rgb[1] / MIDGRAY).log2()).abs() < 0.01, "{paper}: {rgb:?}");
-            assert!(neutral.m_filter_shift.abs() < 20.0 && neutral.y_filter_shift.abs() < 20.0, "{paper}: {neutral:?}");
+            assert!(
+                neutral.m_filter_shift.abs() < 20.0 && neutral.y_filter_shift.abs() < 20.0,
+                "{paper}: {neutral:?}"
+            );
             for (m, y, exposure) in [(-60.0, -87.0, 0.51), (84.0, -44.0, 0.64), (0.0, 0.0, 3.0)] {
                 let mut from = params.clone();
-                (from.enlarger.m_filter_shift, from.enlarger.y_filter_shift, from.enlarger.print_exposure) = (m, y, exposure);
-                let again = neutral_balance(load("kodak_portra_400"), load(paper), &from, &data()).unwrap();
+                (
+                    from.enlarger.m_filter_shift,
+                    from.enlarger.y_filter_shift,
+                    from.enlarger.print_exposure,
+                ) = (m, y, exposure);
+                let again =
+                    neutral_balance(load("kodak_portra_400"), load(paper), &from, &data()).unwrap();
                 assert_eq!(again, neutral, "{paper} from {m} {y} {exposure}");
             }
         }
@@ -842,15 +1043,34 @@ mod tests {
         };
         let frame = negative_of(&params, 60, 40, false, warm);
         let auto_on = |paper: &str, params: &RuntimeParams| {
-            auto_print(load("kodak_portra_400"), load(paper), params, &data(), &frame, &PictureBounds::default()).unwrap()
+            auto_print(
+                load("kodak_portra_400"),
+                load(paper),
+                params,
+                &data(),
+                &frame,
+                &PictureBounds::default(),
+            )
+            .unwrap()
         };
         for paper in PAPERS {
             let own = auto_on(paper, &params);
-            assert!(own.m_filter_shift.abs() < 40.0 && own.y_filter_shift.abs() < 40.0, "{paper}: {own:?}");
+            assert!(
+                own.m_filter_shift.abs() < 40.0 && own.y_filter_shift.abs() < 40.0,
+                "{paper}: {own:?}"
+            );
             for (m, y, exposure) in [(-60.0, -87.0, 0.51), (84.0, -44.0, 0.64), (0.0, 0.0, 3.0)] {
                 let mut from = params.clone();
-                (from.enlarger.m_filter_shift, from.enlarger.y_filter_shift, from.enlarger.print_exposure) = (m, y, exposure);
-                assert_eq!(auto_on(paper, &from), own, "{paper} from {m} {y} {exposure}");
+                (
+                    from.enlarger.m_filter_shift,
+                    from.enlarger.y_filter_shift,
+                    from.enlarger.print_exposure,
+                ) = (m, y, exposure);
+                assert_eq!(
+                    auto_on(paper, &from),
+                    own,
+                    "{paper} from {m} {y} {exposure}"
+                );
             }
         }
     }
@@ -861,7 +1081,15 @@ mod tests {
         params.enlarger.m_filter_shift = 3.0;
         params.enlarger.y_filter_shift = -2.0;
         let meter = |frame: &ImageBuf, bounds: &PictureBounds| {
-            meter_print_exposure(load("kodak_portra_400"), load("kodak_portra_endura"), &params, &data(), frame, bounds).unwrap()
+            meter_print_exposure(
+                load("kodak_portra_400"),
+                load("kodak_portra_endura"),
+                &params,
+                &data(),
+                frame,
+                bounds,
+            )
+            .unwrap()
         };
         let at = |frame: &ImageBuf| meter(frame, &PictureBounds::default());
         let normal = negative_of(&params, 60, 40, true, greys(0.0));
@@ -872,9 +1100,15 @@ mod tests {
         assert!(ratio > 0.4 && ratio < 1.2, "{ratio}");
         // Auto meters the same exposure when the frame has no colour.
         let auto = auto(&params, &normal);
-        assert!((auto.print_exposure / at(&normal) - 1.0).abs() < 0.03, "{auto:?} {}", at(&normal));
+        assert!(
+            (auto.print_exposure / at(&normal) - 1.0).abs() < 0.03,
+            "{auto:?} {}",
+            at(&normal)
+        );
         // Outside the bounds doesn't count: a bright left half is left out.
-        let half = negative_of(&params, 60, 40, false, |x, y| greys(if x < 30 { 3.0 } else { 0.0 })(x, y));
+        let half = negative_of(&params, 60, 40, false, |x, y| {
+            greys(if x < 30 { 3.0 } else { 0.0 })(x, y)
+        });
         let plain = negative_of(&params, 60, 40, false, greys(0.0));
         let right = PictureBounds::new([0.55, 0.1, 0.95, 0.9]).unwrap();
         assert!((meter(&half, &right) / meter(&plain, &right) - 1.0).abs() < 1e-6);
@@ -890,13 +1124,23 @@ mod tests {
         // Greys from three stops under to three over, left to right, after
         // a strip of clear film.
         let (w, h) = (70u32, 10u32);
-        let scene_stops = |x: u32| -3.0 + 6.0 * (x.max(w / 5) - w / 5) as f64 / (w - w / 5 - 1) as f64;
-        let negative = negative_of(&params, w, h, true, |x, _| [MIDGRAY * scene_stops(x).exp2(); 3]);
+        let scene_stops =
+            |x: u32| -3.0 + 6.0 * (x.max(w / 5) - w / 5) as f64 / (w - w / 5 - 1) as f64;
+        let negative = negative_of(&params, w, h, true, |x, _| {
+            [MIDGRAY * scene_stops(x).exp2(); 3]
+        });
         let stops = film_stops(&pipeline, &negative);
-        assert_eq!(stops.len(), ((w - w / 5) * h) as usize, "the clear film isn't counted");
+        assert_eq!(
+            stops.len(),
+            ((w - w / 5) * h) as usize,
+            "the clear film isn't counted"
+        );
         for (i, s) in stops.iter().enumerate() {
             let want = scene_stops(w / 5 + i as u32 % (w - w / 5));
-            assert!(s.iter().all(|v| (*v as f64 - want).abs() < 0.02), "{i}: {s:?} want {want}");
+            assert!(
+                s.iter().all(|v| (*v as f64 - want).abs() < 0.02),
+                "{i}: {s:?} want {want}"
+            );
         }
     }
 }

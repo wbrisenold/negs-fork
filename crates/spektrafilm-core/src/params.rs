@@ -598,6 +598,9 @@ pub struct FilmRenderingParams {
     pub density_curves_morph: CurvesMorphParams,
     #[serde(default)]
     pub base: FilmBaseParams,
+    /// Parameters for reading a real negative scan back to film density.
+    #[serde(default)]
+    pub convert: ConvertFilmParams,
 }
 
 impl Default for FilmRenderingParams {
@@ -611,6 +614,30 @@ impl Default for FilmRenderingParams {
             glare: GlareParams::default(),
             density_curves_morph: CurvesMorphParams::default(),
             base: FilmBaseParams::default(),
+            convert: ConvertFilmParams::default(),
+        }
+    }
+}
+
+/// `film_render.convert`: settings for the convert-film workflow.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ConvertFilmParams {
+    pub scan_illuminant: String,
+    pub exposure_compensation_ev: f64,
+    pub base_percentile: f64,
+    pub calibration: String,
+    pub flat_field: String,
+}
+
+impl Default for ConvertFilmParams {
+    fn default() -> Self {
+        Self {
+            scan_illuminant: "D55".into(),
+            exposure_compensation_ev: 0.0,
+            base_percentile: 99.0,
+            calibration: "1 0 0  0 1 0  0 0 1".into(),
+            flat_field: String::new(),
         }
     }
 }
@@ -686,12 +713,18 @@ impl Default for CurvesMorphParams {
 #[serde(rename_all = "snake_case")]
 pub enum RenderLook {
     Off,
+    /// MJP/Stephen Hill fitted ACES SDR display transform.
+    AcesSdrHillFit,
     ReferentColorOnly,
     ReferentOutput,
     #[serde(alias = "hasselblad_hncs_learned")]
     HasselbladHncs,
+    /// Measured `apply_hncs()` Python recipe with its fixed baseline settings.
+    HasselbladHncsPython,
     /// Smooth global-lightness variant that omits the upstream local CLAHE.
     HasselbladHncsSmooth,
+    /// Canon EOS R5 population-fit JPEG appearance approximation.
+    CanonR5Population,
     ReferentColorHncs,
     #[serde(alias = "referent_output_hncs_learned_tone")]
     ReferentOutputHncsTone,
@@ -803,10 +836,13 @@ impl IoParams {
     pub fn effective_render_look(&self) -> RenderLook {
         match self.render_look {
             Some(RenderLook::Off) => RenderLook::Off,
+            Some(RenderLook::AcesSdrHillFit) => RenderLook::AcesSdrHillFit,
             Some(RenderLook::ReferentColorOnly) => RenderLook::ReferentColorOnly,
             Some(RenderLook::ReferentColorHncs) => RenderLook::ReferentColorHncs,
             Some(RenderLook::HasselbladHncs) => RenderLook::HasselbladHncs,
+            Some(RenderLook::HasselbladHncsPython) => RenderLook::HasselbladHncsPython,
             Some(RenderLook::HasselbladHncsSmooth) => RenderLook::HasselbladHncsSmooth,
+            Some(RenderLook::CanonR5Population) => RenderLook::CanonR5Population,
             Some(RenderLook::ReferentOutput) => RenderLook::ReferentOutput,
             Some(RenderLook::ReferentOutputHncsTone) => RenderLook::ReferentOutputHncsTone,
             Some(RenderLook::ReferentOutputHncsSmoothTone) => {
@@ -1058,6 +1094,8 @@ impl Default for SettingsParams {
 }
 
 /// Route selection used by Negs' film and print workflows.
+pub const ROUTE_PRINT: &str = "input > film > print > scan";
+pub const ROUTE_CONVERT_PRINT: &str = "input > convert-film > print > scan";
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WorkflowParams {
@@ -1066,13 +1104,15 @@ pub struct WorkflowParams {
 
 impl Default for WorkflowParams {
     fn default() -> Self {
-        Self { route: "input > film > print > scan".into() }
+        Self {
+            route: ROUTE_PRINT.into(),
+        }
     }
 }
 
 impl WorkflowParams {
     pub fn converts_film(&self) -> bool {
-        self.route == "input > convert-film > print > scan"
+        self.route == ROUTE_CONVERT_PRINT
     }
 }
 
@@ -1342,5 +1382,26 @@ mod input_interpretation_tests {
             ("ACES2065-1", true)
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+#[cfg(test)]
+mod render_look_tests {
+    use super::*;
+
+    #[test]
+    fn aces_hill_fit_is_a_saved_render_look_choice() {
+        let params: RuntimeParams = serde_json::from_value(serde_json::json!({
+            "io": {"render_look": "aces_sdr_hill_fit"}
+        }))
+        .unwrap();
+        assert_eq!(
+            params.io.effective_render_look(),
+            RenderLook::AcesSdrHillFit
+        );
+        assert_eq!(
+            serde_json::to_value(params.io.render_look).unwrap(),
+            serde_json::json!("aces_sdr_hill_fit")
+        );
     }
 }

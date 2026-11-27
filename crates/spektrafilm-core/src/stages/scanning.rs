@@ -226,7 +226,8 @@ pub fn chroma_denoise_params(
 ) -> Option<spektrafilm_gpu::chroma_denoise::ChromaDenoiseParams> {
     let scanner = &params.scanner;
     let pix_um = crate::stages::filming::pixel_size_um(params.camera.film_format_mm, width, height);
-    let luma = RgbColourspace::output(&params.io.output_color_space).rgb_to_xyz[1].map(|v| v as f32);
+    let luma =
+        RgbColourspace::output(&params.io.output_color_space).rgb_to_xyz[1].map(|v| v as f32);
     spektrafilm_gpu::chroma_denoise::ChromaDenoiseParams::new(
         scanner.chroma_noise_reduction,
         scanner.chroma_noise_radius_um / pix_um,

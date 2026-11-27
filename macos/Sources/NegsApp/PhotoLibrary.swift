@@ -1146,7 +1146,7 @@ private struct LibraryProjectDocument: Codable, Sendable {
 
         for photo in candidates {
             if Task.isCancelled { break }
-            let (exists, result) = await Task.detached(priority: .utility) {
+            let (exists, result): (Bool, CullAnalysis?) = await Task.detached(priority: .utility) { () -> (Bool, CullAnalysis?) in
                 guard FileManager.default.fileExists(atPath: photo.file.url.path) else {
                     return (false, nil)
                 }

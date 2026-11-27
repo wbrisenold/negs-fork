@@ -27,8 +27,12 @@
 
 ## Build and package
 
+- On Intel macOS, build the pinned Odin compiler with MacPorts LLVM from `/opt/local/libexec/llvm-*/bin/llvm-config`. `core/install_odin.py` checks that `llvm-config --version` actually runs and only searches MacPorts; do not start a Homebrew LLVM reinstall or a compiler source build to repair its Z3 dylib chain. Homebrew LLVM has no Intel bottle here, and an incompatible Z3 symlink is not a repair. If the MacPorts compiler is missing or broken, stop with that exact prerequisite error and repair MacPorts.
 - Use `scripts/package_macos_app.sh` for the universal app (`MACOS_ARCHS="arm64 x86_64"`, the default). It checks the macOS SDK, Rust target libraries, and free disk before building, then verifies the generated package. Verify both executable slices with `lipo -archs`.
+- For universal packaging on this Intel host, put Rustup ahead of MacPorts in `PATH` so Cargo uses the Rustup toolchain that has both Apple targets installed: `PATH="$HOME/.cargo/bin:$PATH" rtk proxy env MACOS_ARCHS="arm64 x86_64" CLEAN_BUILD_CACHE=0 bash scripts/package_macos_app.sh`. Keep Odin's LLVM selection on MacPorts as above; Rust and LLVM use separate toolchain selection.
 - For iterative macOS UI work, run `rtk scripts/run_cached_debug_app.sh` after each source change. It rebuilds the native core and cached Intel **debug** executable, stages it into the existing app bundle, replaces the old process, launches the updated app, and verifies the launched executable path. Do not treat a source edit or a successful compile as a running-app update. Then exercise the reported interaction in the visible app and inspect its result before calling a crash fixed. If packaging or launch fails, report that the running app still has the old code.
+
+  When the cached runner fails, preserve its complete output at `target/macos-app/cached-debug-build.log` and report the actual exit status. Keep the log under ignored build output; do not commit it or rely on truncated terminal output as the diagnostic record.
 
   The script reuses the SwiftPM cache rather than rebuilding the optimized app and DMG after every UI edit. The universal release acceptance gate remains `scripts/package_macos_app.sh`.
 
@@ -49,6 +53,7 @@
 
   This manual fallback reuses the cache and existing packaged helpers/resources; it does not validate the universal app. Keep local caches with `CLEAN_BUILD_CACHE=0` when packaging during an iteration. Do not run debug and release builds concurrently.
 - Serialize local builds: run only one Cargo, SwiftPM, or packaging build at a time. Do not start a second build while one is running, including from another terminal or agent.
+- Before launching a local build, check for an existing `scripts/run_cached_debug_app.sh`, `swift build`, Cargo, or packaging process. If one is active, follow that process and its original log/session to completion; do not launch another runner and wait on SwiftPM's cache lock as a retry strategy.
 - Reuse the established local outputs (`target/macos-app` for packaged app builds and SwiftPM scratch output under it); do not create dated, per-feature, or duplicate build directories. Use `MACOS_ARCHS="arm64 x86_64"` and the default `BUILD_TARGET_DIR=target/macos-app` for release acceptance.
 - After a successful local package, `scripts/package_macos_app.sh` removes `target/macos-app`, the Intel test cache at `target/x86_64-apple-darwin`, and `target/debug`; the app and releases remain in `dist/`, and `target/release` is preserved. Set `CLEAN_BUILD_CACHE=0` to retain local caches when iterating.
 - Before switching a local build configuration, stop the prior build and remove stale generated outputs instead of keeping parallel copies. Use `scripts/cleanup_storage.py` to inspect safe cleanup candidates; preserve `target/release` binaries referenced by the app, tests, and analysis scripts. CI may use its isolated matrix outputs.

@@ -121,15 +121,24 @@ pub fn find(image: &ImageBuf) -> FilmEdges {
     }
     let grid = Grid::new(image);
     let middle = grid.middle_levels();
-    let bands: Vec<(Edge, Vec<Band>)> = Edge::ALL.iter().map(|&edge| (edge, grid.bands(edge, &middle))).collect();
-    let chosen: Vec<(Edge, &Band)> = bands.iter().filter_map(|(edge, b)| side_base(b).map(|band| (*edge, band))).collect();
+    let bands: Vec<(Edge, Vec<Band>)> = Edge::ALL
+        .iter()
+        .map(|&edge| (edge, grid.bands(edge, &middle)))
+        .collect();
+    let chosen: Vec<(Edge, &Band)> = bands
+        .iter()
+        .filter_map(|(edge, b)| side_base(b).map(|band| (*edge, band)))
+        .collect();
     let long = |edge: Edge| grid.long_edges().contains(&edge);
     let Some(base_sides) = choose_base(&chosen, long) else {
         return FilmEdges::default();
     };
     let rgb = grid.measure(&base_sides);
     let base_level = mean3(&base_sides.iter().map(|(_, b)| b.level).collect::<Vec<_>>());
-    let clear_film = ClearFilm { rgb, edges: base_sides.iter().map(|(e, _)| *e).collect() };
+    let clear_film = ClearFilm {
+        rgb,
+        edges: base_sides.iter().map(|(e, _)| *e).collect(),
+    };
     // Every edge with a band at the base's level bounds the picture; where
     // the picture is as thin as the base at the gate, fewer places show it.
     let bounds: Vec<(Edge, Band)> = bands
@@ -138,17 +147,23 @@ pub fn find(image: &ImageBuf) -> FilmEdges {
             let band = list
                 .iter()
                 .filter(|b| !b.picture_like && max_diff(b.level, base_level) <= BOUND_TOL)
-                .min_by(|a, b| max_diff(a.level, base_level).total_cmp(&max_diff(b.level, base_level)))
+                .min_by(|a, b| {
+                    max_diff(a.level, base_level).total_cmp(&max_diff(b.level, base_level))
+                })
                 .cloned()
                 .or_else(|| {
                     let need = (BOUND_SUPPORT * PLACES as f64).ceil() as usize;
-                    grid.band_at(*edge, &grid.runs_along(*edge), base_level, need, &middle).filter(|b| !b.picture_like)
+                    grid.band_at(*edge, &grid.runs_along(*edge), base_level, need, &middle)
+                        .filter(|b| !b.picture_like)
                 })?;
             Some((*edge, band))
         })
         .collect();
     let picture = grid.picture(&bounds);
-    FilmEdges { clear_film: Some(clear_film), picture }
+    FilmEdges {
+        clear_film: Some(clear_film),
+        picture,
+    }
 }
 
 impl Edge {
@@ -199,13 +214,23 @@ impl Grid {
             [to_f64(p[0]), to_f64(p[1]), to_f64(p[2])]
         };
         let linear: Vec<[f64; 3]> = if w == image.width as usize && h == image.height as usize {
-            (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).map(|(x, y)| pixel(x as u32, y as u32)).collect()
+            (0..h)
+                .flat_map(|y| (0..w).map(move |x| (x, y)))
+                .map(|(x, y)| pixel(x as u32, y as u32))
+                .collect()
         } else if w < image.width as usize {
             let reduced = crate::preview::downsample_area(image, (w as u32, h as u32));
-            reduced.data.chunks_exact(3).map(|p| [to_f64(p[0]), to_f64(p[1]), to_f64(p[2])]).collect()
+            reduced
+                .data
+                .chunks_exact(3)
+                .map(|p| [to_f64(p[0]), to_f64(p[1]), to_f64(p[2])])
+                .collect()
         } else {
             // Enlarged by nearest neighbour: a step stays a step.
-            let (sx, sy) = (image.width as f64 / w as f64, image.height as f64 / h as f64);
+            let (sx, sy) = (
+                image.width as f64 / w as f64,
+                image.height as f64 / h as f64,
+            );
             (0..h)
                 .flat_map(|y| (0..w).map(move |x| (x, y)))
                 .map(|(x, y)| {
@@ -217,13 +242,25 @@ impl Grid {
         };
         let log = linear
             .iter()
-            .map(|p| p.map(|v| if v.is_finite() { v.max(1e-5).log10() } else { -5.0 }))
+            .map(|p| {
+                p.map(|v| {
+                    if v.is_finite() {
+                        v.max(1e-5).log10()
+                    } else {
+                        -5.0
+                    }
+                })
+            })
             .collect();
         Grid { w, h, linear, log }
     }
 
     fn long_edges(&self) -> [Edge; 2] {
-        if self.w >= self.h { [Edge::Top, Edge::Bottom] } else { [Edge::Left, Edge::Right] }
+        if self.w >= self.h {
+            [Edge::Top, Edge::Bottom]
+        } else {
+            [Edge::Left, Edge::Right]
+        }
     }
 
     /// Pixels along the edge and in across it.
@@ -297,8 +334,11 @@ impl Grid {
 
     /// The flat runs ending in a step along `edge`, at every place.
     fn runs_along(&self, edge: Edge) -> Vec<Run> {
-        let depth = ((self.across_len(edge) as f64 * DEPTH).round() as usize).min(self.across_len(edge));
-        (0..PLACES).flat_map(|place| runs(place, &self.profile(edge, place, depth))).collect()
+        let depth =
+            ((self.across_len(edge) as f64 * DEPTH).round() as usize).min(self.across_len(edge));
+        (0..PLACES)
+            .flat_map(|place| runs(place, &self.profile(edge, place, depth)))
+            .collect()
     }
 
     fn centre(&self, edge: Edge, place: usize) -> f64 {
@@ -317,7 +357,9 @@ impl Grid {
             let best = pool
                 .iter()
                 .map(|r| (support(r.level), r))
-                .max_by(|(n, a), (m, b)| n.cmp(m).then(mean_of(a.level).total_cmp(&mean_of(b.level))))
+                .max_by(|(n, a), (m, b)| {
+                    n.cmp(m).then(mean_of(a.level).total_cmp(&mean_of(b.level)))
+                })
                 .map(|(n, r)| (n, r.level));
             let Some((n, seed)) = best else { break };
             if n < need {
@@ -334,9 +376,22 @@ impl Grid {
 
     /// The runs at `level` whose inner ends lie on one straight line, in at
     /// least `need` places: past a sprocket hole, the band inside it.
-    fn band_at(&self, edge: Edge, pool: &[Run], level: [f64; 3], need: usize, middle: &[f64]) -> Option<Band> {
-        let near: Vec<&Run> = pool.iter().filter(|r| max_diff(r.level, level) <= LEVEL_TOL).collect();
-        let points: Vec<(usize, f64, f64)> = near.iter().map(|r| (r.place, self.centre(edge, r.place), r.edge)).collect();
+    fn band_at(
+        &self,
+        edge: Edge,
+        pool: &[Run],
+        level: [f64; 3],
+        need: usize,
+        middle: &[f64],
+    ) -> Option<Band> {
+        let near: Vec<&Run> = pool
+            .iter()
+            .filter(|r| max_diff(r.level, level) <= LEVEL_TOL)
+            .collect();
+        let points: Vec<(usize, f64, f64)> = near
+            .iter()
+            .map(|r| (r.place, self.centre(edge, r.place), r.edge))
+            .collect();
         let (slope, intercept) = consensus_line(&points)?;
         // Each place's run nearest the line.
         let mut on_line: Vec<Run> = Vec::new();
@@ -346,7 +401,9 @@ impl Grid {
                 continue;
             }
             match on_line.iter_mut().find(|c| c.place == run.place) {
-                Some(c) if (c.edge - (slope * self.centre(edge, c.place) + intercept)).abs() <= off => {}
+                Some(c)
+                    if (c.edge - (slope * self.centre(edge, c.place) + intercept)).abs() <= off => {
+                }
                 Some(c) => *c = run.clone(),
                 None => on_line.push(run.clone()),
             }
@@ -354,11 +411,22 @@ impl Grid {
         if on_line.len() < need {
             return None;
         }
-        let (slope, intercept) = least_squares(&on_line.iter().map(|r| (self.centre(edge, r.place), r.edge)).collect::<Vec<_>>());
+        let (slope, intercept) = least_squares(
+            &on_line
+                .iter()
+                .map(|r| (self.centre(edge, r.place), r.edge))
+                .collect::<Vec<_>>(),
+        );
         let level = median_level(&on_line.iter().collect::<Vec<_>>());
         let thinner = middle.len() - middle.partition_point(|&v| v <= mean_of(level) + THINNER);
         let picture_like = thinner as f64 > THINNER_SHARE * middle.len() as f64;
-        Some(Band { level, runs: on_line, slope, intercept, picture_like })
+        Some(Band {
+            level,
+            runs: on_line,
+            slope,
+            intercept,
+            picture_like,
+        })
     }
 
     /// The mean linear RGB of the clear film in the middle of the bands'
@@ -369,7 +437,10 @@ impl Grid {
             for run in &band.runs {
                 let (a, b) = self.strip(*edge, run.place);
                 let len = run.end - run.start;
-                let (d0, d1) = (run.start + len / 4, (run.end - len / 4).max(run.start + len / 4 + 1));
+                let (d0, d1) = (
+                    run.start + len / 4,
+                    (run.end - len / 4).max(run.start + len / 4 + 1),
+                );
                 let mut sum = [0.0; 3];
                 let mut n = 0.0;
                 for s in a..b {
@@ -391,7 +462,11 @@ impl Grid {
         }
         let logs: Vec<[f64; 3]> = patches.iter().map(|p| p.1).collect();
         let centre = median_level(&logs.iter().collect::<Vec<_>>());
-        let kept: Vec<[f64; 3]> = patches.iter().filter(|p| max_diff(p.1, centre) <= 0.03).map(|p| p.0).collect();
+        let kept: Vec<[f64; 3]> = patches
+            .iter()
+            .filter(|p| max_diff(p.1, centre) <= 0.03)
+            .map(|p| p.0)
+            .collect();
         if kept.is_empty() {
             mean3(&patches.iter().map(|p| p.0).collect::<Vec<_>>())
         } else {
@@ -417,7 +492,11 @@ impl Grid {
             bounds.iter().collect()
         };
         let weight: f64 = levelling.iter().map(|(_, b)| b.runs.len() as f64).sum();
-        let theta = levelling.iter().map(|(e, b)| tilt(*e, b.slope) * b.runs.len() as f64).sum::<f64>() / weight;
+        let theta = levelling
+            .iter()
+            .map(|(e, b)| tilt(*e, b.slope) * b.runs.len() as f64)
+            .sum::<f64>()
+            / weight;
         let mut angle_deg = -theta.to_degrees();
         if angle_deg.abs() < LEVEL_MIN {
             angle_deg = 0.0;
@@ -426,7 +505,12 @@ impl Grid {
         let (sin, cos) = a.sin_cos();
         let (cx, cy) = (w / 2.0, h / 2.0);
         // Turned to level, as the crop turns the photograph.
-        let level_point = |(x, y): (f64, f64)| (cx + (x - cx) * cos - (y - cy) * sin, cy + (x - cx) * sin + (y - cy) * cos);
+        let level_point = |(x, y): (f64, f64)| {
+            (
+                cx + (x - cx) * cos - (y - cy) * sin,
+                cy + (x - cx) * sin + (y - cy) * cos,
+            )
+        };
         // [left, right, top, bottom]: found edges first, cut inside.
         let mut rect: [Option<f64>; 4] = [None; 4];
         for (edge, band) in bounds {
@@ -439,7 +523,8 @@ impl Grid {
                 .iter()
                 .map(|r| {
                     let along = strip_centre(r.place);
-                    let p = level_point(self.point(*edge, along, band.slope * along + band.intercept));
+                    let p =
+                        level_point(self.point(*edge, along, band.slope * along + band.intercept));
                     match edge {
                         Edge::Left | Edge::Right => p.0,
                         Edge::Top | Edge::Bottom => p.1,
@@ -460,14 +545,32 @@ impl Grid {
         // The frame's own edges are cut inside too: the holder or a sliver
         // of the film's edge too thin to measure often shows there.
         let inset = |found: Option<f64>, v: f64, by: f64| if found.is_some() { v } else { v + by };
-        let (x0, x1) = (inset(rect[0], x0, INSET * w), inset(rect[1], x1, -INSET * w));
-        let (y0, y1) = (inset(rect[2], y0, INSET * h), inset(rect[3], y1, -INSET * h));
-        let (x0, x1, y0, y1) = ((x0 / w).max(0.0), (x1 / w).min(1.0), (y0 / h).max(0.0), (y1 / h).min(1.0));
+        let (x0, x1) = (
+            inset(rect[0], x0, INSET * w),
+            inset(rect[1], x1, -INSET * w),
+        );
+        let (y0, y1) = (
+            inset(rect[2], y0, INSET * h),
+            inset(rect[3], y1, -INSET * h),
+        );
+        let (x0, x1, y0, y1) = (
+            (x0 / w).max(0.0),
+            (x1 / w).min(1.0),
+            (y0 / h).max(0.0),
+            (y1 / h).min(1.0),
+        );
         // A picture this small is something else.
         if !(x1 - x0 > 0.3 && y1 - y0 > 0.3) {
             return None;
         }
-        Some(Picture { x0, y0, x1, y1, angle_deg, edges: found })
+        Some(Picture {
+            x0,
+            y0,
+            x1,
+            y1,
+            angle_deg,
+            edges: found,
+        })
     }
 }
 
@@ -482,7 +585,12 @@ impl Grid {
 /// levelled): only as far as it must, so the crop keeps nearly the most
 /// of the picture.
 fn on_the_frame(rect: [Option<f64>; 4], a: f64, w: f64, h: f64) -> [f64; 4] {
-    let [mut x0, mut x1, mut y0, mut y1] = [rect[0].unwrap_or(0.0), rect[1].unwrap_or(w), rect[2].unwrap_or(0.0), rect[3].unwrap_or(h)];
+    let [mut x0, mut x1, mut y0, mut y1] = [
+        rect[0].unwrap_or(0.0),
+        rect[1].unwrap_or(w),
+        rect[2].unwrap_or(0.0),
+        rect[3].unwrap_or(h),
+    ];
     if a == 0.0 {
         // Unturned: the caller clamps it to the frame.
         return [x0, x1, y0, y1];
@@ -490,18 +598,29 @@ fn on_the_frame(rect: [Option<f64>; 4], a: f64, w: f64, h: f64) -> [f64; 4] {
     let (sin, cos) = a.sin_cos();
     let (cx, cy) = (w / 2.0, h / 2.0);
     // A point of the levelled frame, back on the scan.
-    let source = |(x, y): (f64, f64)| (cx + (x - cx) * cos + (y - cy) * sin, cy - (x - cx) * sin + (y - cy) * cos);
+    let source = |(x, y): (f64, f64)| {
+        (
+            cx + (x - cx) * cos + (y - cy) * sin,
+            cy - (x - cx) * sin + (y - cy) * cos,
+        )
+    };
     let on_scan = |p: (f64, f64)| {
         let (sx, sy) = source(p);
         (-1e-9..=w + 1e-9).contains(&sx) && (-1e-9..=h + 1e-9).contains(&sy)
     };
-    let within = |(x, y): (f64, f64)| (-1e-9..=w + 1e-9).contains(&x) && (-1e-9..=h + 1e-9).contains(&y);
+    let within =
+        |(x, y): (f64, f64)| (-1e-9..=w + 1e-9).contains(&x) && (-1e-9..=h + 1e-9).contains(&y);
     // A tenth of a pixel at a time, each corner off the frame moving its
     // sides: in the first pass only those not found, then any.
     const STEP_PX: f64 = 0.1;
     for any in [false, true] {
         for _ in 0..20_000 {
-            let corners = [((x0, y0), 0, 2), ((x1, y0), 1, 2), ((x0, y1), 0, 3), ((x1, y1), 1, 3)];
+            let corners = [
+                ((x0, y0), 0, 2),
+                ((x1, y0), 1, 2),
+                ((x0, y1), 0, 3),
+                ((x1, y1), 1, 3),
+            ];
             let mut moved = false;
             for (corner, side_x, side_y) in corners {
                 if on_scan(corner) && (!any || within(corner)) {
@@ -590,8 +709,18 @@ fn runs(place: usize, p: &[[f64; 3]]) -> Vec<Run> {
             let lo = end.saturating_sub(2).max(start + 1);
             let crossing = (lo..end + 10).find(|&t| mean_at(t) < mid)?;
             let (a, b) = (mean_at(crossing - 1), mean_at(crossing));
-            let f = if a > b { ((a - mid) / (a - b)).clamp(0.0, 1.0) } else { 0.5 };
-            Some(Run { place, start, end, level, edge: crossing as f64 - 0.5 + f })
+            let f = if a > b {
+                ((a - mid) / (a - b)).clamp(0.0, 1.0)
+            } else {
+                0.5
+            };
+            Some(Run {
+                place,
+                start,
+                end,
+                level,
+                edge: crossing as f64 - 0.5 + f,
+            })
         })
         .collect()
 }
@@ -622,7 +751,10 @@ fn median_edge(band: &Band) -> f64 {
 /// thinner film is the base along the long edges (fog only adds density),
 /// and at the ends the denser (bare light past the film's end shows at one
 /// end only).
-fn choose_base<'a>(chosen: &[(Edge, &'a Band)], long: impl Fn(Edge) -> bool) -> Option<Vec<(Edge, &'a Band)>> {
+fn choose_base<'a>(
+    chosen: &[(Edge, &'a Band)],
+    long: impl Fn(Edge) -> bool,
+) -> Option<Vec<(Edge, &'a Band)>> {
     let pick = |set: Vec<(Edge, &'a Band)>, thinnest: bool| -> Option<Vec<(Edge, &'a Band)>> {
         let key = |b: &Band| mean_of(b.level);
         let lead = if thinnest {
@@ -631,7 +763,12 @@ fn choose_base<'a>(chosen: &[(Edge, &'a Band)], long: impl Fn(Edge) -> bool) -> 
             set.iter().min_by(|a, b| key(a.1).total_cmp(&key(b.1)))?
         };
         let level = lead.1.level;
-        Some(set.iter().filter(|(_, b)| max_diff(b.level, level) <= SIDES_AGREE).copied().collect())
+        Some(
+            set.iter()
+                .filter(|(_, b)| max_diff(b.level, level) <= SIDES_AGREE)
+                .copied()
+                .collect(),
+        )
     };
     let long_set: Vec<_> = chosen.iter().filter(|(e, _)| long(*e)).copied().collect();
     let short_set: Vec<_> = chosen.iter().filter(|(e, _)| !long(*e)).copied().collect();
@@ -653,7 +790,10 @@ fn choose_base<'a>(chosen: &[(Edge, &'a Band)], long: impl Fn(Edge) -> bool) -> 
 /// For each place, the run nearest `level` within [`LEVEL_TOL`].
 fn places_near(pool: &[Run], level: [f64; 3]) -> Vec<&Run> {
     let mut best: Vec<&Run> = Vec::new();
-    for run in pool.iter().filter(|r| max_diff(r.level, level) <= LEVEL_TOL) {
+    for run in pool
+        .iter()
+        .filter(|r| max_diff(r.level, level) <= LEVEL_TOL)
+    {
         match best.iter_mut().find(|b| b.place == run.place) {
             Some(b) if max_diff(b.level, level) <= max_diff(run.level, level) => {}
             Some(b) => *b = run,
@@ -724,7 +864,10 @@ fn consensus_line(points: &[(usize, f64, f64)]) -> Option<(f64, f64)> {
 
 fn least_squares(points: &[(f64, f64)]) -> (f64, f64) {
     let n = points.len() as f64;
-    let (mx, my) = (points.iter().map(|p| p.0).sum::<f64>() / n, points.iter().map(|p| p.1).sum::<f64>() / n);
+    let (mx, my) = (
+        points.iter().map(|p| p.0).sum::<f64>() / n,
+        points.iter().map(|p| p.1).sum::<f64>() / n,
+    );
     let sxx: f64 = points.iter().map(|p| (p.0 - mx).powi(2)).sum();
     let sxy: f64 = points.iter().map(|p| (p.0 - mx) * (p.1 - my)).sum();
     let slope = if sxx > 0.0 { sxy / sxx } else { 0.0 };
@@ -766,7 +909,9 @@ mod tests {
     const HOLDER: [f64; 3] = [0.003, 0.003, 0.003];
 
     fn hash(x: u32, y: u32, c: u32) -> f64 {
-        let mut h = x.wrapping_mul(374_761_393) ^ y.wrapping_mul(668_265_263) ^ c.wrapping_mul(2_147_483_647);
+        let mut h = x.wrapping_mul(374_761_393)
+            ^ y.wrapping_mul(668_265_263)
+            ^ c.wrapping_mul(2_147_483_647);
         h = (h ^ (h >> 13)).wrapping_mul(1_274_126_177);
         (h ^ (h >> 16)) as f64 / u32::MAX as f64
     }
@@ -775,7 +920,9 @@ mod tests {
     fn picture(x: f64, y: f64) -> [f64; 3] {
         let (xi, yi) = (x as u32, y as u32);
         [0, 1, 2].map(|c| {
-            let d = 0.35 + 0.25 * (x * 0.071 + c as f64).sin() * (y * 0.053 - c as f64).cos() + 0.15 * hash(xi, yi, c as u32);
+            let d = 0.35
+                + 0.25 * (x * 0.071 + c as f64).sin() * (y * 0.053 - c as f64).cos()
+                + 0.15 * hash(xi, yi, c as u32);
             BASE[c] * 10f64.powf(-d)
         })
     }
@@ -802,7 +949,9 @@ mod tests {
     fn clear_film_on_one_edge() {
         // The gap between frames down the left, the picture running off
         // the other three edges.
-        let found = find(&scan(900, 600, |x, y| if x < 120.0 { BASE } else { picture(x, y) }));
+        let found = find(&scan(900, 600, |x, y| {
+            if x < 120.0 { BASE } else { picture(x, y) }
+        }));
         let clear = found.clear_film.expect("clear film");
         assert_eq!(clear.edges, vec![Edge::Left]);
         assert!(close(clear.rgb, BASE, 0.005), "{:?}", clear.rgb);
@@ -817,13 +966,28 @@ mod tests {
 
     #[test]
     fn rebate_on_both_long_edges() {
-        let found = find(&scan(900, 600, |x, y| if !(70.0..530.0).contains(&y) { BASE } else { picture(x, y) }));
+        let found = find(&scan(900, 600, |x, y| {
+            if !(70.0..530.0).contains(&y) {
+                BASE
+            } else {
+                picture(x, y)
+            }
+        }));
         let clear = found.clear_film.expect("clear film");
         assert_eq!(clear.edges, vec![Edge::Top, Edge::Bottom]);
         assert!(close(clear.rgb, BASE, 0.005), "{:?}", clear.rgb);
         let p = found.picture.expect("picture");
-        assert!((p.y0 - (70.0 / 600.0 + INSET)).abs() < 0.002 && (p.y1 - (530.0 / 600.0 - INSET)).abs() < 0.002, "{p:?}");
-        assert!((p.x0 - INSET).abs() < 1e-9 && (p.x1 - (1.0 - INSET)).abs() < 1e-9 && p.angle_deg == 0.0, "{p:?}");
+        assert!(
+            (p.y0 - (70.0 / 600.0 + INSET)).abs() < 0.002
+                && (p.y1 - (530.0 / 600.0 - INSET)).abs() < 0.002,
+            "{p:?}"
+        );
+        assert!(
+            (p.x0 - INSET).abs() < 1e-9
+                && (p.x1 - (1.0 - INSET)).abs() < 1e-9
+                && p.angle_deg == 0.0,
+            "{p:?}"
+        );
     }
 
     /// 35 mm film in a holder: the holder's dark surround, the film's edge,
@@ -847,7 +1011,11 @@ mod tests {
         assert_eq!(clear.edges, vec![Edge::Top, Edge::Bottom]);
         assert!(close(clear.rgb, BASE, 0.005), "{:?}", clear.rgb);
         let p = found.picture.expect("picture");
-        assert!((p.y0 - (95.0 / 600.0 + INSET)).abs() < 0.002 && (p.y1 - (505.0 / 600.0 - INSET)).abs() < 0.002, "{p:?}");
+        assert!(
+            (p.y0 - (95.0 / 600.0 + INSET)).abs() < 0.002
+                && (p.y1 - (505.0 / 600.0 - INSET)).abs() < 0.002,
+            "{p:?}"
+        );
     }
 
     #[test]
@@ -892,7 +1060,11 @@ mod tests {
     fn a_bright_sky_at_the_edge_is_not_clear_film() {
         assert_eq!(find(&scan(900, 600, sky)), FilmEdges::default());
         // With a rebate along the bottom, that is the base.
-        let found = find(&scan(900, 600, |x, y| if y > 540.0 { BASE } else { sky(x, y) }));
+        let found = find(&scan(
+            900,
+            600,
+            |x, y| if y > 540.0 { BASE } else { sky(x, y) },
+        ));
         let clear = found.clear_film.expect("clear film");
         assert_eq!(clear.edges, vec![Edge::Bottom]);
         assert!(close(clear.rgb, BASE, 0.005), "{:?}", clear.rgb);
@@ -921,13 +1093,16 @@ mod tests {
         let shadows = |x: f64, y: f64| {
             if y > 420.0 {
                 let (xi, yi) = (x as u32, y as u32);
-                [0, 1, 2].map(|c| BASE[c] * 10f64.powf(-(0.02 + 0.08 * hash(xi / 3, yi / 3, c as u32))))
+                [0, 1, 2]
+                    .map(|c| BASE[c] * 10f64.powf(-(0.02 + 0.08 * hash(xi / 3, yi / 3, c as u32))))
             } else {
                 picture(x, y)
             }
         };
         assert_eq!(find(&scan(900, 600, shadows)).clear_film, None);
-        let found = find(&scan(900, 600, |x, y| if x < 100.0 { BASE } else { shadows(x, y) }));
+        let found = find(&scan(900, 600, |x, y| {
+            if x < 100.0 { BASE } else { shadows(x, y) }
+        }));
         let clear = found.clear_film.expect("clear film");
         assert_eq!(clear.edges, vec![Edge::Left]);
         assert!(close(clear.rgb, BASE, 0.005), "{:?}", clear.rgb);
@@ -943,14 +1118,22 @@ mod tests {
             // Back to the film's own square coordinates.
             let (dx, dy) = (x - cx, y - cy);
             let (fx, fy) = (cx + dx * cos + dy * sin, cy - dx * sin + dy * cos);
-            if !(0.0..600.0).contains(&fy) { HOLDER } else { strip(fx, fy) }
+            if !(0.0..600.0).contains(&fy) {
+                HOLDER
+            } else {
+                strip(fx, fy)
+            }
         }));
         let clear = found.clear_film.expect("clear film");
         assert!(close(clear.rgb, BASE, 0.01), "{:?}", clear.rgb);
         let p = found.picture.expect("picture");
         assert!((p.angle_deg + 1.0).abs() < 0.05, "{p:?}");
         // Turned back, the gate's edges are where they were on the film.
-        assert!((p.y0 - (95.0 / 600.0 + INSET)).abs() < 0.003 && (p.y1 - (505.0 / 600.0 - INSET)).abs() < 0.003, "{p:?}");
+        assert!(
+            (p.y0 - (95.0 / 600.0 + INSET)).abs() < 0.003
+                && (p.y1 - (505.0 / 600.0 - INSET)).abs() < 0.003,
+            "{p:?}"
+        );
         // The frame's own edges come in to stay on the turned frame.
         assert!(p.x0 > 0.0 && p.x1 < 1.0, "{p:?}");
     }
@@ -960,11 +1143,19 @@ mod tests {
     fn on_frame([x0, x1, y0, y1]: [f64; 4], a: f64, w: f64, h: f64) -> bool {
         let (sin, cos) = a.sin_cos();
         let (cx, cy) = (w / 2.0, h / 2.0);
-        [(x0, y0), (x1, y0), (x0, y1), (x1, y1)].iter().all(|&(x, y)| {
-            let (sx, sy) = (cx + (x - cx) * cos + (y - cy) * sin, cy - (x - cx) * sin + (y - cy) * cos);
-            let tol = 1e-6;
-            (-tol..=w + tol).contains(&sx) && (-tol..=h + tol).contains(&sy) && (-tol..=w + tol).contains(&x) && (-tol..=h + tol).contains(&y)
-        })
+        [(x0, y0), (x1, y0), (x0, y1), (x1, y1)]
+            .iter()
+            .all(|&(x, y)| {
+                let (sx, sy) = (
+                    cx + (x - cx) * cos + (y - cy) * sin,
+                    cy - (x - cx) * sin + (y - cy) * cos,
+                );
+                let tol = 1e-6;
+                (-tol..=w + tol).contains(&sx)
+                    && (-tol..=h + tol).contains(&sy)
+                    && (-tol..=w + tol).contains(&x)
+                    && (-tol..=h + tol).contains(&y)
+            })
     }
 
     #[test]
@@ -978,9 +1169,16 @@ mod tests {
         assert!(on_frame(fitted, a, w, h), "{fitted:?}");
         // Brought in only as far as it must: still most of the picture.
         let [x0, x1, y0, y1] = fitted;
-        assert!(x0 >= 0.0 && x1 - x0 > 0.85 * w && y1 - y0 > 0.8 * h, "{fitted:?}");
+        assert!(
+            x0 >= 0.0 && x1 - x0 > 0.85 * w && y1 - y0 > 0.8 * h,
+            "{fitted:?}"
+        );
         // Turned the other way too, and with the frame's own edges.
-        for (rect, a) in [(found, -a), ([None, Some(880.0), Some(4.0), None], a), ([None; 4], -a)] {
+        for (rect, a) in [
+            (found, -a),
+            ([None, Some(880.0), Some(4.0), None], a),
+            ([None; 4], -a),
+        ] {
             let fitted = on_the_frame(rect, a, w, h);
             assert!(on_frame(fitted, a, w, h), "{rect:?} {fitted:?}");
         }
@@ -1010,16 +1208,41 @@ mod tests {
         }));
         let p = found.picture.expect("picture");
         let rect = [p.x0 * 900.0, p.x1 * 900.0, p.y0 * 600.0, p.y1 * 600.0];
-        assert!(on_frame(rect, p.angle_deg.to_radians(), 900.0, 600.0), "{p:?}");
-        assert!((0.0..p.x1).contains(&p.x0) && p.x1 <= 1.0 && (0.0..p.y1).contains(&p.y0) && p.y1 <= 1.0, "{p:?}");
+        assert!(
+            on_frame(rect, p.angle_deg.to_radians(), 900.0, 600.0),
+            "{p:?}"
+        );
+        assert!(
+            (0.0..p.x1).contains(&p.x0)
+                && p.x1 <= 1.0
+                && (0.0..p.y1).contains(&p.y0)
+                && p.y1 <= 1.0,
+            "{p:?}"
+        );
     }
 
     #[test]
     fn the_answer_does_not_depend_on_the_scan_size() {
-        let small = find(&scan(450, 300, |x, y| if x < 60.0 { BASE } else { picture(x * 2.0, y * 2.0) }));
-        let large = find(&scan(1800, 1200, |x, y| if x < 240.0 { BASE } else { picture(x / 2.0, y / 2.0) }));
+        let small = find(&scan(450, 300, |x, y| {
+            if x < 60.0 {
+                BASE
+            } else {
+                picture(x * 2.0, y * 2.0)
+            }
+        }));
+        let large = find(&scan(1800, 1200, |x, y| {
+            if x < 240.0 {
+                BASE
+            } else {
+                picture(x / 2.0, y / 2.0)
+            }
+        }));
         let (s, l) = (small.picture.unwrap(), large.picture.unwrap());
         assert!((s.x0 - l.x0).abs() < 0.002, "{s:?} {l:?}");
-        assert!(close(small.clear_film.unwrap().rgb, large.clear_film.unwrap().rgb, 0.005));
+        assert!(close(
+            small.clear_film.unwrap().rgb,
+            large.clear_film.unwrap().rgb,
+            0.005
+        ));
     }
 }
