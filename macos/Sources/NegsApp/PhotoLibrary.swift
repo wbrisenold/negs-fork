@@ -164,6 +164,9 @@ struct CullAnalysisSummary: Equatable {
     let attempted: Int
     let failed: Int
     let cancelled: Bool
+    let candidateURLs: Set<URL>
+    let completedURLs: Set<URL>
+    let failedURLs: Set<URL>
 }
 
 /// Local Vision results plus transparent, deterministic technical signals.
@@ -756,8 +759,11 @@ private struct LibraryProjectDocument: Codable, Sendable {
 
     func selectedCount(in visible: [LibraryPhoto]) -> Int {
         let visibleURLs = Set(visible.map { $0.file.url })
-        let selectedURLs = gridSelection.selected.union(selectedPhotoURL.map { [$0] } ?? [])
         return selectedURLs.intersection(visibleURLs).count
+    }
+
+    var selectedURLs: Set<URL> {
+        gridSelection.selected.union(selectedPhotoURL.map { Set([$0]) } ?? [])
     }
 
     func count(for project: LibraryProject) -> Int {
@@ -831,7 +837,8 @@ private struct LibraryProjectDocument: Codable, Sendable {
         _ = await importFolders(urls, to: selectedProjectID)
     }
 
-    func importFolders(_ urls: [URL], to projectID: UUID) async -> FolderImportResult {
+    func importFolders(_ urls: [URL], to projectID: UUID,
+                       onProgress: @escaping @MainActor (Int, Int) -> Void = { _, _ in }) async -> FolderImportResult {
         guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }) else {
             return FolderImportResult(importedCount: 0, scannedCount: 0, failures: ["The destination project no longer exists."])
         }
@@ -869,7 +876,7 @@ private struct LibraryProjectDocument: Codable, Sendable {
             ensureSourceCategory(folderID, projectID: projectID)
         }
         persist()
-        failures.append(contentsOf: await refresh(projectID: projectID, afterCurrent: true))
+        failures.append(contentsOf: await refresh(projectID: projectID, afterCurrent: true, onProgress: onProgress))
         guard let updatedProjectIndex = projects.firstIndex(where: { $0.id == projectID }) else {
             return FolderImportResult(importedCount: 0, scannedCount: selectedFolderIDs.count,
                                       failures: ["The destination project was removed during import."])
@@ -1016,7 +1023,8 @@ private struct LibraryProjectDocument: Codable, Sendable {
     }
 
     @discardableResult
-    func refresh(projectID: UUID? = nil, afterCurrent: Bool = false) async -> [String] {
+    func refresh(projectID: UUID? = nil, afterCurrent: Bool = false,
+                 onProgress: (@MainActor (Int, Int) -> Void)? = nil) async -> [String] {
         if let activeRefresh {
             let currentProjectID = activeRefreshProjectID
             let currentRefreshID = activeRefreshID
@@ -1028,7 +1036,7 @@ private struct LibraryProjectDocument: Codable, Sendable {
                     activeRefreshID = nil
                     refreshing = false
                 }
-                return await refresh(projectID: projectID)
+                return await refresh(projectID: projectID, onProgress: onProgress)
             }
             return result
         }
@@ -1037,7 +1045,7 @@ private struct LibraryProjectDocument: Codable, Sendable {
         activeRefreshProjectID = targetProjectID
         let refreshID = UUID()
         activeRefreshID = refreshID
-        let task = Task { await self.refreshNow(projectID: targetProjectID) }
+        let task = Task { await self.refreshNow(projectID: targetProjectID, onProgress: onProgress) }
         activeRefresh = task
         let failures = await task.value
         if activeRefreshID == refreshID {
@@ -1049,7 +1057,7 @@ private struct LibraryProjectDocument: Codable, Sendable {
         return failures
     }
 
-    private func refreshNow(projectID: UUID?) async -> [String] {
+    private func refreshNow(projectID: UUID?, onProgress: (@MainActor (Int, Int) -> Void)? = nil) async -> [String] {
         refreshProgress = 0
         let activeFolderIDs = projects.first(where: { $0.id == projectID })?.folderIDs ?? []
         let sources = folders.filter { activeFolderIDs.contains($0.id) }.map { ($0.id, $0.resolvedURL()) }
@@ -1068,6 +1076,7 @@ private struct LibraryProjectDocument: Codable, Sendable {
             while let result = await group.next() {
                 results.append(result)
                 refreshProgress += 1
+                onProgress?(refreshProgress, refreshTotal)
                 if let status = importStatus, status.phase == .importing,
                    status.projectID == projectID {
                     importStatus = LibraryImportStatus(projectID: status.projectID, destinationName: status.destinationName, phase: status.phase,
@@ -1141,7 +1150,8 @@ private struct LibraryProjectDocument: Codable, Sendable {
             !$0.missing && (scope?.contains($0.file.url) ?? true) && (replacingExisting || $0.cull == nil)
         }
         guard !candidates.isEmpty else {
-            cullAnalysisSummary = CullAnalysisSummary(attempted: 0, failed: 0, cancelled: false)
+            cullAnalysisSummary = CullAnalysisSummary(attempted: 0, failed: 0, cancelled: false,
+                                                      candidateURLs: [], completedURLs: [], failedURLs: [])
             return
         }
         var photoIndices = Dictionary(uniqueKeysWithValues: photos.enumerated().map { ($0.element.file.url, $0.offset) })
@@ -1152,6 +1162,8 @@ private struct LibraryProjectDocument: Codable, Sendable {
         defer { analyzingCull = false }
 
         var failedCount = 0
+        var completedURLs = Set<URL>()
+        var failedURLs = Set<URL>()
         for photo in candidates {
             if Task.isCancelled { break }
             let result = await Task.detached(priority: .utility) {
@@ -1166,14 +1178,21 @@ private struct LibraryProjectDocument: Codable, Sendable {
                     reasons: ["Could not decode this image for culling; review it manually"])
                 photoIndices[photo.file.url] = index
             }
-            if result == nil { failedCount += 1 }
+            if result == nil {
+                failedCount += 1
+                failedURLs.insert(photo.file.url)
+            }
+            completedURLs.insert(photo.file.url)
             cullProgress += 1
         }
         persist()
         cullAnalysisSummary = CullAnalysisSummary(
             attempted: cullProgress,
             failed: failedCount,
-            cancelled: Task.isCancelled
+            cancelled: Task.isCancelled,
+            candidateURLs: Set(candidates.map(\.file.url)),
+            completedURLs: completedURLs,
+            failedURLs: failedURLs
         )
     }
 

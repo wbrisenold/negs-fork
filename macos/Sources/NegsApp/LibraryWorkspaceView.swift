@@ -7,10 +7,10 @@ struct LibraryWorkspaceView: View {
         let selectedPhotos: [LibraryPhoto]
         let selectedReady: [LibraryPhoto]
         let selectedOfflineCount: Int
-        let editTargets: [LibraryPhoto]
+        let developHandoff: LibraryHandoffResult
+        let visibleExport: LibraryHandoffResult
+        let queueExport: LibraryHandoffResult
         let unqueuedSelectionCount: Int
-        let queuedReady: [LibraryPhoto]
-        let queuedOfflineCount: Int
         let projectIsEmpty: Bool
         let editableCount: Int
         let offlineCount: Int
@@ -41,6 +41,7 @@ struct LibraryWorkspaceView: View {
     @State private var projectToDelete: UUID?
     @State private var showingGroupDeleteConfirmation = false
     @State private var categoryToDelete: UUID?
+    @State private var bulkActionSummary: LibraryBulkActionSummary?
     @State private var showingFilterOptions = false
     @State private var showingTopPickOptions = false
     @State private var cullAnalysisTask: Task<Void, Never>?
@@ -69,14 +70,9 @@ struct LibraryWorkspaceView: View {
 
     var body: some View {
         let visiblePhotos = library.visiblePhotos
-        let analyzedTopPicks = visiblePhotos.reduce(into: 0) { count, photo in
-            if photo.cull != nil && !(photo.cull?.failed ?? true) { count += 1 }
-        }
-        let topPickURLs = analyzedTopPicks > 0 ? library.topPickURLs(in: visiblePhotos) : []
-        let topPickQuota = library.topPickUnit == .percent ? " · \(library.topPickValue)%" : ""
-        let topPickLabel = analyzedTopPicks == 0
-            ? "Top Picks · Not analyzed"
-            : "Top Picks · \(topPickURLs.count) of \(analyzedTopPicks)\(topPickQuota)"
+        let topPickSummary = LibraryWorkflow.topPickSummary(in: library)
+        let topPickURLs = topPickSummary.analyzedPhotoCount > 0 ? library.topPickURLs(in: visiblePhotos) : []
+        let topPickLabel = topPickSummary.label
         return HSplitView {
             sidebar.frame(minWidth: 172, idealWidth: 196, maxWidth: 228)
                 .padding(StudioStyle.Space.paneInset)
@@ -247,7 +243,7 @@ struct LibraryWorkspaceView: View {
 
     private func beginCullAnalysis(in scope: Set<URL>, replacingExisting: Bool) {
         cullAnalysisTask = Task {
-            await library.analyzeCull(in: scope, replacingExisting: replacingExisting)
+            _ = await LibraryWorkflow.perform(.analyzeCull(scope, replacingExisting: replacingExisting), in: library)
             cullAnalysisTask = nil
         }
     }
@@ -256,16 +252,14 @@ struct LibraryWorkspaceView: View {
         let displayedPhotos = displayedPhotos(from: visiblePhotos, topPicks: topPickURLs)
         let workflowState = LibraryWorkflow.visibleState(in: library, displaying: displayedPhotos)
         let editablePhotos = displayedPhotos.filter { !$0.missing }
-        let selectedURLs = library.gridSelection.selected.union(library.selectedPhotoURL.map { Set([$0]) } ?? [])
+        let selectedURLs = library.selectedURLs
         let selectedPhotos = displayedPhotos.filter { selectedURLs.contains($0.file.url) }
         let selectedReady = editablePhotos.filter { selectedURLs.contains($0.file.url) }
         let selectedOfflineCount = selectedPhotos.count - selectedReady.count
-        // An explicit selection containing only offline files must not fall
-        // through to editing every available photo in the view.
-        let editTargets = selectedURLs.isEmpty ? editablePhotos : selectedReady
+        let developHandoff = LibraryWorkflow.handoff(.develop, in: library, displaying: displayedPhotos)
+        let visibleExport = LibraryWorkflow.handoff(.exportVisible, in: library, displaying: displayedPhotos)
+        let queueExport = LibraryWorkflow.handoff(.exportQueue, in: library, displaying: displayedPhotos)
         let unqueuedSelectionCount = selectedReady.filter { !$0.selectedForExport }.count
-        let queuedReady = displayedPhotos.filter { $0.selectedForExport && !$0.missing }
-        let queuedOfflineCount = displayedPhotos.filter { $0.selectedForExport && $0.missing }.count
         let offlineCount = displayedPhotos.count - editablePhotos.count
         let projectIsEmpty = workflowState.emptyState?.nextStep == .addPhotos
         let selection = LibrarySelectionActionContext(
@@ -273,10 +267,10 @@ struct LibraryWorkspaceView: View {
             selectedPhotos: selectedPhotos,
             selectedReady: selectedReady,
             selectedOfflineCount: selectedOfflineCount,
-            editTargets: editTargets,
+            developHandoff: developHandoff,
+            visibleExport: visibleExport,
+            queueExport: queueExport,
             unqueuedSelectionCount: unqueuedSelectionCount,
-            queuedReady: queuedReady,
-            queuedOfflineCount: queuedOfflineCount,
             projectIsEmpty: projectIsEmpty,
             editableCount: editablePhotos.count,
             offlineCount: offlineCount
@@ -294,7 +288,13 @@ struct LibraryWorkspaceView: View {
 
     @ViewBuilder private func libraryHeader(workflowState: LibraryWorkflowVisibleState) -> some View {
         HStack(spacing: StudioStyle.Space.compact) {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(workflowState.scopeLabel)
+                    .font(StudioStyle.Typography.section)
+                    .tracking(StudioStyle.Typography.sectionTracking)
+                    .foregroundStyle(StudioStyle.ActionRole.quiet)
+                    .lineLimit(1)
+                    .accessibilityAddTraits(.isHeader)
                 HStack(spacing: 7) {
                     Text(workflowState.title).font(Theme.text(18, weight: 600)).foregroundStyle(Theme.paper)
                         .lineLimit(1).truncationMode(.tail)
@@ -416,6 +416,7 @@ struct LibraryWorkspaceView: View {
             .studioWorkspaceCard()
             .padding(.horizontal, StudioStyle.Space.section).padding(.bottom, StudioStyle.Space.compact)
         } else if let summary = library.cullAnalysisSummary {
+            let retryScope = summary.failedURLs.union(summary.candidateURLs.subtracting(summary.completedURLs))
             HStack(spacing: StudioStyle.Space.standard) {
                 Image(systemName: summary.failed > 0 ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
                     .foregroundStyle(summary.failed > 0 ? Theme.warn : StudioStyle.positive)
@@ -448,10 +449,10 @@ struct LibraryWorkspaceView: View {
                 Spacer(minLength: 4)
                 if summary.cancelled || summary.failed > 0 {
                     Button(summary.failed > 0 ? "Retry Analysis" : "Continue Analysis") {
-                        let scope = Set(library.visiblePhotos.map { $0.file.url })
-                        beginCullAnalysis(in: scope, replacingExisting: summary.failed > 0)
+                        beginCullAnalysis(in: retryScope, replacingExisting: !summary.failedURLs.isEmpty)
                     }
                     .buttonStyle(StudioActionButtonStyle(kind: .secondary))
+                    .disabled(retryScope.isEmpty)
                 }
             }
             .padding(.horizontal, StudioStyle.Space.section).padding(.vertical, StudioStyle.Space.compact)
@@ -554,7 +555,7 @@ struct LibraryWorkspaceView: View {
         Button {
             showingTopPickOptions = true
         } label: {
-            Text("Top Picks…")
+            Text(topPickLabel)
         }
         .buttonStyle(StudioActionButtonStyle(kind: .secondary))
         .popover(isPresented: $showingTopPickOptions, arrowEdge: .bottom) {
@@ -594,7 +595,7 @@ struct LibraryWorkspaceView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Divider()
-                Text("Ranks analyzed photos in the current Library view, then keeps this number or percentage. Project, search and group scope all apply.")
+                Text("Current scope: \(library.visiblePhotos.count) photos, \(LibraryWorkflow.topPickSummary(in: library).analyzedPhotoCount) analyzed. Keeps the highest-scoring eligible photos within this project, search, or group scope.")
                     .font(.caption2).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
                 Button {
                     _ = LibraryWorkflow.perform(.toggleCullFilter(.topPicks), in: library)
@@ -657,8 +658,15 @@ struct LibraryWorkspaceView: View {
             }
             .buttonStyle(StudioActionButtonStyle(kind: .secondary))
             .disabled(library.analyzingCull || !hasOnlinePhotos)
-            .help("Analyze online photos in the current project scope. AI scores and Top Picks ranking rules are unchanged.")
+            .help(hasOnlinePhotos
+                  ? "Analyze online photos in the current Library scope. AI scores and Top Picks ranking rules are unchanged."
+                  : "No online photos are available to analyze in this Library scope.")
             .accessibilityLabel(library.analyzingCull ? "Photo analysis running" : hasAnalysis ? "Re-analyze photos with AI" : "Analyze photos with AI")
+            if !hasOnlinePhotos {
+                Text("No online photos in this scope are available for analysis.")
+                    .font(Theme.ui(10)).foregroundStyle(Theme.dim)
+                    .accessibilityLabel("AI analysis unavailable: no online photos in this scope")
+            }
             Menu {
                 ForEach(LibrarySort.allCases) { sort in
                     Button {
@@ -692,34 +700,39 @@ struct LibraryWorkspaceView: View {
                     .font(Theme.ui(10)).foregroundStyle(Theme.dim)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
+                let onlineCount = selection.selectedReady.count
                 HStack(spacing: StudioStyle.Space.compact) {
                     Menu {
-                        Button("Pick Selected", systemImage: "flag.fill") {
-                            library.setFlag(.picked, for: selection.selectedPhotos.map(\.file.url))
+                        Button("Pick · \(onlineCount) online", systemImage: "flag.fill") {
+                            applyBulkMetadata(.pick, selectedURLs: selection.selectedURLs)
                         }
-                        Button("Reject Selected", systemImage: "xmark.circle") {
-                            library.setFlag(.rejected, for: selection.selectedPhotos.map(\.file.url))
+                        Button("Reject · \(onlineCount) online", systemImage: "xmark.circle") {
+                            applyBulkMetadata(.reject, selectedURLs: selection.selectedURLs)
                         }
-                        Button("Clear Flags", systemImage: "flag.slash") {
-                            library.setFlag(.none, for: selection.selectedPhotos.map(\.file.url))
+                        Button("Clear Marks · \(onlineCount) online", systemImage: "flag.slash") {
+                            applyBulkMetadata(.clearMarks, selectedURLs: selection.selectedURLs)
                         }
                     } label: {
-                        Label("Mark", systemImage: "checkmark.circle")
+                        Label("Mark · \(onlineCount) online", systemImage: "checkmark.circle")
                     }
                     .buttonStyle(StudioActionButtonStyle(kind: .secondary))
-                    .help("Pick, reject, or clear flags for the selected photos")
+                    .disabled(onlineCount == 0)
+                    .help("Selected: \(selection.selectedPhotos.count). These actions affect \(onlineCount) online photos; \(selection.selectedOfflineCount) offline photos are skipped.")
                     Menu {
                         ForEach(1...5, id: \.self) { rating in
-                            Button("Rate \(rating) Stars") {
-                                library.setRating(rating, for: selection.selectedPhotos.map(\.file.url))
+                            Button("Rate \(rating) Stars · \(onlineCount) online") {
+                                applyBulkMetadata(.rate(rating), selectedURLs: selection.selectedURLs)
                             }
                         }
-                        Button("Clear Ratings") { library.setRating(0, for: selection.selectedPhotos.map(\.file.url)) }
+                        Button("Clear Ratings · \(onlineCount) online") {
+                            applyBulkMetadata(.clearRatings, selectedURLs: selection.selectedURLs)
+                        }
                     } label: {
-                        Label("Rate", systemImage: "star")
+                        Label("Rate · \(onlineCount) online", systemImage: "star")
                     }
                     .buttonStyle(StudioActionButtonStyle(kind: .secondary))
-                    .help("Rate all selected photos")
+                    .disabled(onlineCount == 0)
+                    .help("Selected: \(selection.selectedPhotos.count). Ratings affect \(onlineCount) online photos; \(selection.selectedOfflineCount) offline photos are skipped.")
                     if let projectID = library.selectedProjectID {
                         let groups = library.categories(for: projectID)
                         if !groups.isEmpty {
@@ -727,10 +740,10 @@ struct LibraryWorkspaceView: View {
                                 ForEach(groups) { group in
                                     Menu(group.name) {
                                         Button("Add Selected to Group", systemImage: "plus.circle") {
-                                            library.addToBin(selection.selectedPhotos, binID: group.id)
+                                            _ = LibraryWorkflow.perform(.addPhotosToGroup(selection.selectedURLs, groupID: group.id), in: library)
                                         }
                                         Button("Remove Selected from Group", systemImage: "minus.circle") {
-                                            library.removeFromBin(selection.selectedPhotos, binID: group.id)
+                                            _ = LibraryWorkflow.perform(.removePhotosFromGroup(selection.selectedURLs, groupID: group.id), in: library)
                                         }
                                     }
                                 }
@@ -748,6 +761,11 @@ struct LibraryWorkspaceView: View {
                     }
                 }
                 .fixedSize(horizontal: false, vertical: true)
+            }
+            if let bulkActionSummary {
+                Text(bulkActionSummary.message)
+                    .font(Theme.metadata(10)).foregroundStyle(Theme.dim).monospacedDigit()
+                    .accessibilityLabel(bulkActionSummary.message)
             }
             if let projectID = library.selectedProjectID, !selection.selectedPhotos.isEmpty {
                 Button("Remove Selected from Project") {
@@ -778,24 +796,28 @@ struct LibraryWorkspaceView: View {
         .studioWorkspacePane(surface: Theme.panel)
     }
 
+    private func applyBulkMetadata(_ action: LibraryBulkMetadataAction, selectedURLs: Set<URL>) {
+        bulkActionSummary = LibraryWorkflow.perform(.applyBulkMetadata(action, selectedURLs: selectedURLs), in: library)
+            .bulkActionSummary
+    }
+
     private func libraryHandoffCard(selection: LibrarySelectionActionContext) -> some View {
         VStack(alignment: .leading, spacing: StudioStyle.Space.standard) {
-            let targetCount = selection.editTargets.count
-            let isExplicitSelection = !selection.selectedURLs.isEmpty
+            let targetCount = selection.developHandoff.targetURLs.count
+            let isExplicitSelection = selection.developHandoff.scope == .selected
             libraryStepHeading("03", title: "DEVELOP / EXPORT",
                                detail: isExplicitSelection ? "Actions apply to selected photos" : "Actions apply to all visible photos")
             if targetCount > 0 {
                 Button {
-                    editFiltered(selection.editTargets)
+                    guard !selection.developHandoff.targetURLs.isEmpty else { return }
+                    model.editLibrarySelection(selection.developHandoff.targetURLs)
                 } label: {
                     Label(isExplicitSelection ? "Develop Selected · \(targetCount)" : "Develop All · \(targetCount)",
                           systemImage: "slider.horizontal.3")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(StudioActionButtonStyle(kind: .primary))
-                .help(isExplicitSelection
-                      ? "Develop \(selection.selectedReady.count) selected online photos; skip \(selection.selectedOfflineCount) offline sources."
-                      : "Develop all \(targetCount) visible photos; skip \(selection.offlineCount) offline sources.")
+                .help("Develop \(selection.developHandoff.summary).")
             } else if !selection.selectedPhotos.isEmpty {
                 Text("No selected photo is available to develop. \(selection.selectedOfflineCount) selected source files are offline.")
                     .font(Theme.ui(10)).foregroundStyle(Theme.warn)
@@ -813,12 +835,31 @@ struct LibraryWorkspaceView: View {
                 .disabled(selection.unqueuedSelectionCount == 0)
                 .help("Queue selected online photos. \(selection.selectedOfflineCount) offline selected photos are excluded.")
             }
-            if !selection.queuedReady.isEmpty {
-                Button("Export Queue · \(selection.queuedReady.count)") {
-                    model.exportLibraryPhotos(selection.queuedReady.map(\.file.url))
+            if selection.queueExport.selectedCount > 0 {
+                Button("Export Queue · \(selection.queueExport.onlineCount) online") {
+                    model.exportLibraryPhotos(selection.queueExport.targetURLs)
                 }
                 .buttonStyle(StudioActionButtonStyle(kind: .secondary))
-                .help("Export \(selection.queuedReady.count) queued online photos in this scope; skip \(selection.queuedOfflineCount) offline files.")
+                .disabled(selection.queueExport.targetURLs.isEmpty)
+                .help("Queue contains \(selection.queueExport.selectedCount) photos in this scope. Export \(selection.queueExport.summary).")
+            }
+            Button("Export Visible · \(selection.visibleExport.onlineCount) online") {
+                model.exportLibraryPhotos(selection.visibleExport.targetURLs)
+            }
+            .buttonStyle(StudioActionButtonStyle(kind: .secondary))
+            .disabled(selection.visibleExport.targetURLs.isEmpty)
+            .help("Export all visible photos in this Library scope. \(selection.visibleExport.summary). This does not depend on the export queue.")
+            if let batch = model.batch {
+                VStack(alignment: .leading, spacing: StudioStyle.Space.compact) {
+                    HStack(spacing: StudioStyle.Space.compact) {
+                        if batch.running { ProgressView(value: batch.fraction).frame(width: 88) }
+                        Text(batch.title).font(Theme.metadata(10)).foregroundStyle(Theme.label)
+                    }
+                    Text("\(batch.exported.count) exported · \(batch.failures.count) failed · \(batch.skipped.count) skipped")
+                        .font(Theme.metadata(9)).foregroundStyle(Theme.dim).monospacedDigit()
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(batch.title). \(batch.exported.count) exported, \(batch.failures.count) failed, \(batch.skipped.count) skipped.")
             }
             if let project = library.projects.first(where: { $0.id == library.selectedProjectID }) {
                 Button("Add Photos to \(project.name)…") { showingProjectPhotoPicker = true }
@@ -1230,12 +1271,6 @@ struct LibraryWorkspaceView: View {
         _ = LibraryWorkflow.perform(.select(photos[next].file.url, extending ? .range : .single), in: library)
     }
 
-    private func editFiltered(_ editablePhotos: [LibraryPhoto]) {
-        let urls = editablePhotos.map(\.file.url)
-        guard !urls.isEmpty else { return }
-        model.editLibrarySelection(urls)
-    }
-
     @MainActor private func importFolders() {
         guard let projectID = library.selectedProjectID,
               let project = library.projects.first(where: { $0.id == projectID }) else { return }
@@ -1397,6 +1432,8 @@ private struct NavigationRow: View {
         .buttonStyle(WordActionStyle())
         .focused($keyboardFocused)
         .foregroundStyle(selected ? Theme.accent : Theme.label)
+        .accessibilityLabel("\(title), \(count) photos")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
@@ -1408,6 +1445,7 @@ private struct ProjectPhotoPicker: View {
     @State private var sourceFolderID: UUID?
     @State private var searchText = ""
     @State private var selectedURLs = Set<URL>()
+    @State private var isAddingPhotos = false
 
     private var project: LibraryProject? { library.projects.first { $0.id == projectID } }
     private var candidates: [LibraryPhoto] {
@@ -1462,6 +1500,19 @@ private struct ProjectPhotoPicker: View {
             .font(.callout)
             .padding(.horizontal, 18).padding(.vertical, 10)
             Divider()
+            if isAddingPhotos {
+                HStack(spacing: 10) {
+                    ProgressView(value: Double(library.importStatus?.progress ?? 0),
+                                 total: Double(max(library.importStatus?.total ?? selectedURLs.count, 1)))
+                        .frame(width: 120)
+                        .accessibilityLabel("Adding selected photos progress")
+                    Text("Adding photos to \(project?.name ?? "Project")…")
+                        .font(.callout).foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 18).padding(.vertical, 10)
+                .accessibilityElement(children: .combine)
+            }
             if candidates.isEmpty {
                 VStack(spacing: 12) {
                     ContentUnavailableView("No Available Photos", systemImage: "photo.on.rectangle.angled",
@@ -1497,6 +1548,7 @@ private struct ProjectPhotoPicker: View {
                 Spacer()
                 Button("Add \(selectedURLs.count) Photos") {
                     let photos = library.photos.filter { selectedURLs.contains($0.file.url) }
+                    isAddingPhotos = true
                     Task {
                         _ = await LibraryWorkflow.perform(.addSelectedPhotos(photos, to: projectID), in: library)
                         dismiss()
@@ -1504,7 +1556,7 @@ private struct ProjectPhotoPicker: View {
                 }
                 .buttonStyle(StudioActionButtonStyle(kind: .primary))
                 .keyboardShortcut(.defaultAction)
-                .disabled(selectedURLs.isEmpty)
+                .disabled(selectedURLs.isEmpty || isAddingPhotos)
             }
             .padding(16)
         }
