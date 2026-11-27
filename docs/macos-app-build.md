@@ -6,6 +6,13 @@
 - The only app users should open is `dist/negs-macos/Negs.app`. `target/macos-app` contains compiler caches and temporary promotion staging only. The debug runner promotes a debug-build executable into that same canonical bundle: “debug” is the build mode, not a second app path. Never manually launch a bundle from `target/` or from a sibling checkout.
 - App bundles and screenshots are generated output and stay out of Git. The commit is the durable source record; the push triggers the Intel packaging workflow, which uploads a SHA-named GitHub Actions artifact.
 
+## Debug promotion gate
+
+- The debug build is approved for local use only when the runner exits successfully: it builds the pushed source-of-truth revision, validates architecture, manifest, feature markers, and signature, promotes the candidate, and confirms the running process uses the canonical path.
+- Promote the debug executable into the existing `dist/negs-macos/Negs.app` bundle. This replaces the prior app at the same path; do not retain or open a second debug app bundle or create another `dist` directory.
+- Keep the current canonical app in place until the staged candidate passes pre-promotion verification. If build, verification, promotion, or launch-path checks fail, restore the prior canonical app and report the failure.
+- The optimized package uses the same canonical path. The app's source revision and build mode in its manifest identify whether the current canonical app came from a debug or release build.
+
 ## Local builds
 
 For an iterative Intel build:
