@@ -23,7 +23,7 @@ import XCTest
         var projectID: UUID
     }
 
-    private func fixture() async throws -> Fixture {
+    private func fixture(configure: ((inout [LibraryPhoto]) -> Void)? = nil) async throws -> Fixture {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("negs-media-pool-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         // The source stays offline so loading exercises catalog preservation.
@@ -37,7 +37,8 @@ import XCTest
         second.rating = 5
         second.missing = true
         second.albumIDs = [binID]
-        let records = [first, second]
+        var records = [first, second]
+        configure?(&records)
         let catalog = Catalog(folders: [LibraryFolder(id: folderID, path: source.path)], photos: records,
                               albums: [LibraryAlbum(id: binID, name: "Review")],
                               smartCollections: [SmartLibraryCollection(id: UUID(), name: "Picked", filter: .picked)],
@@ -280,9 +281,9 @@ import XCTest
     func testCullActionReportsFailureAndKeepsItsLibraryScope() async throws {
         let fixture = try await fixture()
         let library = fixture.library
-        _ = LibraryWorkflow.perform(.openProject(fixture.projectID), in: library)
+        _ = await LibraryWorkflow.perform(.openProject(fixture.projectID), in: library)
         let photoURL = fixture.photos[0].file.url
-        _ = LibraryWorkflow.perform(.select(photoURL, .single), in: library)
+        _ = await LibraryWorkflow.perform(.select(photoURL, .single), in: library)
 
         let outcome = await LibraryWorkflow.perform(.analyzeCull([photoURL], replacingExisting: false), in: library)
 
@@ -294,23 +295,24 @@ import XCTest
     }
 
     func testTopPickSummaryUpdatesWithSearchScope() async throws {
-        let fixture = try await fixture()
+        let fixture = try await fixture { photos in
+            for index in photos.indices {
+                photos[index].cull = CullAnalysis(score: index == 0 ? 90 : 40, sharpness: 90,
+                                                  aesthetics: nil, composition: nil, eyesOpen: nil,
+                                                  faceCount: 0, utilityImage: false, reasons: [])
+            }
+        }
         let library = fixture.library
-        _ = LibraryWorkflow.perform(.openProject(fixture.projectID), in: library)
+        _ = await LibraryWorkflow.perform(.openProject(fixture.projectID), in: library)
         library.topPickUnit = .images
         library.topPickValue = 1
-        for (index, photo) in fixture.photos.enumerated() {
-            library.photos[index].cull = CullAnalysis(score: index == 0 ? 90 : 40, sharpness: 90,
-                                                      aesthetics: nil, composition: nil, eyesOpen: nil,
-                                                      faceCount: 0, utilityImage: false, reasons: [])
-        }
 
         let fullScope = LibraryWorkflow.visibleState(in: library)
         XCTAssertEqual(fullScope.topPickSummary.scopePhotoCount, 2)
         XCTAssertEqual(fullScope.topPickSummary.analyzedPhotoCount, 2)
         XCTAssertEqual(fullScope.topPickSummary.pickCount, 1)
 
-        let narrowedScope = LibraryWorkflow.perform(.search("a.png"), in: library)
+        let narrowedScope = await LibraryWorkflow.perform(.search("a.png"), in: library)
         XCTAssertEqual(narrowedScope.topPickSummary.scopePhotoCount, 1)
         XCTAssertEqual(narrowedScope.topPickSummary.analyzedPhotoCount, 1)
         XCTAssertEqual(narrowedScope.topPickSummary.pickCount, 1)
@@ -321,11 +323,9 @@ import XCTest
         let library = fixture.library
         let onlineURL = fixture.photos[0].file.url
         let offlineURL = fixture.photos[1].file.url
-        library.photos[0].missing = false
-        library.photos[1].missing = true
         let selectedURLs: Set<URL> = [onlineURL, offlineURL]
 
-        let result = LibraryWorkflow.perform(
+        let result = await LibraryWorkflow.perform(
             .applyBulkMetadata(.reject, selectedURLs: selectedURLs), in: library
         )
 
@@ -346,13 +346,13 @@ import XCTest
         try FileManager.default.createDirectory(at: photoURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try originalBytes.write(to: photoURL)
 
-        _ = LibraryWorkflow.perform(.addPhotosToGroup([photoURL], groupID: fixture.binID), in: library)
+        _ = await LibraryWorkflow.perform(.addPhotosToGroup([photoURL], groupID: fixture.binID), in: library)
         try await library.flushPersistence()
         let afterAdd = PhotoLibrary(storeURL: fixture.root.appendingPathComponent("catalog.json"))
         await afterAdd.load()
         XCTAssertTrue(afterAdd.photos.first { $0.file.url == photoURL }?.albumIDs.contains(fixture.binID) == true)
 
-        _ = LibraryWorkflow.perform(.removePhotosFromGroup([photoURL], groupID: fixture.binID), in: afterAdd)
+        _ = await LibraryWorkflow.perform(.removePhotosFromGroup([photoURL], groupID: fixture.binID), in: afterAdd)
         try await afterAdd.flushPersistence()
         let afterRemove = PhotoLibrary(storeURL: fixture.root.appendingPathComponent("catalog.json"))
         await afterRemove.load()
@@ -365,14 +365,12 @@ import XCTest
     func testDevelopHandoffKeepsExplicitOfflineSelectionAndVisibleTargetsDistinct() async throws {
         let fixture = try await fixture()
         let library = fixture.library
-        _ = LibraryWorkflow.perform(.openProject(fixture.projectID), in: library)
+        _ = await LibraryWorkflow.perform(.openProject(fixture.projectID), in: library)
         let onlineURL = fixture.photos[0].file.url
         let offlineURL = fixture.photos[1].file.url
-        library.photos[0].missing = false
-        library.photos[1].missing = true
         let visible = library.filteredPhotos()
 
-        _ = LibraryWorkflow.perform(.select(offlineURL, .single), in: library)
+        _ = await LibraryWorkflow.perform(.select(offlineURL, .single), in: library)
         let selected = LibraryWorkflow.handoff(.develop, in: library, displaying: visible)
         XCTAssertEqual(selected.scope, .selected)
         XCTAssertEqual(selected.targetURLs, [])
@@ -380,7 +378,7 @@ import XCTest
         XCTAssertEqual(selected.onlineCount, 0)
         XCTAssertEqual(selected.offlineCount, 1)
 
-        _ = LibraryWorkflow.perform(.clearSelection, in: library)
+        _ = await LibraryWorkflow.perform(.clearSelection, in: library)
         let allVisible = LibraryWorkflow.handoff(.develop, in: library, displaying: visible)
         XCTAssertEqual(allVisible.scope, .visible)
         XCTAssertEqual(allVisible.targetURLs, [onlineURL])
@@ -429,11 +427,9 @@ import XCTest
     func testExportHandoffSeparatesQueueFromVisiblePhotos() async throws {
         let fixture = try await fixture()
         let library = fixture.library
-        _ = LibraryWorkflow.perform(.openProject(fixture.projectID), in: library)
+        _ = await LibraryWorkflow.perform(.openProject(fixture.projectID), in: library)
         let onlineURL = fixture.photos[0].file.url
         let offlineURL = fixture.photos[1].file.url
-        library.photos[0].missing = false
-        library.photos[1].missing = true
         library.setExportQueued(true, for: [offlineURL])
         let visible = library.filteredPhotos()
 
