@@ -677,7 +677,7 @@ struct LibraryWorkspaceView: View {
             .accessibilityLabel(library.analyzingCull ? "Photo analysis running" : hasAnalysis ? "Re-analyze photos with AI" : "Analyze photos with AI")
         }
         .padding(StudioStyle.Space.section)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .studioWorkspacePane(surface: Theme.panel)
     }
 
@@ -775,7 +775,7 @@ struct LibraryWorkspaceView: View {
             }
         }
         .padding(StudioStyle.Space.section)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .studioWorkspacePane(surface: Theme.panel)
     }
 
@@ -829,7 +829,7 @@ struct LibraryWorkspaceView: View {
             }
         }
         .padding(StudioStyle.Space.section)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .studioWorkspacePane(surface: Theme.panel)
     }
 
