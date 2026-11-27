@@ -37,8 +37,17 @@ import XCTest
     }
 
     private func click(segment: Int, in control: NSSegmentedControl, window: NSWindow) throws {
-        let segmentRect = control.rect(forSegment: segment)
-        let point = control.convert(NSPoint(x: segmentRect.midX, y: segmentRect.midY), to: nil)
+        // AppKit does not expose a segment frame. Use the widths reported by
+        // NSSegmentedControl, falling back to equal segments when they are
+        // content-sized by the system.
+        let widths = (0..<control.segmentCount).map { control.width(forSegment: $0) }
+        let totalWidth = widths.reduce(0, +)
+        let segmentWidth = widths[segment] > 0 ? widths[segment] : control.bounds.width / CGFloat(control.segmentCount)
+        let leadingWidth = totalWidth > 0
+            ? widths.prefix(segment).reduce(0, +)
+            : CGFloat(segment) * segmentWidth
+        let point = control.convert(NSPoint(x: control.bounds.minX + leadingWidth + segmentWidth / 2,
+                                            y: control.bounds.midY), to: nil)
         for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
             let event = try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
                 timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
