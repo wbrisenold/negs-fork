@@ -5,24 +5,16 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 source_branch="studio-port-upstream-sync"
+python3 scripts/ensure_canonical_checkout.py
 branch="$(git branch --show-current)"
 [[ "$branch" == "$source_branch" ]] || {
     echo "Build refused: Negs app builds must use branch $source_branch (current: ${branch:-detached})." >&2
     exit 2
 }
 
-git fetch --quiet origin "refs/heads/$source_branch:refs/remotes/origin/$source_branch"
 source_revision="$(git rev-parse HEAD)"
-pushed_revision="$(git rev-parse "origin/$source_branch")"
-[[ "$source_revision" == "$pushed_revision" ]] || {
-    echo "Build refused: commit $source_revision is not pushed as origin/$source_branch ($pushed_revision)." >&2
-    exit 2
-}
-if [[ -n "$(git status --porcelain)" ]]; then
-    echo "Build refused: commit and push the source changes before building." >&2
-    git status --short >&2
-    exit 2
-fi
+source_tree_dirty=0
+if [[ -n "$(git status --porcelain)" ]]; then source_tree_dirty=1; fi
 
 if pgrep -f '[s]wift build --package-path macos' >/dev/null \
     || pgrep -f '[c]argo build' >/dev/null \
@@ -44,7 +36,7 @@ mkdir -p "$(dirname "$canonical_app")" "$repo_root/target/macos-app"
     exit 2
 }
 
-echo "Building pushed $source_branch source $source_revision for Intel..."
+echo "Building local $source_branch source $source_revision for Intel (dirty=$source_tree_dirty)..."
 swift build --package-path macos --scratch-path "$scratch" -c debug --triple "$triple"
 [[ -x "$build_bin" ]] || { echo "Swift build did not produce $build_bin" >&2; exit 2; }
 architectures="$(lipo -archs "$build_bin")"
@@ -73,7 +65,7 @@ python3 scripts/verify_macos_app.py stamp --app "$staged_app" \
     --build-mode debug --architectures "$arch"
 codesign --force --deep --sign - "$staged_app"
 python3 scripts/verify_macos_app.py verify --app "$staged_app" \
-    --architectures "$arch" --source-revision "$source_revision" --source-branch "$source_branch"
+    --architectures "$arch" --source-revision "$source_revision" --source-branch "$source_branch" --allow-dirty
 
 # Keep the active canonical app until the staged build has passed its gates.
 osascript -e 'tell application id "dev.negs.app" to quit' >/dev/null 2>&1 || true
@@ -97,7 +89,7 @@ python3 scripts/verify_macos_app.py clean-legacy-dist-apps \
     --dist-root "$dist_root" --canonical-app "$canonical_app"
 python3 scripts/verify_macos_app.py verify --app "$canonical_app" \
     --architectures "$arch" --source-revision "$source_revision" \
-    --source-branch "$source_branch" --dist-root "$dist_root"
+    --source-branch "$source_branch" --dist-root "$dist_root" --allow-dirty
 
 open -na "$running_app"
 for _ in {1..30}; do

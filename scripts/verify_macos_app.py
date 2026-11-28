@@ -55,7 +55,7 @@ def stamp(args):
     print(json.dumps(manifest, indent=2))
 
 
-def verify_app(app, architectures, expected_revision, expected_branch):
+def verify_app(app, architectures, expected_revision, expected_branch, allow_dirty=False):
     app = app.resolve(strict=True)
     executable_name = plistlib.loads((app / "Contents/Info.plist").read_bytes())["CFBundleExecutable"]
     executable = app / "Contents/MacOS" / executable_name
@@ -82,7 +82,7 @@ def verify_app(app, architectures, expected_revision, expected_branch):
         raise ValueError(
             f"App source branch mismatch: expected {expected_branch}, got {manifest.get('source_branch')}"
         )
-    if manifest.get("source_tree_dirty"):
+    if manifest.get("source_tree_dirty") and not allow_dirty:
         raise ValueError("Refusing an app built from a dirty source tree")
     if set(manifest.get("architectures", [])) != set(architectures):
         raise ValueError("Build manifest architecture does not match the executable")
@@ -151,6 +151,7 @@ def main():
     verifying.add_argument("--source-revision", default=None)
     verifying.add_argument("--source-branch", default=None)
     verifying.add_argument("--dist-root", type=Path)
+    verifying.add_argument("--allow-dirty", action="store_true")
 
     cleaning = commands.add_parser("clean-legacy-dist-apps")
     cleaning.add_argument("--dist-root", required=True, type=Path)
@@ -166,6 +167,7 @@ def main():
                 args.architectures,
                 args.source_revision or source_revision(),
                 args.source_branch,
+                allow_dirty=args.allow_dirty,
             )
             if args.dist_root:
                 verify_dist(args.dist_root, args.app)

@@ -15,6 +15,10 @@ struct Post {
     luma: vec4<f32>,
     color: vec4<f32>,
     color_flags: vec4<f32>,
+    output_to_xyz_d65: array<vec4<f32>, 3>,
+    xyz_d65_to_output: array<vec4<f32>, 3>,
+    harmony_nodes: vec4<f32>,
+    harmony_meta: vec4<u32>,
     film_compression: vec4<f32>,
     film_expand: vec4<f32>,
     skin: vec4<f32>,
@@ -37,42 +41,123 @@ fn post_rgb_to_hsv(c: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(h, select(0.0, d / hi, hi > 1e-8), hi);
 }
 
-fn post_hsv_to_rgb(hsv: vec3<f32>) -> vec3<f32> {
-    let h = hsv.x;
-    let c = hsv.z * hsv.y;
-    let x = c * (1.0 - abs((h / 60.0 - 2.0 * floor(h / 120.0)) - 1.0));
-    let m = hsv.z - c;
-    var rgb = vec3<f32>(c, x, 0.0);
-    if h >= 60.0 && h < 120.0 { rgb = vec3<f32>(x, c, 0.0); }
-    else if h >= 120.0 && h < 180.0 { rgb = vec3<f32>(0.0, c, x); }
-    else if h >= 180.0 && h < 240.0 { rgb = vec3<f32>(0.0, x, c); }
-    else if h >= 240.0 && h < 300.0 { rgb = vec3<f32>(x, 0.0, c); }
-    else if h >= 300.0 { rgb = vec3<f32>(c, 0.0, x); }
-    return clamp(rgb + vec3<f32>(m), vec3<f32>(0.0), vec3<f32>(1.0));
+fn post_matrix_rgb(matrix: array<vec4<f32>, 3>, rgb: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(dot(matrix[0].xyz, rgb), dot(matrix[1].xyz, rgb), dot(matrix[2].xyz, rgb));
 }
 
-fn post_hue_distance(a: f32, b: f32) -> f32 {
-    let d = abs(a - b);
-    return min(d, 360.0 - d);
+const UCS_L_STAR_RANGE: f32 = 2.0988838;
+const UCS_L_STAR_UPPER: f32 = 2.09885;
+
+fn post_y_to_l_star(y: f32) -> f32 {
+    let y_hat = pow(max(y, 0.0), 0.63165134);
+    return UCS_L_STAR_RANGE * y_hat / (y_hat + 1.1242677);
+}
+
+fn post_xyz_to_jch(xyz: vec3<f32>) -> vec3<f32> {
+    let safe_xyz = max(xyz, vec3<f32>(0.0));
+    let total = safe_xyz.x + safe_xyz.y + safe_xyz.z;
+    var xy = vec2<f32>(0.3127, 0.3290);
+    if total > 0.0 { xy = safe_xyz.xy / total; }
+    let uvd = vec3<f32>(
+        -0.783941 * xy.x + 0.27751298 * xy.y + 0.15383658,
+         0.74527353 * xy.x - 0.20537587 * xy.y - 0.16547838,
+         0.3187073 * xy.x + 2.167437 * xy.y + 0.29132056);
+    let divisor = select(-max(abs(uvd.z), 1e-30), max(abs(uvd.z), 1e-30), uvd.z >= 0.0);
+    let u = uvd.x / divisor;
+    let v = uvd.y / divisor;
+    let us = 1.3965623 * u / (abs(u) + 1.4921736);
+    let vs = 1.4513954 * v / (abs(v) + 1.5248864);
+    let up = -1.1249839 * us - 0.9804837 * vs;
+    let vp = 1.8632332 * us + 1.9718531 * vs;
+    let ls = post_y_to_l_star(safe_xyz.y);
+    let lw = post_y_to_l_star(1.0);
+    let m2 = up * up + vp * vp;
+    return vec3<f32>(ls / lw,
+        15.932994 * pow(ls, 0.65239975) * pow(m2, 0.6007557) / lw,
+        atan2(vp, up));
+}
+
+fn post_jch_to_xyz(jch: vec3<f32>) -> vec3<f32> {
+    let lw = post_y_to_l_star(1.0);
+    let ls = clamp(jch.x * lw, 0.0, UCS_L_STAR_UPPER);
+    var m = 0.0;
+    if ls != 0.0 { m = pow(max(jch.y * lw / (15.932994 * pow(ls, 0.65239975)), 0.0), 0.83228505); }
+    let up = m * cos(jch.z);
+    let vp = m * sin(jch.z);
+    let us = -5.0375224 * up - 2.5048563 * vp;
+    let vs = 4.7600293 * up + 2.874013 * vp;
+    let u = -1.4921736 * us / (abs(us) - 1.3965623);
+    let v = -1.5248864 * vs / (abs(vs) - 1.4513955);
+    let xd = 0.16717148 * u + 0.1412998 * v - 0.008015313;
+    let yd = -0.15095909 * u - 0.15518506 * v - 0.008433124;
+    let zd = 0.94025475 * u + v - 0.025632596;
+    let divisor = select(-max(abs(zd), 1e-30), max(abs(zd), 1e-30), zd >= 0.0);
+    let x = xd / divisor;
+    let y = yd / divisor;
+    let luminance = pow(max(1.1242677 * ls / (UCS_L_STAR_RANGE - ls), 0.0), 1.5831518);
+    if abs(y) <= 1e-30 { return vec3<f32>(0.0, luminance, 0.0); }
+    return vec3<f32>(luminance * x / y, luminance, luminance * (1.0 - x - y) / y);
+}
+
+fn post_hue_delta(hue_a: f32, hue_b: f32) -> f32 {
+    return atan2(sin(hue_b - hue_a), cos(hue_b - hue_a));
+}
+
+fn post_hue_distance(hue_a: f32, hue_b: f32) -> f32 {
+    let difference = abs(hue_a - hue_b);
+    return min(difference, 360.0 - difference);
+}
+
+fn post_is_in_gamut(rgb: vec3<f32>) -> bool {
+    return all(rgb >= vec3<f32>(0.0)) && all(rgb <= vec3<f32>(1.0));
 }
 
 fn post_color_separation(rgb: vec3<f32>) -> vec3<f32> {
-    if post.color_strength <= 0.0 { return rgb; }
-    var hsv = post_rgb_to_hsv(rgb);
-    let protection = max(1.0 - post.color_flags.x, min(hsv.y / 0.18, 1.0));
-    let sat_mask = clamp((hsv.y - post.color.z) / 0.35, 0.0, 1.0);
-    let lum_center = clamp(0.5 + post.color.w, 0.0, 1.0);
-    let lum_mask = clamp(1.0 - abs(hsv.z - lum_center) / 0.5, 0.0, 1.0);
-    let target = exp(-0.5 * pow(post_hue_distance(hsv.x, post.color.x) / 55.0, 2.0));
-    let complement = exp(-0.5 * pow(post_hue_distance(hsv.x, post.color.y) / 55.0, 2.0));
-    let amount = post.color_strength * protection * sat_mask * (0.35 + 0.65 * lum_mask);
-    let method = post.color_flags.y;
-    let hue_pull = select(target - complement, target, post.color_flags.z > 0.5);
-    let delta = post_hue_distance(post.color.x, post.color.y);
-    let signed_delta = select(delta, -delta, ((post.color.x - post.color.y) - 360.0 * floor((post.color.x - post.color.y) / 360.0)) > 180.0);
-    hsv.x = (hsv.x + hue_pull * amount * (1.0 - method) * signed_delta * 0.18 + 360.0) % 360.0;
-    hsv.y = clamp(hsv.y + (target + complement) * amount * method * 0.35, 0.0, 1.0);
-    return post_hsv_to_rgb(hsv);
+    let node_count = min(post.harmony_meta.x, 4u);
+    if post.color_strength <= 0.0 || node_count == 0u { return rgb; }
+    let linear_output = vec3<f32>(post_lookup(0u, rgb.r), post_lookup(0u, rgb.g), post_lookup(0u, rgb.b));
+    let xyz = post_matrix_rgb(post.output_to_xyz_d65, linear_output);
+    var jch = post_xyz_to_jch(xyz);
+    let chroma = jch.y;
+    if chroma <= 1e-7 { return rgb; }
+    let hsv = post_rgb_to_hsv(rgb);
+    let neutral = clamp(post.color_flags.x, 0.0, 1.0);
+    let chroma_protection = chroma / (chroma + neutral * neutral * neutral * 0.03 + 1e-5);
+    let saturation_mask = clamp((hsv.y - clamp(post.color.z, 0.0, 1.0)) / 0.35, 0.0, 1.0);
+    let transition_width = 0.08 + clamp(post.color_flags.y, 0.0, 1.0) * 0.52;
+    let pivot = clamp(0.5 + post.color.w * 0.5, 0.1, 0.9);
+    let highlight_mix = smoothstep(pivot - transition_width * 0.5,
+                                   pivot + transition_width * 0.5, jch.x);
+    let shadow_hue = post.harmony_nodes[0];
+    let highlight_hue = post.harmony_nodes[node_count - 1u];
+    let toned_hue = shadow_hue + post_hue_delta(shadow_hue, highlight_hue) * highlight_mix;
+    let amount = post.color_strength * chroma_protection * saturation_mask;
+    let hue_shift = post_hue_delta(jch.z, toned_hue) * amount;
+    if abs(hue_shift) < 1e-7 { return rgb; }
+    jch.z = (jch.z + hue_shift + 3.14159265359) % 6.28318530718 - 3.14159265359;
+    let candidate = post_matrix_rgb(post.xyz_d65_to_output, post_jch_to_xyz(jch));
+    var mapped = candidate;
+    if !post_is_in_gamut(candidate) {
+        var low = 0.0;
+        var high = chroma;
+        var neutral_jch = jch;
+        neutral_jch.y = 0.0;
+        mapped = post_matrix_rgb(post.xyz_d65_to_output, post_jch_to_xyz(neutral_jch));
+        for (var iteration = 0; iteration < 8; iteration++) {
+            let mid = (low + high) * 0.5;
+            var test_jch = jch;
+            test_jch.y = mid;
+            let rgb_mid = post_matrix_rgb(post.xyz_d65_to_output, post_jch_to_xyz(test_jch));
+            if post_is_in_gamut(rgb_mid) {
+                low = mid;
+                mapped = rgb_mid;
+            } else {
+                high = mid;
+            }
+        }
+    }
+    let output = clamp(mapped, vec3<f32>(0.0), vec3<f32>(1.0));
+    return vec3<f32>(post_lookup(1u, sqrt(output.r)), post_lookup(1u, sqrt(output.g)), post_lookup(1u, sqrt(output.b)));
 }
 
 fn post_rgb_to_hsl(rgb: vec3<f32>) -> vec3<f32> {
@@ -175,9 +260,9 @@ fn post_film_compression(rgb: vec3<f32>) -> vec3<f32> {
     let start = clamp(post.film_compression.y, 0.50, 1.20);
     let range = max(post.film_compression.z * 0.5, 0.01);
     let compressed = select(y, start + range * (1.0 - exp(-(y - start) / range)), y > start);
-    let target = mix(y, compressed, impact);
+    let target_luma = mix(y, compressed, impact);
     let density = 1.0 + clamp(post.film_compression.w, 0.0, 1.0) * impact;
-    let adjusted = clamp(vec3<f32>(target) + (rgb - vec3<f32>(y)) * (target / max(y, 1e-8)) * density,
+    let adjusted = clamp(vec3<f32>(target_luma) + (rgb - vec3<f32>(y)) * (target_luma / max(y, 1e-8)) * density,
                          vec3<f32>(0.0), vec3<f32>(1.0));
     return select(rgb, adjusted, y > 1e-8);
 }

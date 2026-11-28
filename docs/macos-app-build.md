@@ -2,13 +2,13 @@
 
 ## One source and one app
 
-- `studio-port-upstream-sync` is the source of truth for the Negs macOS app. Make the source change, commit it, and push it to `origin/studio-port-upstream-sync` before building. The local debug runner refuses another branch, a dirty tree, or a commit that is not the pushed branch head.
+- `/Users/A1990/Downloads/negs-main-source-truth` on `studio-port-upstream-sync` is the only source checkout. The local gate rejects another path, another branch, or more than one Git worktree. Debug builds may include local uncommitted edits; release packaging still requires a clean commit pushed to `origin/studio-port-upstream-sync`.
 - The only app users should open is `dist/negs-macos/Negs.app`. `target/macos-app` contains compiler caches and temporary promotion staging only. The debug runner promotes a debug-build executable into that same canonical bundle: “debug” is the build mode, not a second app path. Never manually launch a bundle from `target/` or from a sibling checkout.
 - App bundles and screenshots are generated output and stay out of Git. The commit is the durable source record; the push triggers the Intel packaging workflow, which uploads a SHA-named GitHub Actions artifact.
 
 ## Debug promotion gate
 
-- The debug build is approved for local use only when the runner exits successfully: it builds the pushed source-of-truth revision, validates architecture, manifest, feature markers, and signature, promotes the candidate, and confirms the running process uses the canonical path.
+- The debug build is approved for local use only when the runner exits successfully: it builds the current local source, records whether the tree is dirty, validates architecture, manifest, feature markers, and signature, promotes the candidate, and confirms the running process uses the canonical path.
 - Promote the debug executable into the existing `dist/negs-macos/Negs.app` bundle. This replaces the prior app at the same path; do not retain or open a second debug app bundle or create another `dist` directory.
 - Keep the current canonical app in place until the staged candidate passes pre-promotion verification. If build, verification, promotion, or launch-path checks fail, restore the prior canonical app and report the failure.
 - The optimized package uses the same canonical path. The app's source revision and build mode in its manifest identify whether the current canonical app came from a debug or release build.
@@ -21,7 +21,7 @@ For an iterative Intel build:
 rtk scripts/run_cached_debug_app.sh
 ```
 
-The runner checks the pushed source revision, reuses `target/macos-app` SwiftPM output, builds the debug executable, copies the existing app resources into a staging bundle under `target/macos-app`, stamps the bundle with its source revision, and verifies the executable contains the saturation overlay, skin-tone overlay, and depth-map controls. Only after those checks pass does it replace and open `dist/negs-macos/Negs.app`; it verifies the running process path. A failed build leaves the previous canonical app in place.
+The runner checks the canonical path, branch, and single-worktree rule, reuses `target/macos-app` SwiftPM output, and builds the current local source. It copies the existing app resources into a staging bundle under `target/macos-app`, stamps the bundle with its commit and dirty status, and verifies the executable contains the saturation overlay, skin-tone overlay, and depth-map controls. Only after those checks pass does it replace and open `dist/negs-macos/Negs.app`; it verifies the running process path. A failed build leaves the previous canonical app in place.
 
 For the optimized Intel package and its ZIP/DMG:
 
@@ -44,7 +44,7 @@ swift test --package-path macos \
 
 For every user-visible UI change:
 
-1. Commit and push the intended source on `studio-port-upstream-sync`, then run `rtk scripts/run_cached_debug_app.sh` from the source-of-truth checkout.
+1. Run `rtk scripts/run_cached_debug_app.sh` from the canonical checkout to build and inspect local changes. Commit and push only after the local result passes.
 2. Confirm the runner reports the expected source SHA, `x86_64`, and the canonical `dist/negs-macos/Negs.app` process path.
 3. Open the affected screen in that launched app. Capture a fresh screenshot under `target/macos-app/` and compare it with the accepted design/spec using the same view and representative content.
 4. Name the visible differences and exercise each changed control or workflow. If the screenshot or interaction check is unavailable, report that part as unverified; a compile, merged PR, or process launch is not visual acceptance.

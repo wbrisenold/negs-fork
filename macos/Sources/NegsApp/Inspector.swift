@@ -1084,16 +1084,29 @@ struct AdjustmentInspector: View {
             Divider().overlay(Theme.line)
             Text("Color Separation").font(Theme.ui(10, weight: .semibold)).foregroundStyle(Theme.label)
                 .padding(.top, 3)
+            HintText("Split-tone grading shifts shadow and highlight hues in perceptual UCS JCH while preserving chroma.")
             LabeledSlider(title: "Strength", value: model.number("post.color_separation.strength", range: 0...100, step: 1),
                           range: 0...100, step: 1, unit: "%", defaultValue: 0,
                           modified: model.isModified("post.color_separation.strength"), reset: { model.resetValue("post.color_separation.strength") },
                           editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Change Color Separation") },
-                          help: "Separates two selected hue families in the finished scan. Set this above zero to activate the remaining controls.")
-            LabeledSlider(title: "Target hue", value: model.number("post.color_separation.target_hue", range: 0...360, step: 1),
+                          help: "Controls the strength of the shadow-to-highlight tone grade.")
+            LabeledSlider(title: "Shadow tone", value: model.number("post.color_separation.target_hue", range: 0...360, step: 1),
                           range: 0...360, step: 1, unit: "°", defaultValue: 35,
                           modified: model.isModified("post.color_separation.target_hue"), reset: { model.resetValue("post.color_separation.target_hue") },
                           editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Change Color Separation") },
-                          help: "Hue angle of the first colour family, measured in the displayed scan's encoded RGB hue wheel.")
+                          help: "Sets the shadow color tone and anchors the selected toning style.")
+            ChoiceRow(title: "Toning style",
+                      items: ColorSeparationPreset.allCases.map { .option($0.title, tag: $0.rawValue) },
+                      selection: ColorSeparationPreset.matching(
+                        rule: model.value("post.color_separation.harmony_rule").string
+                      ).rawValue,
+                      changed: model.isModified("post.color_separation.harmony_rule"),
+                      help: "Choose a split-tone relationship derived from the shadow tone hue.",
+                      choose: { tag in
+                          if let preset = ColorSeparationPreset(rawValue: tag) {
+                              model.applyColorSeparationPreset(preset)
+                          }
+                      })
             HStack(spacing: 7) {
                 Spacer(minLength: 0)
                 Button { model.beginColorSeparationHuePick() } label: {
@@ -1103,8 +1116,8 @@ struct AdjustmentInspector: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("Pick the target hue from the photograph")
-                .accessibilityLabel("Pick target hue from photograph")
+                .help("Pick the shadow tone hue from the photograph")
+                .accessibilityLabel("Pick shadow tone hue from photograph")
                 if let sample = model.colorSample {
                     RoundedRectangle(cornerRadius: 3)
                         .fill(Color(red: Double(sample.red) / 255, green: Double(sample.green) / 255, blue: Double(sample.blue) / 255))
@@ -1113,34 +1126,36 @@ struct AdjustmentInspector: View {
                         .help(sample.hex)
                 }
             }
-            LabeledSlider(title: "Complement", value: model.number("post.color_separation.complementary_hue", range: 0...360, step: 1),
-                          range: 0...360, step: 1, unit: "°", defaultValue: 215,
-                          modified: model.isModified("post.color_separation.complementary_hue"), reset: { model.resetValue("post.color_separation.complementary_hue") },
-                          editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Change Color Separation") },
-                          help: "Hue angle of the opposing colour family. The default pair is warm orange and cool blue.")
+            if ColorSeparationPreset.matching(rule: model.value("post.color_separation.harmony_rule").string) == .manual {
+                LabeledSlider(title: "Highlight tone", value: model.number("post.color_separation.complementary_hue", range: 0...360, step: 1),
+                              range: 0...360, step: 1, unit: "°", defaultValue: 215,
+                              modified: model.isModified("post.color_separation.complementary_hue"), reset: { model.resetValue("post.color_separation.complementary_hue") },
+                              editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Change Color Separation") },
+                              help: "Sets the highlight color tone in Manual mode.")
+            }
             LabeledSlider(title: "Saturation floor", value: model.number("post.color_separation.target_saturation", range: 0...100, step: 1),
                           range: 0...100, step: 1, unit: "%", defaultValue: 20,
                           modified: model.isModified("post.color_separation.target_saturation"), reset: { model.resetValue("post.color_separation.target_saturation") },
                           editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Change Color Separation") },
-                          help: "Leaves low-saturation pixels alone so neutrals stay neutral.")
-            LabeledSlider(title: "Luminance focus", value: model.number("post.color_separation.luminance_mask", range: -100...100, step: 1),
+                          help: "Sets the minimum input saturation selected for toning. This does not add saturation.")
+            LabeledSlider(title: "Tone pivot", value: model.number("post.color_separation.luminance_mask", range: -100...100, step: 1),
                           range: -100...100, step: 1, defaultValue: 0,
                           modified: model.isModified("post.color_separation.luminance_mask"), reset: { model.resetValue("post.color_separation.luminance_mask") },
                           editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Change Color Separation") },
-                          help: "Moves the luminance range where the hue separation is strongest. Zero centers it on midtones.")
+                          help: "Moves the transition between shadow and highlight tones. Zero centers it on midtones.")
             LabeledSlider(title: "Protect neutrals", value: model.number("post.color_separation.neutral_protection", range: 0...100, step: 1),
                           range: 0...100, step: 1, unit: "%", defaultValue: 70,
                           modified: model.isModified("post.color_separation.neutral_protection"), reset: { model.resetValue("post.color_separation.neutral_protection") },
                           editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Change Color Separation") },
-                          help: "Reduces the effect on weakly coloured pixels.")
-            LabeledSlider(title: "Method", value: model.number("post.color_separation.method", range: 0...100, step: 1),
+                          help: "Reduces the effect on weakly colored pixels.")
+            LabeledSlider(title: "Transition width", value: model.number("post.color_separation.method", range: 0...100, step: 1),
                           range: 0...100, step: 1, unit: "%", defaultValue: 50,
                           modified: model.isModified("post.color_separation.method"), reset: { model.resetValue("post.color_separation.method") },
                           editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Change Color Separation") },
-                          help: "Blends hue separation with saturation emphasis.")
+                          help: "Sets how smoothly the image transitions between shadow and highlight tones.")
             TickRow(title: "Color wash", isOn: model.toggle("post.color_separation.color_wash"),
                     changed: model.isModified("post.color_separation.color_wash"),
-                    help: "Pushes the selected hue family toward the target instead of separating it from the complement.")
+                          help: "Uses the same hue for shadows and highlights.")
             Divider().overlay(Theme.line)
             Text("Color Density · ME deSatch").font(Theme.ui(10, weight: .semibold)).foregroundStyle(Theme.label)
                 .padding(.top, 3)
@@ -1169,7 +1184,8 @@ struct AdjustmentInspector: View {
         InkSection(title: "Relight", edited: model.isModified("post.relight.enabled")
                    || model.isModified("post.relight.strength") || relightFields.contains(where: model.isModified)) {
             HintText("Three soft radial lights. Color and light falloff are evaluated in the active output color space.")
-            TickRow(title: "Enable relighting", isOn: model.toggle("post.relight.enabled"),
+            TickRow(title: "Enable relighting",
+                    isOn: Binding(get: { model.value("post.relight.enabled").bool }, set: model.setRelightEnabled),
                     changed: model.isModified("post.relight.enabled"),
                     help: "Adds editable soft lights to the developed image.")
             LabeledSlider(title: "Overall strength", value: model.number("post.relight.strength", range: 0...1, step: 0.01),
@@ -1180,7 +1196,9 @@ struct AdjustmentInspector: View {
             ForEach(0..<3, id: \.self) { index in
                 let base = "post.relight.lights.\(index)"
                 Divider().overlay(Theme.line)
-                TickRow(title: "Light \(index + 1)", isOn: model.toggle("\(base).enabled"),
+                TickRow(title: "Light \(index + 1)",
+                        isOn: Binding(get: { model.value("\(base).enabled").bool },
+                                      set: { model.setRelightLightEnabled(index: index, enabled: $0) }),
                         changed: model.isModified("\(base).enabled"), help: "Enable this soft radial light.")
                 if model.value("\(base).enabled").bool {
                     LabeledSlider(title: "Horizontal position", value: model.number("\(base).x", range: 0...1, step: 0.01),
@@ -1199,7 +1217,7 @@ struct AdjustmentInspector: View {
                                   editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Size Relight") },
                                   help: "Soft falloff radius relative to the shorter image dimension.")
                     LabeledSlider(title: "Intensity", value: model.number("\(base).intensity", range: -1...1, step: 0.01),
-                                  range: -1...1, step: 0.01, defaultValue: 0,
+                                  range: -1...1, step: 0.01, defaultValue: 0.35,
                                   modified: model.isModified("\(base).intensity"), reset: { model.resetValue("\(base).intensity") },
                                   editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Change Relight") },
                                   help: "Positive values add light; negative values create negative fill.")
@@ -2222,22 +2240,21 @@ private struct RawWhiteBalancePad: View {
 
     private var axisHeader: some View {
         HStack {
-            Text("MAGENTA").foregroundStyle(Color.pink)
+            Text("COOL").foregroundStyle(Color.blue)
             Spacer()
-            Text("TINT").foregroundStyle(Theme.dim)
+            Text("\(Int(temperature.rounded())) K").foregroundStyle(Theme.label)
             Spacer()
-            Text("GREEN").foregroundStyle(Color.green)
+            Text("WARM").foregroundStyle(Color.orange)
         }
         .font(Theme.ui(8, weight: .semibold))
     }
 
     private var axisFooter: some View {
         HStack {
-            Text("COOL").foregroundStyle(Color.blue)
             Spacer()
-            Text("\(Int(temperature.rounded())) K").foregroundStyle(Theme.label)
+            Text("GREEN ↑   TINT \(Int(tint.rounded()))   ↓ MAGENTA")
+                .foregroundStyle(Theme.label)
             Spacer()
-            Text("WARM").foregroundStyle(Color.orange)
         }
         .font(Theme.ui(8, weight: .semibold).monospacedDigit())
     }
@@ -2260,7 +2277,7 @@ private struct RawWhiteBalancePad: View {
         .contentShape(Rectangle())
         .gesture(padGesture(width: width, height: height))
         .accessibilityElement()
-        .accessibilityLabel("RAW white balance: horizontal changes temperature from cool to warm; vertical changes tint from magenta to green")
+        .accessibilityLabel("RAW white balance: horizontal changes temperature from cool to warm; vertical changes tint from magenta at the bottom to green at the top")
         .accessibilityValue("\(Int(temperature.rounded())) Kelvin, tint \(Int(tint.rounded()))")
     }
 

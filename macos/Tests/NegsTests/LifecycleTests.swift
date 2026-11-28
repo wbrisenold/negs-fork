@@ -4,6 +4,48 @@ import XCTest
 @testable import NegsApp
 
 @MainActor final class LifecycleTests: XCTestCase {
+    func testRelightSwitchesEnableAnEffectiveDefaultLight() {
+        let model = EditorModel(sidecars: nil)
+        defer { model.shutdown() }
+
+        model.setRelightEnabled(true)
+        XCTAssertTrue(model.value("post.relight.enabled").bool)
+        XCTAssertTrue(model.value("post.relight.lights.0.enabled").bool)
+        XCTAssertGreaterThan(model.value("post.relight.lights.0.intensity").double, 0)
+
+        let intensity = model.value("post.relight.lights.0.intensity")
+        model.setRelightEnabled(false)
+        XCTAssertFalse(model.value("post.relight.enabled").bool)
+        XCTAssertEqual(model.value("post.relight.lights.0.intensity"), intensity)
+    }
+
+    func testEnablingAnIndividualRelightLightSuppliesVisibleIntensity() {
+        let model = EditorModel(sidecars: nil)
+        defer { model.shutdown() }
+
+        model.setRelightLightEnabled(index: 1, enabled: true)
+
+        XCTAssertTrue(model.value("post.relight.lights.1.enabled").bool)
+        XCTAssertGreaterThan(model.value("post.relight.lights.1.intensity").double, 0)
+    }
+
+    func testRawWhiteBalancePadUsesIndependentTemperatureAndTintAxes() {
+        let model = EditorModel(sidecars: nil)
+        defer { model.shutdown() }
+
+        model.setWhiteBalancePad(temperatureOffset: 0, tintAmount: 0)
+        XCTAssertEqual(model.value("io.raw_white_balance.temperature").double, 6504, accuracy: 1)
+        XCTAssertEqual(model.value("io.raw_white_balance.tint").double, 1, accuracy: 0.002)
+
+        model.setWhiteBalancePad(temperatureOffset: 35, tintAmount: 0)
+        XCTAssertGreaterThan(model.value("io.raw_white_balance.temperature").double, 6504)
+        XCTAssertEqual(model.value("io.raw_white_balance.tint").double, 1, accuracy: 0.002)
+
+        model.setWhiteBalancePad(temperatureOffset: 0, tintAmount: 35)
+        XCTAssertEqual(model.value("io.raw_white_balance.temperature").double, 6504, accuracy: 1)
+        XCTAssertGreaterThan(model.value("io.raw_white_balance.tint").double, 1)
+    }
+
     func testNewPhotographResetsAdjustmentsAndIndividualResetIsUndoable() async throws {
         guard FileManager.default.isExecutableFile(atPath: paths().helper.path) else { throw XCTSkip("Build the release helper first") }
         let model = EditorModel()

@@ -125,23 +125,17 @@ pub fn apply_reference(
             *out = rgb_to_lab8(rgb);
         });
 
-    let original_lightness: Vec<u8> = lab.par_iter().map(|pixel| pixel[0]).collect();
-    let mut lightness = original_lightness.clone();
-    lightness.par_iter_mut().for_each(|value| {
-        *value = ((*value as f64 / 255.0).powf(0.8) * 255.0).clamp(0.0, 255.0) as u8;
+    // The source Lab buffer already retains original L. Keep just the CLAHE
+    // lightness plane and use this small LUT to recover the quantized lift in
+    // the final pass, avoiding two extra full-frame byte buffers.
+    let lifted_lut: [u8; 256] = std::array::from_fn(|value| {
+        ((value as f64 / 255.0).powf(0.8) * 255.0).clamp(0.0, 255.0) as u8
     });
-    let lifted = lightness.clone();
+    let mut lightness: Vec<u8> = lab
+        .par_iter()
+        .map(|pixel| lifted_lut[pixel[0] as usize])
+        .collect();
     clahe_reference(&mut lightness, w, h);
-    lightness
-        .par_iter_mut()
-        .zip(lifted.par_iter())
-        .for_each(|(local, lifted)| {
-            let clahe = *lifted as f64 / 255.0
-                + (*local as f64 / 255.0 - *lifted as f64 / 255.0)
-                    * (settings.clahe_strength.clamp(0.0, 100.0) / 100.0) as f64;
-            *local = (film_curve(clahe) * 255.0).round().clamp(0.0, 255.0) as u8;
-        });
-
     image
         .data
         .par_chunks_exact_mut(3)
@@ -150,9 +144,14 @@ pub fn apply_reference(
             let original_l = pixel[0] as f64 / 255.0;
             let a = pixel[1] as f64 - 128.0;
             let b = pixel[2] as f64 - 128.0;
+            let lifted = lifted_lut[pixel[0] as usize] as f64 / 255.0;
+            let local = *light as f64 / 255.0;
+            let clahe = lifted
+                + (local - lifted) * (settings.clahe_strength.clamp(0.0, 100.0) / 100.0) as f64;
+            let target_light = (film_curve(clahe) * 255.0).round().clamp(0.0, 255.0) as u8;
             let target_l = protect_hncs_lift(
                 original_l,
-                *light as f64 / 255.0,
+                target_light as f64 / 255.0,
                 a,
                 b,
                 settings.skin_protection,
@@ -443,5 +442,74 @@ mod tests {
             assert!((a[channel] - b[channel]).abs() < 1e-7);
             assert!(a[channel].is_finite());
         }
+    }
+
+    #[test]
+    fn reference_controls_change_hncs_output() {
+        use crate::post::HncsParams;
+        use spektrafilm_math::precision::{from_f64, to_f64};
+
+        let mut source = ImageBuf::new(32, 32);
+        for y in 0..32 {
+            for x in 0..32 {
+                let value = if x < 16 && y < 16 { 0.8 } else { 0.35 };
+                let index = source.idx(x, y, 0);
+                source.data[index..index + 3].copy_from_slice(&[
+                    from_f64(value),
+                    from_f64(value * 0.72),
+                    from_f64(value * 0.58),
+                ]);
+            }
+        }
+
+        let mut low_contrast = source.clone();
+        let mut high_contrast = source.clone();
+        super::apply_reference(
+            &mut low_contrast,
+            "sRGB",
+            true,
+            &HncsParams {
+                clahe_strength: 0.0,
+                skin_protection: 0.0,
+            },
+        );
+        super::apply_reference(
+            &mut high_contrast,
+            "sRGB",
+            true,
+            &HncsParams {
+                clahe_strength: 100.0,
+                skin_protection: 0.0,
+            },
+        );
+        assert_ne!(low_contrast.data, high_contrast.data);
+
+        let mut unprotected = source.clone();
+        let mut protected = source;
+        super::apply_reference(
+            &mut unprotected,
+            "sRGB",
+            true,
+            &HncsParams {
+                clahe_strength: 0.0,
+                skin_protection: 0.0,
+            },
+        );
+        super::apply_reference(
+            &mut protected,
+            "sRGB",
+            true,
+            &HncsParams {
+                clahe_strength: 0.0,
+                skin_protection: 100.0,
+            },
+        );
+        assert!(
+            unprotected
+                .data
+                .iter()
+                .zip(&protected.data)
+                .any(|(a, b)| (to_f64(*a) - to_f64(*b)).abs() > 1e-5)
+        );
     }
 }

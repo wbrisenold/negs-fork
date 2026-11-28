@@ -301,6 +301,10 @@ pub struct DisplayColorSeparation {
     pub neutral_protection: f32,
     pub method: f32,
     pub color_wash: bool,
+    pub output_to_xyz_d65: [[f32; 4]; 3],
+    pub xyz_d65_to_output: [[f32; 4]; 3],
+    pub harmony_nodes: [f32; 4],
+    pub harmony_node_count: u32,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

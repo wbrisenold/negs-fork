@@ -2442,6 +2442,10 @@ impl WgpuBackend {
             luma: [f32; 4],
             color: [f32; 4],
             color_flags: [f32; 4],
+            output_to_xyz_d65: [[f32; 4]; 3],
+            xyz_d65_to_output: [[f32; 4]; 3],
+            harmony_nodes: [f32; 4],
+            harmony_meta: [u32; 4],
             film_compression: [f32; 4],
             film_expand: [f32; 4],
             skin: [f32; 4],
@@ -2469,6 +2473,10 @@ impl WgpuBackend {
                     p.color_separation.color_wash as u8 as f32,
                     0.0,
                 ],
+                output_to_xyz_d65: p.color_separation.output_to_xyz_d65,
+                xyz_d65_to_output: p.color_separation.xyz_d65_to_output,
+                harmony_nodes: p.color_separation.harmony_nodes,
+                harmony_meta: [p.color_separation.harmony_node_count, 0, 0, 0],
                 film_compression: [
                     p.film_compression.impact,
                     p.film_compression.white_point,
@@ -2519,6 +2527,10 @@ impl WgpuBackend {
                 luma: [0.0; 4],
                 color: [0.0; 4],
                 color_flags: [0.0; 4],
+                output_to_xyz_d65: [[0.0; 4]; 3],
+                xyz_d65_to_output: [[0.0; 4]; 3],
+                harmony_nodes: [0.0; 4],
+                harmony_meta: [0; 4],
                 film_compression: [0.0; 4],
                 film_expand: [0.0; 4],
                 skin: [0.0; 4],
@@ -7588,6 +7600,27 @@ fn is_uniform(xs: &[f64]) -> bool {
 mod grain_tests {
     use super::*;
     use wgpu::util::DeviceExt;
+
+    #[test]
+    fn color_harmonizer_display_shaders_validate() {
+        for base in [
+            include_str!("../../spektrafilm-shaders/wgsl/display_present.wgsl"),
+            include_str!("../../spektrafilm-shaders/wgsl/display_rgba8.wgsl"),
+        ] {
+            let source = format!(
+                "{base}\n{}",
+                include_str!("../../spektrafilm-shaders/wgsl/display_post.wgsl")
+            );
+            let module = wgpu::naga::front::wgsl::parse_str(&source)
+                .expect("display harmonizer shader should parse");
+            wgpu::naga::valid::Validator::new(
+                wgpu::naga::valid::ValidationFlags::all(),
+                wgpu::naga::valid::Capabilities::all(),
+            )
+            .validate(&module)
+            .expect("display harmonizer shader should validate");
+        }
+    }
 
     #[test]
     fn image_pool_preserves_small_reuse_but_evicts_before_oversized_renders() {

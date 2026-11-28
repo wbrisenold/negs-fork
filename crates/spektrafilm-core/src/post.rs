@@ -13,6 +13,7 @@
 //! The arithmetic is f32 even in the f64 build: the tables already limit
 //! accuracy to about 2e-7, far below a 16-bit output step, and the f64
 //! build's purpose, parity with the Python reference, doesn't cover Post.
+use crate::color_harmonizer::ColorHarmonizer;
 use base64::Engine as _;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -321,6 +322,25 @@ pub struct ColorSeparationParams {
     pub method: f32,
     #[serde(default)]
     pub color_wash: bool,
+    #[serde(default)]
+    pub harmony_rule: ColorHarmonyRule,
+}
+
+/// Harmony geometry for Color Separation. Unknown sidecar values fall back to
+/// the legacy manual target/complement pair.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ColorHarmonyRule {
+    Monochromatic,
+    Analogous,
+    Complementary,
+    SplitComplementary,
+    Triadic,
+    Tetradic,
+    Square,
+    #[default]
+    #[serde(other)]
+    Manual,
 }
 
 /// Skin shaper controls shared by the CPU post pass and resident display shader.
@@ -464,6 +484,7 @@ impl Default for ColorSeparationParams {
             neutral_protection: 70.0,
             method: 50.0,
             color_wash: false,
+            harmony_rule: ColorHarmonyRule::Manual,
         }
     }
 }
@@ -496,84 +517,6 @@ impl PostParams {
     }
 }
 
-fn hue_distance(a: f32, b: f32) -> f32 {
-    let d = (a - b).rem_euclid(360.0);
-    d.min(360.0 - d)
-}
-
-fn rgb_to_hsv(c: [f32; 3]) -> [f32; 3] {
-    let max = c[0].max(c[1]).max(c[2]);
-    let min = c[0].min(c[1]).min(c[2]);
-    let d = max - min;
-    let h = if d <= 1e-8 {
-        0.0
-    } else if max == c[0] {
-        60.0 * ((c[1] - c[2]) / d).rem_euclid(6.0)
-    } else if max == c[1] {
-        60.0 * ((c[2] - c[0]) / d + 2.0)
-    } else {
-        60.0 * ((c[0] - c[1]) / d + 4.0)
-    };
-    [h, if max <= 1e-8 { 0.0 } else { d / max }, max]
-}
-
-fn hsv_to_rgb(hsv: [f32; 3]) -> [f32; 3] {
-    let [h, s, v] = hsv;
-    let chroma = v * s;
-    let x = chroma * (1.0 - ((h / 60.0).rem_euclid(2.0) - 1.0).abs());
-    let m = v - chroma;
-    let rgb = if h < 60.0 {
-        [chroma, x, 0.0]
-    } else if h < 120.0 {
-        [x, chroma, 0.0]
-    } else if h < 180.0 {
-        [0.0, chroma, x]
-    } else if h < 240.0 {
-        [0.0, x, chroma]
-    } else if h < 300.0 {
-        [x, 0.0, chroma]
-    } else {
-        [chroma, 0.0, x]
-    };
-    rgb.map(|v| (v + m).clamp(0.0, 1.0))
-}
-
-/// Independent approximation of the published control set: isolate the
-/// chosen and complementary hue bands, then move them apart or wash toward
-/// the selected hue. It is not a reconstruction of the unavailable DCTL.
-fn apply_color_separation(rgb: [f32; 3], p: ColorSeparationParams) -> [f32; 3] {
-    if p.strength <= 0.0 {
-        return rgb;
-    }
-    let mut hsv = rgb_to_hsv(rgb);
-    let sat = hsv[1];
-    let protection = (1.0 - p.neutral_protection.clamp(0.0, 100.0) / 100.0)
-        .max(sat / 0.18)
-        .min(1.0);
-    let sat_mask = ((sat - p.target_saturation.clamp(0.0, 100.0) / 100.0) / 0.35).clamp(0.0, 1.0);
-    let lum_center = (0.5 + p.luminance_mask.clamp(-100.0, 100.0) / 200.0).clamp(0.0, 1.0);
-    let lum_mask = (1.0 - (hsv[2] - lum_center).abs() / 0.5).clamp(0.0, 1.0);
-    let target = (-0.5 * (hue_distance(hsv[0], p.target_hue) / 55.0).powi(2)).exp();
-    let complement = (-0.5 * (hue_distance(hsv[0], p.complementary_hue) / 55.0).powi(2)).exp();
-    let amount =
-        p.strength.clamp(0.0, 100.0) / 100.0 * protection * sat_mask * (0.35 + 0.65 * lum_mask);
-    let method = p.method.clamp(0.0, 100.0) / 100.0;
-    let hue_pull = if p.color_wash {
-        target
-    } else {
-        target - complement
-    };
-    let hue_delta = hue_distance(p.target_hue, p.complementary_hue);
-    let hue_delta = if ((p.target_hue - p.complementary_hue).rem_euclid(360.0)) > 180.0 {
-        -hue_delta
-    } else {
-        hue_delta
-    };
-    hsv[0] = (hsv[0] + hue_pull * amount * (1.0 - method) * hue_delta * 0.18).rem_euclid(360.0);
-    hsv[1] = (hsv[1] + (target + complement) * amount * method * 0.35).clamp(0.0, 1.0);
-    hsv_to_rgb(hsv)
-}
-
 fn rgb_to_hsl(rgb: [f32; 3]) -> [f32; 3] {
     let max = rgb[0].max(rgb[1]).max(rgb[2]);
     let min = rgb[0].min(rgb[1]).min(rgb[2]);
@@ -599,6 +542,11 @@ fn rgb_to_hsl(rgb: [f32; 3]) -> [f32; 3] {
         hue += 360.0;
     }
     [hue, saturation, lightness]
+}
+
+fn hue_distance(a: f32, b: f32) -> f32 {
+    let distance = (a - b).rem_euclid(360.0);
+    distance.min(360.0 - distance)
 }
 
 fn hsl_to_rgb(hsl: [f32; 3]) -> [f32; 3] {
@@ -802,6 +750,7 @@ pub struct PostProcess {
     /// Linear luminance → adjusted linear luminance, sampled on √Y.
     tone: Vec<f32>,
     color_separation: ColorSeparationParams,
+    color_harmonizer: ColorHarmonizer,
     skin_shaper: SkinShaperParams,
     color_density: ColorDensityParams,
     film_compression: FilmCompressionParams,
@@ -970,14 +919,18 @@ impl PostProcess {
                 });
             }
         }
+        let decode = samples(&|v| space.decode(v));
+        let encode = samples(&|s| space.encode(s * s));
+        let color_harmonizer = ColorHarmonizer::new(params.color_separation, target_space, &decode);
         Self {
             saturation: params.saturation / 100.0,
             luma: luminance_weights(color_space),
             encoded,
-            decode: samples(&|v| space.decode(v)),
-            encode: samples(&|s| space.encode(s * s)),
+            decode,
+            encode,
             tone: samples(&|s| srgb_decode(tone(params, srgb_encode(s * s)))),
             color_separation: params.color_separation,
+            color_harmonizer,
             skin_shaper: params.skin_shaper,
             color_density: params.color_density,
             film_compression: params.film_compression,
@@ -1130,7 +1083,12 @@ impl PostProcess {
                 }
             }
             if self.color_separation.strength > 0.0 {
-                display = apply_color_separation(display, self.color_separation);
+                display = self.color_harmonizer.apply(
+                    display,
+                    self.color_separation,
+                    &self.decode,
+                    &self.encode,
+                );
             }
             if !self.skin_shaper.is_identity() {
                 display = apply_skin_shaper(display, self.skin_shaper);
@@ -1201,6 +1159,10 @@ impl PostProcess {
                 neutral_protection: self.color_separation.neutral_protection,
                 method: self.color_separation.method,
                 color_wash: self.color_separation.color_wash,
+                output_to_xyz_d65: self.color_harmonizer.output_to_xyz_d65(),
+                xyz_d65_to_output: self.color_harmonizer.xyz_d65_to_output(),
+                harmony_nodes: self.color_harmonizer.nodes(),
+                harmony_node_count: self.color_harmonizer.node_count(),
             },
             skin_shaper: spektrafilm_gpu::DisplaySkinShaper {
                 global_sat: self.skin_shaper.global_sat,
@@ -1420,6 +1382,243 @@ mod tests {
         assert!(out.iter().all(|v| (0.0..=1.0).contains(v)));
         assert!((luma(out) - luma([0.9, 0.3, 0.1])).abs() < 1e-3);
         assert!(out[0] - out[2] > 0.8);
+    }
+
+    #[test]
+    fn split_toning_visibly_moves_toward_the_highlight_tone_and_keeps_jch_chroma() {
+        let mut edit = PostParams::default();
+        edit.color_separation = ColorSeparationParams {
+            strength: 100.0,
+            target_hue: 30.0,
+            complementary_hue: 210.0,
+            target_saturation: 0.0,
+            luminance_mask: 0.0,
+            neutral_protection: 0.0,
+            method: 100.0,
+            color_wash: true,
+            harmony_rule: ColorHarmonyRule::Manual,
+        };
+        let process = PostProcess::new(&edit, true, "sRGB");
+        let original = test_hsv_to_rgb(48.0, 0.72, 0.68);
+        let anchor = test_hsv_to_rgb(30.0, 0.8, 0.72);
+        let output = process.apply_rgb(original);
+        let hue_distance = |a: f32, b: f32| {
+            let d = (a - b).rem_euclid(std::f32::consts::TAU);
+            d.min(std::f32::consts::TAU - d)
+        };
+        let original_jch = test_srgb_to_jch(original);
+        let output_jch = test_srgb_to_jch(output);
+        let anchor_jch = test_srgb_to_jch(anchor);
+        let visible_change = original
+            .iter()
+            .zip(output)
+            .map(|(before, after)| (before - after).powi(2))
+            .sum::<f32>()
+            .sqrt();
+        assert!(
+            visible_change > 0.08,
+            "tone should make a visible change: {visible_change}"
+        );
+        let hue = |jch: [f32; 3]| jch[2].rem_euclid(std::f32::consts::TAU);
+        assert!(
+            hue_distance(hue(output_jch), hue(anchor_jch))
+                < hue_distance(hue(original_jch), hue(anchor_jch)),
+            "output must move perceptually toward the selected anchor"
+        );
+        assert!((output_jch[1] - original_jch[1]).abs() < 0.002);
+    }
+
+    #[test]
+    fn split_toning_keeps_a_matching_tone_and_neutrals_stable() {
+        let mut edit = PostParams::default();
+        edit.color_separation = ColorSeparationParams {
+            strength: 100.0,
+            target_hue: 30.0,
+            complementary_hue: 210.0,
+            target_saturation: 0.0,
+            luminance_mask: 0.0,
+            neutral_protection: 100.0,
+            method: 100.0,
+            color_wash: true,
+            harmony_rule: ColorHarmonyRule::Manual,
+        };
+        let process = PostProcess::new(&edit, true, "sRGB");
+        let anchor = test_hsv_to_rgb(30.0, 0.8, 0.72);
+        let neutral = [0.42, 0.42, 0.42];
+        let anchor_output = process.apply_rgb(anchor);
+        let neutral_output = process.apply_rgb(neutral);
+        for channel in 0..3 {
+            assert!(
+                (anchor_output[channel] - anchor[channel]).abs() < 1e-4,
+                "anchor output {anchor_output:?} differs from {anchor:?}"
+            );
+            assert!(
+                (neutral_output[channel] - neutral[channel]).abs() < 1e-4,
+                "neutral output {neutral_output:?} differs from {neutral:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn color_toning_styles_and_controls_change_post_render_output() {
+        let colours = [
+            test_hsv_to_rgb(12.0, 0.72, 0.78),
+            test_hsv_to_rgb(34.0, 0.72, 0.64),
+            test_hsv_to_rgb(92.0, 0.72, 0.50),
+            test_hsv_to_rgb(176.0, 0.72, 0.38),
+            test_hsv_to_rgb(228.0, 0.72, 0.24),
+        ];
+        let base = params(|p| {
+            p.color_separation = ColorSeparationParams {
+                strength: 82.0,
+                target_hue: 30.0,
+                complementary_hue: 220.0,
+                target_saturation: 0.0,
+                luminance_mask: 0.0,
+                neutral_protection: 0.0,
+                method: 40.0,
+                color_wash: false,
+                harmony_rule: ColorHarmonyRule::Manual,
+            };
+        });
+        let render = |settings: &PostParams, space: &str| {
+            let process = PostProcess::new(settings, true, space);
+            colours.map(|colour| process.apply_rgb(colour))
+        };
+        let baseline = render(&base, "sRGB");
+        let changes: [(&str, fn(&mut PostParams)); 8] = [
+            ("strength", |p| p.color_separation.strength = 28.0),
+            ("target hue", |p| p.color_separation.target_hue = 75.0),
+            ("complementary hue", |p| {
+                p.color_separation.complementary_hue = 265.0
+            }),
+            ("saturation floor", |p| {
+                p.color_separation.target_saturation = 68.0
+            }),
+            ("tone pivot", |p| p.color_separation.luminance_mask = -75.0),
+            ("neutral protection", |p| {
+                p.color_separation.neutral_protection = 85.0
+            }),
+            ("transition width", |p| p.color_separation.method = 90.0),
+            ("color wash", |p| p.color_separation.color_wash = true),
+        ];
+        for (name, change) in changes {
+            let mut candidate = base.clone();
+            change(&mut candidate);
+            assert_ne!(
+                render(&candidate, "sRGB"),
+                baseline,
+                "{name} must affect rendered color"
+            );
+        }
+
+        let mut triadic = base.clone();
+        triadic.color_separation.harmony_rule = ColorHarmonyRule::Triadic;
+        assert_ne!(
+            render(&triadic, "sRGB"),
+            baseline,
+            "the selected tone style must affect output"
+        );
+        let wide_gamut = render(&base, "Rec.2020");
+        assert!(
+            wide_gamut
+                .iter()
+                .flatten()
+                .all(|channel| channel.is_finite() && (0.0..=1.0).contains(channel))
+        );
+    }
+
+    #[test]
+    fn old_color_separation_sidecars_default_to_manual_harmony() {
+        let mut legacy = serde_json::to_value(ColorSeparationParams::default()).unwrap();
+        legacy.as_object_mut().unwrap().remove("harmony_rule");
+        let decoded: ColorSeparationParams = serde_json::from_value(legacy).unwrap();
+        assert_eq!(decoded.harmony_rule, ColorHarmonyRule::Manual);
+
+        let mut unknown = serde_json::to_value(ColorSeparationParams::default()).unwrap();
+        unknown["harmony_rule"] = serde_json::Value::String("future_rule".into());
+        let decoded: ColorSeparationParams = serde_json::from_value(unknown).unwrap();
+        assert_eq!(decoded.harmony_rule, ColorHarmonyRule::Manual);
+    }
+
+    fn test_hsv_to_rgb(hue: f32, saturation: f32, value: f32) -> [f32; 3] {
+        let chroma = value * saturation;
+        let x = chroma * (1.0 - ((hue / 60.0).rem_euclid(2.0) - 1.0).abs());
+        let m = value - chroma;
+        let rgb = if hue < 60.0 {
+            [chroma, x, 0.0]
+        } else if hue < 120.0 {
+            [x, chroma, 0.0]
+        } else if hue < 180.0 {
+            [0.0, chroma, x]
+        } else if hue < 240.0 {
+            [0.0, x, chroma]
+        } else if hue < 300.0 {
+            [x, 0.0, chroma]
+        } else {
+            [chroma, 0.0, x]
+        };
+        rgb.map(|channel| channel + m)
+    }
+
+    fn test_srgb_to_jch(rgb: [f32; 3]) -> [f32; 3] {
+        let linear = rgb.map(|v| {
+            if v <= 0.04045 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        });
+        let xyz = [
+            0.4124564 * linear[0] + 0.3575761 * linear[1] + 0.1804375 * linear[2],
+            0.2126729 * linear[0] + 0.7151522 * linear[1] + 0.0721750 * linear[2],
+            0.0193339 * linear[0] + 0.1191920 * linear[1] + 0.9503041 * linear[2],
+        ];
+        let sum = xyz[0] + xyz[1] + xyz[2];
+        let x = xyz[0] / sum;
+        let y = xyz[1] / sum;
+        let uvd = [
+            -0.783941 * x + 0.27751298 * y + 0.15383658,
+            0.74527353 * x - 0.20537587 * y - 0.16547838,
+            0.3187073 * x + 2.167437 * y + 0.29132056,
+        ];
+        let u = uvd[0] / uvd[2];
+        let v = uvd[1] / uvd[2];
+        let us = 1.3965623 * u / (u.abs() + 1.4921736);
+        let vs = 1.4513954 * v / (v.abs() + 1.5248864);
+        let up = -1.1249839 * us - 0.9804837 * vs;
+        let vp = 1.8632332 * us + 1.9718531 * vs;
+        let y_hat = xyz[1].powf(0.63165134);
+        let ls = 2.0988838 * y_hat / (y_hat + 1.1242677);
+        let lw = 2.0988838 / (1.0 + 1.1242677);
+        let m2 = up * up + vp * vp;
+        [
+            ls / lw,
+            15.932994 * ls.powf(0.65239975) * m2.powf(0.6007557) / lw,
+            vp.atan2(up),
+        ]
+    }
+
+    #[test]
+    fn relight_only_changes_enabled_light_regions() {
+        let baseline = PostProcess::new(&PostParams::default(), false, "sRGB");
+        let mut edit = PostParams::default();
+        edit.relight.enabled = true;
+        edit.relight.lights[0] = RelightLight {
+            enabled: true,
+            x: 0.25,
+            y: 0.5,
+            radius: 0.5,
+            intensity: 0.8,
+            color: [1.0, 0.5, 0.25],
+        };
+        let relight = PostProcess::new(&edit, false, "sRGB");
+        let pixel = [0.2, 0.3, 0.4];
+        let center = relight.apply_rgb_at(pixel, 0, 0, 2, 1);
+        let outside = relight.apply_rgb_at(pixel, 1, 0, 2, 1);
+        let unchanged = baseline.apply_rgb_at(pixel, 0, 0, 2, 1);
+        assert_ne!(center, unchanged);
+        assert_eq!(outside, unchanged);
     }
 
     #[test]

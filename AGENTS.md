@@ -2,7 +2,7 @@
 
 ## Targets and repository boundaries
 
-- The current Negs source of truth is branch `studio-port-upstream-sync`; build the Intel macOS app from a clean commit on that branch after it is pushed to `origin`.
+- The only Negs checkout is `/Users/A1990/Downloads/negs-main-source-truth` on branch `studio-port-upstream-sync`. Iterative debug builds may use local uncommitted changes; release packaging requires a clean pushed commit. `scripts/ensure_canonical_checkout.py` enforces the path, branch, and single-worktree rule.
 - The codebase-memory graph indexes this checkout as `negs-source-truth`; use that project alias with graph tools rather than the filesystem path.
 - The active workstation target is Intel macOS (`x86_64-apple-darwin`). Keep Intel build, preview, and packaging paths working when changing native code.
 - Keep the `upstream` remote pointed at `noahhaasis/negs`. Develop and push this fork's work on a branch; never push this fork's feature work to upstream `main`.
@@ -36,7 +36,7 @@
 - Read [`docs/macos-app-build.md`](docs/macos-app-build.md) before building or opening Negs. It defines the only supported source branch, build commands, canonical app path, promotion checks, and GitHub artifact gate.
 - For app-wide UI consistency requests or screenshot-based UI bugs, follow the screen audit and label review in [`docs/native-macos-ui.md`](docs/native-macos-ui.md) before making broad changes.
 - For user-visible UI work, follow the fresh-app visual acceptance steps in [`docs/macos-app-build.md`](docs/macos-app-build.md); source changes and a successful build alone do not establish that the requested change is visible or usable.
-- Run `rtk scripts/run_cached_debug_app.sh` for iterative Intel UI work. It builds, verifies, promotes, and opens only `dist/negs-macos/Negs.app`.
+- Run `rtk scripts/run_cached_debug_app.sh` for iterative Intel UI work. It builds local changes, verifies, promotes, and opens only `dist/negs-macos/Negs.app`.
 - Use `MACOS_ARCHS=x86_64 rtk bash scripts/package_macos_app.sh` for the optimized Intel release package. Local package builds retain caches by default; set `CLEAN_BUILD_CACHE=1` only when intentionally reclaiming build-cache space. The package gate verifies feature strings, source revision, Intel architecture, signature, and the single canonical app bundle.
 - Serialize local builds: run only one Cargo, SwiftPM, or packaging build at a time. Do not start a second build while one is running, including from another terminal or agent.
 - Reuse the established local outputs (`target/macos-app` for packaged app builds and SwiftPM scratch output under it); do not create dated, per-feature, or duplicate build directories. For this Intel workstation, use `MACOS_ARCHS=x86_64` and the default `BUILD_TARGET_DIR=target/macos-app`.

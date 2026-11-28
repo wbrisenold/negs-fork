@@ -21,6 +21,7 @@ cd "$repo_root"
 source_branch="studio-port-upstream-sync"
 current_branch="$(git branch --show-current)"
 if [[ "${GITHUB_ACTIONS:-}" != "true" ]]; then
+    "$PYTHON" scripts/ensure_canonical_checkout.py
     [[ "$current_branch" == "$source_branch" ]] || {
         echo "Package refused: Negs source of truth is $source_branch (current: ${current_branch:-detached})." >&2
         exit 2

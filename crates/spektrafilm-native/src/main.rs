@@ -262,6 +262,14 @@ struct WbSource {
     reduced: bool,
 }
 
+/// Keep display-only post controls out of the film pipeline while forwarding
+/// HNCS settings, which are consumed by the pipeline's selected output look.
+fn take_display_post(params: &mut RuntimeParams) -> PostParams {
+    let display_post = std::mem::take(&mut params.post);
+    params.post.hncs = display_post.hncs;
+    display_post
+}
+
 /// The longest frame developed for a cropped thumbnail.
 const THUMBNAIL_FRAME_MAX: u32 = 1280;
 /// White balances kept for preset thumbnails (few presets differ).
@@ -488,7 +496,7 @@ impl Session {
         );
         params.io.raw_white_balance.validate()?;
         params.settings.serial_grain = false;
-        let post = std::mem::take(&mut params.post);
+        let post = take_display_post(&mut params);
         let interpretation = params.io.input_interpretation.clone();
         interpretation.validate()?;
         let (wb, lens) = (params.io.raw_white_balance, params.io.lens_correction);
@@ -1096,8 +1104,9 @@ impl Session {
                 params.io.raw_white_balance.validate()?;
                 params.settings.serial_grain = false;
                 params.prep.validate().map_err(anyhow::Error::msg)?;
-                // Applied to the display and on save, so the pipeline runs without them.
-                let post = std::mem::take(&mut params.post);
+                // Display post controls run after the scan. HNCS settings stay
+                // in the pipeline because the selected output look consumes them.
+                let post = take_display_post(&mut params);
                 let wb = params.io.raw_white_balance;
                 let lens = params.io.lens_correction;
                 let interpretation = params.io.input_interpretation.clone();
@@ -1488,6 +1497,23 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn display_post_keeps_hncs_settings_in_pipeline_parameters() {
+        let mut params = RuntimeParams::default();
+        params.post.hncs.clahe_strength = 17.0;
+        params.post.hncs.skin_protection = 83.0;
+        params.post.color_separation.strength = 64.0;
+
+        let display_post = take_display_post(&mut params);
+
+        assert_eq!(display_post.hncs.clahe_strength, 17.0);
+        assert_eq!(display_post.hncs.skin_protection, 83.0);
+        assert_eq!(params.post.hncs.clahe_strength, 17.0);
+        assert_eq!(params.post.hncs.skin_protection, 83.0);
+        assert_eq!(params.post.color_separation.strength, 0.0);
+    }
+
     #[test]
     fn brightness_reference_is_independent_and_refuses_to_replace_the_photo() {
         let dir = std::env::temp_dir().join(format!("negs-reference-test-{}", std::process::id()));

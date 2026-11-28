@@ -4263,6 +4263,50 @@ enum PreviewCompareMode: String, CaseIterable, Identifiable {
         requestedScopeMode = mode
         updateHistogram()
     }
+    func applyColorSeparationPreset(_ preset: ColorSeparationPreset) {
+        let target = value("post.color_separation.target_hue").double
+        var next = state
+        next.params["post.color_separation.harmony_rule"] = .string(preset.rawValue)
+        if preset != .manual, preset != .monochromatic {
+            next.params["post.color_separation.complementary_hue"] = .number(
+                preset.complementaryHue(target: target))
+        }
+        if preset != .manual,
+           abs(value("post.color_separation.strength").double) < 1e-6 {
+            next.params["post.color_separation.strength"] = .number(72)
+        }
+        apply(next, action: "Set Color Separation Preset")
+    }
+
+    func setRelightEnabled(_ enabled: Bool) {
+        var next = state
+        next.params["post.relight.enabled"] = .bool(enabled)
+        if enabled {
+            let lights = next.params["post.relight.lights"].array
+            if !lights.contains(where: { $0["enabled"].bool }) {
+                next.params["post.relight.lights.0.enabled"] = .bool(true)
+                if abs(value("post.relight.lights.0.intensity").double) < 1e-6 {
+                    next.params["post.relight.lights.0.intensity"] = .number(0.35)
+                }
+            }
+        }
+        apply(next, action: "Enable Relighting")
+    }
+
+    func setRelightLightEnabled(index: Int, enabled: Bool) {
+        guard (0..<3).contains(index) else { return }
+        var next = state
+        let base = "post.relight.lights.\(index)"
+        next.params["\(base).enabled"] = .bool(enabled)
+        if enabled {
+            next.params["post.relight.enabled"] = .bool(true)
+            if abs(value("\(base).intensity").double) < 1e-6 {
+                next.params["\(base).intensity"] = .number(0.35)
+            }
+        }
+        apply(next, action: "Enable Relight Light")
+    }
+
     func beginColorSeparationHuePick() {
         if colorSeparationHuePickActive {
             cancelColorSeparationHuePick()
